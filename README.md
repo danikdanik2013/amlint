@@ -1,5 +1,9 @@
 # amlint
 
+[![CI](https://github.com/danikdanik2013/amlint/actions/workflows/ci.yml/badge.svg)](https://github.com/danikdanik2013/amlint/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/amlint)](https://pypi.org/project/amlint)
+[![Python](https://img.shields.io/pypi/pyversions/amlint)](https://pypi.org/project/amlint)
+
 Semantic linter for Prometheus Alertmanager configs.
 
 `amtool check-config` validates syntax. **amlint validates semantics:**
@@ -23,8 +27,7 @@ The most painful mistakes are syntactically valid:
 ## Install
 
 ```bash
-pip install pyyaml
-pip install -e .
+pip install amlint
 ```
 
 ## Usage
@@ -69,6 +72,10 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `groupby-ellipsis` | warn | `...` mixed with explicit labels in `group_by` |
 | `inhibit-same-match` | info | source and target match the same label value |
 | `unused-receiver` | info | receiver defined but not used in any route |
+| `duplicate-receiver` | error | receiver name defined more than once |
+| `empty-receiver` | warn/info | receiver has no integration configured — alerts will be dropped |
+| `undefined-time-interval` | error | `mute_time_intervals` / `active_time_intervals` references unknown interval |
+| `repeat-before-group` | warn | `repeat_interval` shorter than `group_interval` |
 
 ## Tests
 

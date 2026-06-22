@@ -12,7 +12,6 @@ Usage:
 """
 
 import re
-import sys
 
 
 ERROR = "error"      # config is broken: alerts will be lost
@@ -197,6 +196,102 @@ def check_groupby(cfg):
     return out
 
 
+_DURATION_UNITS = {'ms': 0.001, 's': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
+_DURATION_RE = re.compile(r'(\d+)(ms|[smhdw])')
+
+def _parse_duration(s):
+    if not s:
+        return None
+    total = sum(int(n) * _DURATION_UNITS[u] for n, u in _DURATION_RE.findall(str(s)))
+    return total or None
+
+
+# CHECK 7: duplicate receiver names
+def check_duplicate_receivers(cfg):
+    out = []
+    seen = set()
+    for r in cfg.get("receivers", []) or []:
+        name = r.get("name")
+        if not name:
+            continue
+        if name in seen:
+            out.append(Finding(
+                ERROR, "duplicate-receiver",
+                f"Receiver '{name}' is defined more than once. "
+                f"The second definition will be silently ignored.",
+                "receivers",
+            ))
+        seen.add(name)
+    return out
+
+
+# CHECK 8: receiver with no integration configured
+_INTEGRATION_KEYS = {
+    "email_configs", "pagerduty_configs", "slack_configs", "opsgenie_configs",
+    "victorops_configs", "webhook_configs", "wechat_configs", "sns_configs",
+    "msteams_configs", "telegram_configs", "discord_configs",
+}
+
+def check_empty_receivers(cfg):
+    out = []
+    route = cfg.get("route")
+    default_rcv = route.get("receiver") if route else None
+    for r in cfg.get("receivers", []) or []:
+        name = r.get("name")
+        if not name:
+            continue
+        if not any(k in r for k in _INTEGRATION_KEYS):
+            level = INFO if name == default_rcv else WARN
+            out.append(Finding(
+                level, "empty-receiver",
+                f"Receiver '{name}' has no integration configured "
+                f"(no slack_configs, pagerduty_configs, webhook_configs, etc.). "
+                f"Alerts sent here will be silently dropped.",
+                "receivers",
+            ))
+    return out
+
+
+# CHECK 9: mute_time_intervals / active_time_intervals reference undefined interval
+def check_undefined_time_intervals(cfg):
+    out = []
+    defined = {t.get("name") for t in cfg.get("time_intervals", []) or [] if t.get("name")}
+    route = cfg.get("route")
+    if not route:
+        return out
+    for node, path in _walk_routes(route):
+        for key in ("mute_time_intervals", "active_time_intervals"):
+            for name in node.get(key) or []:
+                if name not in defined:
+                    out.append(Finding(
+                        ERROR, "undefined-time-interval",
+                        f"{key} references '{name}' which is not defined in time_intervals. "
+                        f"Alertmanager will reject this config at runtime.",
+                        path,
+                    ))
+    return out
+
+
+# CHECK 10: repeat_interval shorter than group_interval
+def check_timing(cfg):
+    out = []
+    route = cfg.get("route")
+    if not route:
+        return out
+    for node, path in _walk_routes(route):
+        gi = _parse_duration(node.get("group_interval"))
+        ri = _parse_duration(node.get("repeat_interval"))
+        if gi and ri and ri < gi:
+            out.append(Finding(
+                WARN, "repeat-before-group",
+                f"repeat_interval ({node['repeat_interval']}) is shorter than "
+                f"group_interval ({node['group_interval']}). "
+                f"Alertmanager will send repeats before the group has a chance to fire.",
+                path,
+            ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -204,6 +299,10 @@ ALL_CHECKS = [
     check_bad_regex,
     check_unreachable_routes,
     check_groupby,
+    check_duplicate_receivers,
+    check_empty_receivers,
+    check_undefined_time_intervals,
+    check_timing,
 ]
 
 

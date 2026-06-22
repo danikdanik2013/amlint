@@ -124,6 +124,67 @@ def test_matchers_valid_regex_ok():
     assert "bad-regex" not in codes(cfg)
 
 
+def test_duplicate_receivers():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}, {"name": "a"}],
+    }
+    assert "duplicate-receiver" in codes(cfg)
+
+
+def test_empty_receiver_warn():
+    cfg = {
+        "route": {"receiver": "default"},
+        "receivers": [
+            {"name": "default", "slack_configs": [{}]},
+            {"name": "orphan"},
+        ],
+    }
+    assert "empty-receiver" in codes(cfg)
+
+
+def test_empty_receiver_default_is_info():
+    cfg = {
+        "route": {"receiver": "null"},
+        "receivers": [{"name": "null"}],
+    }
+    findings = [f for f in lint(cfg) if f.code == "empty-receiver"]
+    assert findings and findings[0].level == "info"
+
+
+def test_undefined_time_interval():
+    cfg = {
+        "route": {"receiver": "a", "mute_time_intervals": ["maintenance"]},
+        "receivers": [{"name": "a"}],
+    }
+    assert "undefined-time-interval" in codes(cfg)
+
+
+def test_defined_time_interval_ok():
+    cfg = {
+        "route": {"receiver": "a", "mute_time_intervals": ["maintenance"]},
+        "receivers": [{"name": "a"}],
+        "time_intervals": [{"name": "maintenance"}],
+    }
+    assert "undefined-time-interval" not in codes(cfg)
+
+
+def test_repeat_before_group():
+    cfg = {
+        "route": {"receiver": "a", "group_interval": "1h", "repeat_interval": "5m"},
+        "receivers": [{"name": "a"}],
+    }
+    assert "repeat-before-group" in codes(cfg)
+
+
+def test_timing_ok():
+    cfg = {
+        "route": {"receiver": "a", "group_interval": "5m", "repeat_interval": "4h"},
+        "receivers": [{"name": "a"}],
+    }
+    assert "repeat-before-group" not in codes(cfg)
+
+
 def test_broken_yml_integration():
     """Smoke test: broken.yml must produce the expected set of finding codes."""
     broken = os.path.join(os.path.dirname(__file__), "broken.yml")
@@ -137,4 +198,5 @@ def test_broken_yml_integration():
         "unreachable-route",
         "groupby-ellipsis",
         "unused-receiver",
+        "empty-receiver",
     }
