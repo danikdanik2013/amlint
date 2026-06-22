@@ -19,7 +19,13 @@ try:
 except Exception:
     _VERSION = "0.1.1"
 
-from .linter import lint, ERROR, WARN, INFO
+try:
+    import argcomplete
+    _ARGCOMPLETE = True
+except ImportError:
+    _ARGCOMPLETE = False
+
+from .linter import ERROR, INFO, WARN, lint
 
 _COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
 
@@ -92,6 +98,32 @@ def _cmd_check(args):
     return 1 if has_err or (args.strict and has_warn) else 0
 
 
+_INIT_TEMPLATE = """\
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default
+  group_by: [alertname, cluster]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes: []
+
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://your-webhook-url/alert
+
+inhibit_rules: []
+"""
+
+
+def _cmd_init() -> int:
+    print(_INIT_TEMPLATE, end="")
+    return 0
+
+
 def _cmd_diff(args):
     old_findings = lint(load(args.old))
     new_findings = lint(load(args.new))
@@ -122,8 +154,10 @@ def _cmd_diff(args):
 
     if args.format == "json":
         print(json.dumps({
-            "added":  [{"code": f.code, "level": f.level, "message": f.msg, "where": f.where} for f in added],
-            "fixed":  [{"code": f.code, "level": f.level, "message": f.msg, "where": f.where} for f in fixed],
+            "added":  [{"code": f.code, "level": f.level, "message": f.msg, "where": f.where}
+                       for f in added],
+            "fixed":  [{"code": f.code, "level": f.level, "message": f.msg, "where": f.where}
+                       for f in fixed],
             "unchanged": unchanged,
         }, ensure_ascii=False, indent=2))
         return 1 if added else 0
@@ -169,11 +203,18 @@ def main(argv=None):
     pd.add_argument("new", help="updated config")
     pd.add_argument("--format", choices=["text", "json"], default="text")
 
+    sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
+
+    if _ARGCOMPLETE:
+        argcomplete.autocomplete(p)
+
     args = p.parse_args(argv)
     if args.cmd == "check":
         return _cmd_check(args)
     if args.cmd == "diff":
         return _cmd_diff(args)
+    if args.cmd == "init":
+        return _cmd_init()
 
 
 if __name__ == "__main__":

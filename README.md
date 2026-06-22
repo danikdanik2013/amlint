@@ -46,6 +46,14 @@ amlint check prod.yml staging.yml        # multiple files
 cat alertmanager.yml | amlint check -    # stdin
 amlint check alertmanager.yml --strict   # WARN also exits non-zero
 amlint check alertmanager.yml --format json
+amlint diff old.yml new.yml              # show what changed
+amlint init > alertmanager.yml           # generate minimal valid config
+```
+
+**Shell completions (bash/zsh):**
+```bash
+pip install "amlint[completions]"
+eval "$(register-python-argcomplete amlint)"  # add to ~/.zshrc or ~/.bashrc
 ```
 
 Example output:

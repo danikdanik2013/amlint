@@ -1,10 +1,10 @@
 [project]
 name = "amlint"
-version = "0.1.1"
+version = "0.1.2"
 description = "Semantic linter for Prometheus Alertmanager configs"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "danikdanik2013"}]
 keywords = ["alertmanager", "prometheus", "linter", "devops", "monitoring"]
 classifiers = [
@@ -12,7 +12,6 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
@@ -24,7 +23,8 @@ classifiers = [
 dependencies = ["pyyaml>=5.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov>=4"]
+dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "argcomplete>=3"]
+completions = ["argcomplete>=3"]
 
 [project.urls]
 Homepage = "https://github.com/danikdanik2013/amlint"
@@ -33,6 +33,15 @@ Repository = "https://github.com/danikdanik2013/amlint"
 
 [project.scripts]
 amlint = "amlint.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["amlint*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.ruff]
+line-length = 100
 
 [build-system]
 requires = ["setuptools>=61", "wheel"]

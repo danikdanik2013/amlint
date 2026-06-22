@@ -12,7 +12,7 @@ Usage:
 """
 
 import re
-
+from typing import Generator, List, Set, Tuple
 
 ERROR = "error"      # config is broken: alerts will be lost
 WARN = "warn"        # almost certainly not what you intended
@@ -22,18 +22,18 @@ INFO = "info"        # suspicious, worth a look
 class Finding:
     __slots__ = ("level", "code", "msg", "where")
 
-    def __init__(self, level, code, msg, where=""):
+    def __init__(self, level: str, code: str, msg: str, where: str = "") -> None:
         self.level = level
         self.code = code
         self.msg = msg
         self.where = where
 
 
-def _defined_receivers(cfg):
+def _defined_receivers(cfg: dict) -> Set[str]:
     return {r.get("name") for r in cfg.get("receivers", []) if r.get("name")}
 
 
-def _walk_routes(node, path="route"):
+def _walk_routes(node: dict, path: str = "route") -> Generator[Tuple[dict, str], None, None]:
     """Yields (route_node, path) for the root and all nested routes."""
     yield node, path
     for i, child in enumerate(node.get("routes", []) or []):
@@ -361,6 +361,47 @@ def check_group_wait(cfg):
     return out
 
 
+# CHECK 14: route tree deeper than MAX_DEPTH levels
+_MAX_ROUTE_DEPTH = 5
+
+def check_deep_nesting(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    route = cfg.get("route")
+    if not route:
+        return out
+
+    def scan(node: dict, path: str, depth: int) -> None:
+        if depth > _MAX_ROUTE_DEPTH:
+            out.append(Finding(
+                INFO, "deep-nesting",
+                f"Route tree is {depth} levels deep (>{_MAX_ROUTE_DEPTH}). "
+                f"Deeply nested routing is hard to reason about and maintain.",
+                path,
+            ))
+            return
+        for i, child in enumerate(node.get("routes", []) or []):
+            scan(child, f"{path}.routes[{i}]", depth + 1)
+
+    scan(route, "route", 0)
+    return out
+
+
+# CHECK 15: email_configs without smtp_smarthost
+def check_email_smarthost(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    global_smarthost = (cfg.get("global") or {}).get("smtp_smarthost")
+    for r in cfg.get("receivers", []) or []:
+        for i, ec in enumerate(r.get("email_configs", []) or []):
+            if not ec.get("smarthost") and not global_smarthost:
+                out.append(Finding(
+                    ERROR, "email-no-smarthost",
+                    f"email_configs entry in receiver '{r.get('name')}' has no 'smarthost' "
+                    f"and global.smtp_smarthost is not set. Emails cannot be sent.",
+                    f"receivers[{r.get('name')}].email_configs[{i}]",
+                ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -375,11 +416,13 @@ ALL_CHECKS = [
     check_circular_inhibition,
     check_useless_continue,
     check_group_wait,
+    check_deep_nesting,
+    check_email_smarthost,
 ]
 
 
-def lint(cfg):
-    findings = []
+def lint(cfg: dict) -> List[Finding]:
+    findings: List[Finding] = []
     for check in ALL_CHECKS:
         findings.extend(check(cfg))
     order = {ERROR: 0, WARN: 1, INFO: 2}
