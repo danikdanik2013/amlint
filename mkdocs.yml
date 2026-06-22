@@ -1,0 +1,57 @@
+site_name: amlint
+site_description: Semantic linter for Prometheus Alertmanager configs
+site_url: https://danikdanik2013.github.io/amlint
+repo_url: https://github.com/danikdanik2013/amlint
+repo_name: danikdanik2013/amlint
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - search.highlight
+    - search.suggest
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Usage: usage.md
+  - Checks:
+    - Overview: checks/index.md
+    - Routing: checks/routing.md
+    - Receivers: checks/receivers.md
+    - Inhibition: checks/inhibition.md
+    - Timing: checks/timing.md
+  - Contributing: contributing.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - tables
+  - attr_list
+  - md_in_html
+
+plugins:
+  - search

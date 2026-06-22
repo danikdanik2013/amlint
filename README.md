@@ -1,6 +1,7 @@
 # amlint
 
 [![CI](https://github.com/danikdanik2013/amlint/actions/workflows/ci.yml/badge.svg)](https://github.com/danikdanik2013/amlint/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-github.io-blue)](https://danikdanik2013.github.io/amlint)
 [![Coverage](https://coveralls.io/repos/github/danikdanik2013/amlint/badge.svg?branch=main)](https://coveralls.io/github/danikdanik2013/amlint)
 [![PyPI](https://img.shields.io/pypi/v/amlint)](https://pypi.org/project/amlint)
 [![Python](https://img.shields.io/pypi/pyversions/amlint)](https://pypi.org/project/amlint)
