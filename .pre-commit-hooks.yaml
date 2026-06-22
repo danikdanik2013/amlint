@@ -1,0 +1,7 @@
+- id: amlint
+  name: amlint
+  description: Semantic linter for Prometheus Alertmanager configs
+  language: python
+  entry: amlint check
+  files: alertmanager\.ya?ml$
+  types: [yaml]

@@ -106,6 +106,24 @@ def test_inhibit_same_match():
     assert "inhibit-same-match" in codes(cfg)
 
 
+def test_bad_regex_via_matchers():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"matchers": ["service=~auth(["], "receiver": "a"}]},
+        "receivers": [{"name": "a"}],
+    }
+    assert "bad-regex" in codes(cfg)
+
+
+def test_matchers_valid_regex_ok():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"matchers": ["severity=~^(critical|warning)$"], "receiver": "a"}]},
+        "receivers": [{"name": "a"}],
+    }
+    assert "bad-regex" not in codes(cfg)
+
+
 def test_broken_yml_integration():
     """Smoke test: broken.yml must produce the expected set of finding codes."""
     broken = os.path.join(os.path.dirname(__file__), "broken.yml")

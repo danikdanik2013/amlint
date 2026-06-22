@@ -113,21 +113,33 @@ def check_dead_inhibitions(cfg):
     return out
 
 
-# CHECK 4: match_re patterns that fail to compile
+# CHECK 4: match_re / matchers: patterns that fail to compile
+_MATCHER_RE = re.compile(r'^([^=!~]+)(=~|!~)(.+)$')
+
+
+def _regex_patterns(node):
+    """Yield (label, pattern) for all regex matchers in a route node."""
+    for label, pattern in (node.get("match_re") or {}).items():
+        yield label, pattern
+    for m in node.get("matchers") or []:
+        hit = _MATCHER_RE.match(str(m))
+        if hit:
+            yield hit.group(1).strip(), hit.group(3)
+
+
 def check_bad_regex(cfg):
     out = []
     route = cfg.get("route")
     if not route:
         return out
     for node, path in _walk_routes(route):
-        mre = node.get("match_re") or {}
-        for label, pattern in mre.items():
+        for label, pattern in _regex_patterns(node):
             try:
                 re.compile(pattern)
             except re.error as e:
                 out.append(Finding(
                     ERROR, "bad-regex",
-                    f"match_re for '{label}' does not compile: {e}",
+                    f"Regex for '{label}' does not compile: {e}",
                     path,
                 ))
     return out
