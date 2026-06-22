@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.3] - 2026-06-22
+
+### Changed
+- Rich-based output: icons (✖ ⚠ ℹ), word wrap, separator line, colored summary
+
 ## [0.1.1] - 2026-06-22
 
 ### Added
