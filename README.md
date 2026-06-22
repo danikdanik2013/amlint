@@ -1,7 +1,7 @@
 # amlint
 
 [![CI](https://github.com/danikdanik2013/amlint/actions/workflows/ci.yml/badge.svg)](https://github.com/danikdanik2013/amlint/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/danikdanik2013/amlint/branch/main/graph/badge.svg)](https://codecov.io/gh/danikdanik2013/amlint)
+[![Coverage](https://coveralls.io/repos/github/danikdanik2013/amlint/badge.svg?branch=main)](https://coveralls.io/github/danikdanik2013/amlint)
 [![PyPI](https://img.shields.io/pypi/v/amlint)](https://pypi.org/project/amlint)
 [![Python](https://img.shields.io/pypi/pyversions/amlint)](https://pypi.org/project/amlint)
 [![Docker](https://ghcr-badge.egpl.dev/danikdanik2013/amlint/size?tag=latest&label=docker)](https://github.com/danikdanik2013/amlint/pkgs/container/amlint)
