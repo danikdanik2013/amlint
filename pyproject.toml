@@ -24,7 +24,7 @@ classifiers = [
 dependencies = ["pyyaml>=5.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "pytest-cov>=4"]
 
 [project.urls]
 Homepage = "https://github.com/danikdanik2013/amlint"

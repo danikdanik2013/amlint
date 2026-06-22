@@ -2,7 +2,9 @@
 
 import os
 import yaml
+import pytest
 from amlint.linter import lint, ERROR, WARN, INFO
+from amlint.cli import main
 
 
 def codes(cfg):
@@ -213,6 +215,65 @@ def test_wait_exceeds_interval():
         "receivers": [{"name": "a"}],
     }
     assert "wait-exceeds-interval" in codes(cfg)
+
+
+# ── CLI tests ────────────────────────────────────────────────────────
+
+def test_cli_check_clean(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n")
+    assert main(["check", str(cfg)]) == 0
+
+
+def test_cli_check_errors(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
+    assert main(["check", str(cfg)]) == 1
+
+
+def test_cli_check_strict(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+                   "inhibit_rules:\n  - source_match: {severity: critical}\n"
+                   "    target_match: {severity: warning}\n")
+    assert main(["check", "--strict", str(cfg)]) == 1
+
+
+def test_cli_check_json(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
+    main(["check", "--format", "json", str(cfg)])
+    import json
+    out = json.loads(capsys.readouterr().out)
+    assert any(f["code"] == "undefined-receiver" for f in out)
+
+
+def test_cli_check_stdin(tmp_path, monkeypatch):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        "route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+    ))
+    assert main(["check", "-"]) == 0
+
+
+def test_cli_diff_no_change(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n")
+    assert main(["diff", str(cfg), str(cfg)]) == 0
+
+
+def test_cli_diff_regression(tmp_path):
+    good = tmp_path / "good.yml"
+    bad  = tmp_path / "bad.yml"
+    good.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n")
+    bad.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
+    assert main(["diff", str(good), str(bad)]) == 1
+
+
+def test_cli_file_not_found():
+    with pytest.raises(SystemExit) as exc:
+        main(["check", "/nonexistent/path.yml"])
+    assert exc.value.code == 2
 
 
 def test_broken_yml_integration():

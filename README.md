@@ -1,8 +1,10 @@
 # amlint
 
 [![CI](https://github.com/danikdanik2013/amlint/actions/workflows/ci.yml/badge.svg)](https://github.com/danikdanik2013/amlint/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/danikdanik2013/amlint/branch/main/graph/badge.svg)](https://codecov.io/gh/danikdanik2013/amlint)
 [![PyPI](https://img.shields.io/pypi/v/amlint)](https://pypi.org/project/amlint)
 [![Python](https://img.shields.io/pypi/pyversions/amlint)](https://pypi.org/project/amlint)
+[![Docker](https://ghcr-badge.egpl.dev/danikdanik2013/amlint/size?tag=latest&label=docker)](https://github.com/danikdanik2013/amlint/pkgs/container/amlint)
 
 Semantic linter for Prometheus Alertmanager configs.
 
@@ -28,6 +30,12 @@ The most painful mistakes are syntactically valid:
 
 ```bash
 pip install amlint
+```
+
+Or with Docker (no Python required):
+
+```bash
+docker run --rm -v $(pwd):/cfg ghcr.io/danikdanik2013/amlint check /cfg/alertmanager.yml
 ```
 
 ## Usage
