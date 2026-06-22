@@ -17,7 +17,7 @@ try:
     from importlib.metadata import version as _pkg_version
     _VERSION = _pkg_version("amlint")
 except Exception:
-    _VERSION = "0.1.1"
+    _VERSION = "0.1.2"
 
 try:
     import argcomplete
@@ -25,20 +25,17 @@ try:
 except ImportError:
     _ARGCOMPLETE = False
 
+from rich.console import Console
+from rich.rule import Rule
+from rich.text import Text
+
 from .linter import ERROR, INFO, WARN, lint
 
-_COLOR = sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+console = Console(highlight=False)
+err_console = Console(stderr=True, highlight=False)
 
-
-def _c(code, s):
-    return f"\033[{code}m{s}\033[0m" if _COLOR else s
-
-
-BADGE = {
-    ERROR: _c("31", "ERROR"),
-    WARN:  _c("33", "WARN "),
-    INFO:  _c("36", "INFO "),
-}
+ICON  = {ERROR: "✖", WARN: "⚠", INFO: "ℹ"}
+STYLE = {ERROR: "bold red", WARN: "bold yellow", INFO: "bold cyan"}
 
 
 def load(path):
@@ -47,32 +44,47 @@ def load(path):
             content = sys.stdin.read()
         else:
             if not os.path.exists(path):
-                print(f"File not found: {path}", file=sys.stderr)
+                err_console.print(f"[red]File not found:[/red] {path}")
                 sys.exit(2)
             with open(path) as f:
                 content = f.read()
         return yaml.safe_load(content) or {}
     except yaml.YAMLError as e:
-        print(f"Failed to parse YAML ({path}): {e}", file=sys.stderr)
+        err_console.print(f"[red]Failed to parse YAML[/red] ({path}): {e}")
         sys.exit(2)
 
 
 def _print_findings(findings, label=None):
     if label:
-        print(_c("1", f"\n── {label} ──"))
+        console.print(Rule(f"[bold]{label}[/bold]", style="dim"))
+
     if not findings:
-        print(_c("32", "  ✓ No issues found.\n"))
+        console.print("\n  [bold green]✓[/bold green]  No issues found.\n")
         return
-    print()
+
+    console.print()
     for f in findings:
-        print(f"  {BADGE[f.level]}  {f.msg}")
+        header = Text()
+        header.append(f"  {ICON[f.level]}  ", style=STYLE[f.level])
+        header.append(f.level.upper().ljust(5), style=STYLE[f.level])
+        header.append(f"  [{f.code}]", style="dim")
         if f.where:
-            print(f"  {_c('2', '↳ ' + f.where)}  {_c('2', '[' + f.code + ']')}")
-        print()
+            header.append(f"  ·  {f.where}", style="dim")
+        console.print(header)
+        console.print(f"     {f.msg}")
+        console.print()
+
     errs  = sum(1 for f in findings if f.level == ERROR)
     warns = sum(1 for f in findings if f.level == WARN)
     infos = sum(1 for f in findings if f.level == INFO)
-    print(f"  {errs} error · {warns} warn · {infos} info\n")
+
+    console.print(Rule(style="dim"))
+    parts = []
+    if errs:  parts.append(f"[red]✖ {errs} error{'s' if errs != 1 else ''}[/red]")
+    if warns: parts.append(f"[yellow]⚠ {warns} warning{'s' if warns != 1 else ''}[/yellow]")
+    if infos: parts.append(f"[cyan]ℹ {infos} info[/cyan]")
+    console.print("  " + "  ·  ".join(parts))
+    console.print()
 
 
 def _cmd_check(args):
@@ -133,8 +145,8 @@ def _cmd_diff(args):
 
     old_counts = Counter(key(f) for f in old_findings)
     new_counts = Counter(key(f) for f in new_findings)
-    added_keys  = new_counts - old_counts
-    fixed_keys  = old_counts - new_counts
+    added_keys = new_counts - old_counts
+    fixed_keys = old_counts - new_counts
 
     added, remaining = [], dict(added_keys)
     for f in new_findings:
@@ -163,24 +175,27 @@ def _cmd_diff(args):
         return 1 if added else 0
 
     if not added and not fixed:
-        print(_c("32", "\n  ✓ No changes in findings.\n"))
+        console.print("\n  [bold green]✓[/bold green]  No changes in findings.\n")
         return 0
 
-    print()
+    console.print()
     for f in fixed:
-        print(f"  {_c('32', 'FIXED')}  {f.msg}")
-        if f.where:
-            print(f"  {_c('2', '↳ ' + f.where)}  {_c('2', '[' + f.code + ']')}")
-        print()
+        console.print(f"  [bold green]FIXED[/bold green]  [{f.code}]"
+                      + (f"  ·  [dim]{f.where}[/dim]" if f.where else ""))
+        console.print(f"     {f.msg}")
+        console.print()
     for f in added:
-        print(f"  {_c('31', 'NEW  ')}  {f.msg}")
-        if f.where:
-            print(f"  {_c('2', '↳ ' + f.where)}  {_c('2', '[' + f.code + ']')}")
-        print()
+        console.print(f"  [bold red]NEW  [/bold red]  [{f.code}]"
+                      + (f"  ·  [dim]{f.where}[/dim]" if f.where else ""))
+        console.print(f"     {f.msg}")
+        console.print()
 
-    print(f"  {_c('32', str(len(fixed)) + ' fixed')} · "
-          f"{_c('31', str(len(added)) + ' new')} · "
-          f"{unchanged} unchanged\n")
+    console.print(Rule(style="dim"))
+    console.print(
+        f"  [green]{len(fixed)} fixed[/green]"
+        f"  ·  [red]{len(added)} new[/red]"
+        f"  ·  {unchanged} unchanged\n"
+    )
     return 1 if added else 0
 
 

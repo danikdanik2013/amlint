@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: System :: Monitoring",
     "Topic :: Utilities",
 ]
-dependencies = ["pyyaml>=5.1"]
+dependencies = ["pyyaml>=5.1", "rich>=13"]
 
 [project.optional-dependencies]
 dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "argcomplete>=3"]
