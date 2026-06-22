@@ -292,6 +292,75 @@ def check_timing(cfg):
     return out
 
 
+# CHECK 11: two inhibition rules that silence each other
+def check_circular_inhibition(cfg):
+    out = []
+    rules = cfg.get("inhibit_rules", []) or []
+    for i, a in enumerate(rules):
+        for j, b in enumerate(rules):
+            if i >= j:
+                continue
+            src_a = {**(a.get("source_match") or {})}
+            tgt_a = {**(a.get("target_match") or {})}
+            src_b = {**(b.get("source_match") or {})}
+            tgt_b = {**(b.get("target_match") or {})}
+            a_can_silence_b = any(src_a.get(k) == tgt_b.get(k) for k in set(src_a) & set(tgt_b))
+            b_can_silence_a = any(src_b.get(k) == tgt_a.get(k) for k in set(src_b) & set(tgt_a))
+            if a_can_silence_b and b_can_silence_a:
+                out.append(Finding(
+                    WARN, "circular-inhibition",
+                    f"inhibit_rules[{i}] and inhibit_rules[{j}] may silence each other — "
+                    f"when both conditions fire simultaneously, neither alert will be delivered.",
+                    f"inhibit_rules[{i}]",
+                ))
+    return out
+
+
+# CHECK 12: continue:true on the last sibling (no effect)
+def check_useless_continue(cfg):
+    out = []
+    route = cfg.get("route")
+    if not route:
+        return out
+
+    def scan(routes, parent_path):
+        if not routes:
+            return
+        for i, child in enumerate(routes or []):
+            path = f"{parent_path}.routes[{i}]"
+            if child.get("continue") is True and i == len(routes) - 1:
+                out.append(Finding(
+                    INFO, "useless-continue",
+                    "continue:true on the last sibling route has no effect — "
+                    "there are no subsequent routes to continue to.",
+                    path,
+                ))
+            scan(child.get("routes"), path)
+
+    scan(route.get("routes"), "route")
+    return out
+
+
+# CHECK 13: group_wait longer than group_interval
+def check_group_wait(cfg):
+    out = []
+    route = cfg.get("route")
+    if not route:
+        return out
+    for node, path in _walk_routes(route):
+        gw = _parse_duration(node.get("group_wait"))
+        gi = _parse_duration(node.get("group_interval"))
+        if gw and gi and gw > gi:
+            out.append(Finding(
+                WARN, "wait-exceeds-interval",
+                f"group_wait ({node['group_wait']}) is longer than "
+                f"group_interval ({node['group_interval']}). "
+                f"Subsequent alerts will fire before the initial group has a chance to form.",
+                path,
+            ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -303,6 +372,9 @@ ALL_CHECKS = [
     check_empty_receivers,
     check_undefined_time_intervals,
     check_timing,
+    check_circular_inhibition,
+    check_useless_continue,
+    check_group_wait,
 ]
 
 

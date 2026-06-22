@@ -185,6 +185,36 @@ def test_timing_ok():
     assert "repeat-before-group" not in codes(cfg)
 
 
+def test_circular_inhibition():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_match": {"severity": "critical"}, "target_match": {"severity": "warning"}, "equal": ["alertname"]},
+            {"source_match": {"severity": "warning"}, "target_match": {"severity": "critical"}, "equal": ["alertname"]},
+        ],
+    }
+    assert "circular-inhibition" in codes(cfg)
+
+
+def test_useless_continue():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"match": {"env": "prod"}, "receiver": "a", "continue": True},
+        ]},
+        "receivers": [{"name": "a"}],
+    }
+    assert "useless-continue" in codes(cfg)
+
+
+def test_wait_exceeds_interval():
+    cfg = {
+        "route": {"receiver": "a", "group_wait": "10m", "group_interval": "2m"},
+        "receivers": [{"name": "a"}],
+    }
+    assert "wait-exceeds-interval" in codes(cfg)
+
+
 def test_broken_yml_integration():
     """Smoke test: broken.yml must produce the expected set of finding codes."""
     broken = os.path.join(os.path.dirname(__file__), "broken.yml")

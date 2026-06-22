@@ -34,6 +34,8 @@ pip install amlint
 
 ```bash
 amlint check alertmanager.yml
+amlint check prod.yml staging.yml        # multiple files
+cat alertmanager.yml | amlint check -    # stdin
 amlint check alertmanager.yml --strict   # WARN also exits non-zero
 amlint check alertmanager.yml --format json
 ```
@@ -76,6 +78,9 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `empty-receiver` | warn/info | receiver has no integration configured — alerts will be dropped |
 | `undefined-time-interval` | error | `mute_time_intervals` / `active_time_intervals` references unknown interval |
 | `repeat-before-group` | warn | `repeat_interval` shorter than `group_interval` |
+| `circular-inhibition` | warn | two inhibition rules that silence each other |
+| `wait-exceeds-interval` | warn | `group_wait` longer than `group_interval` |
+| `useless-continue` | info | `continue:true` on the last sibling route has no effect |
 
 ## Tests
 

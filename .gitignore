@@ -18,3 +18,7 @@ htmlcov/
 .claude/
 .venv/
 venv/
+
+# Root-level duplicates (package lives in amlint/)
+/cli.py
+/linter.py
