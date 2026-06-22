@@ -1,6 +1,6 @@
 [project]
 name = "amlint"
-version = "0.1.0"
+version = "0.1.1"
 description = "Semantic linter for Prometheus Alertmanager configs"
 readme = "README.md"
 requires-python = ">=3.9"

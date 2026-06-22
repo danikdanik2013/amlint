@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.1] - 2026-06-22
+
+### Added
+- `amlint --version` flag
+- `amlint diff old.yml new.yml` — shows fixed vs new findings between two configs,
+  exits non-zero if new regressions appeared (useful in PR CI)
+- `dependabot.yml` — auto-updates GitHub Actions and pip dependencies weekly
+- `SECURITY.md` — vulnerability reporting policy
+
 ## [0.1.0] - 2026-06-22
 
 ### Added
