@@ -1,0 +1,15 @@
+[project]
+name = "amlint"
+version = "0.1.0"
+description = "Semantic linter for Prometheus Alertmanager configs"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dependencies = ["pyyaml>=5.1"]
+
+[project.scripts]
+amlint = "amlint.cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

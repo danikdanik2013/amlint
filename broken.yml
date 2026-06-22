@@ -1,0 +1,28 @@
+# Навмисно проблемний конфіг - кожна помилка типова для реальних команд.
+# amtool check-config це пропустить (синтаксис валідний), amlint - ні.
+
+route:
+  receiver: default-team
+  group_by: ['alertname', '...']        # group_by-ellipsis: '...' робить решту зайвою
+  routes:
+    - receiver: catch-all-team           # unreachable: catch-all без match...
+      continue: false                    # ...і continue:false ховає гілки нижче
+    - match:
+        severity: critical
+      receiver: pager-team               # undefined-receiver: такого нема в receivers
+    - match_re:
+        service: "auth(["                 # bad-regex: не компілюється
+      receiver: default-team
+
+receivers:
+  - name: default-team
+    # slack_configs тощо
+  - name: catch-all-team
+  - name: unused-team                    # unused-receiver: визначений, не вживається
+
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match:
+      severity: warning
+    # inhibit-no-equal: немає 'equal' - гаситиме незв'язані алерти
