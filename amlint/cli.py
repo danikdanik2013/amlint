@@ -80,9 +80,12 @@ def _print_findings(findings, label=None):
 
     console.print(Rule(style="dim"))
     parts = []
-    if errs:  parts.append(f"[red]✖ {errs} error{'s' if errs != 1 else ''}[/red]")
-    if warns: parts.append(f"[yellow]⚠ {warns} warning{'s' if warns != 1 else ''}[/yellow]")
-    if infos: parts.append(f"[cyan]ℹ {infos} info[/cyan]")
+    if errs:
+        parts.append(f"[red]✖ {errs} error{'s' if errs != 1 else ''}[/red]")
+    if warns:
+        parts.append(f"[yellow]⚠ {warns} warning{'s' if warns != 1 else ''}[/yellow]")
+    if infos:
+        parts.append(f"[cyan]ℹ {infos} info[/cyan]")
     console.print("  " + "  ·  ".join(parts))
     console.print()
 
