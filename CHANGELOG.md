@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.8] - 2026-06-23
+
+### Added
+- `route-match-collision` (warn) — two sibling routes with identical matchers; the second never receives alerts
+- `amlint list` — prints all 23 check codes with level and one-line description
+- docs: routing.md new section, usage.md `list` command, index count 22→23
+
 ## [0.1.7] - 2026-06-23
 
 ### Added

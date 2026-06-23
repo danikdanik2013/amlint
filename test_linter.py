@@ -375,6 +375,54 @@ def test_msteams_no_webhook_url():
     assert "msteams-no-webhook-url" in codes(cfg)
 
 
+def test_route_match_collision():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"match": {"team": "infra", "severity": "critical"}, "receiver": "a"},
+            {"match": {"team": "infra", "severity": "critical"}, "receiver": "b"},
+        ]},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    assert "route-match-collision" in codes(cfg)
+
+
+def test_route_match_collision_matchers_form():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"matchers": ["team=infra", "severity=critical"], "receiver": "a"},
+            {"matchers": ["severity=critical", "team=infra"], "receiver": "b"},
+        ]},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    assert "route-match-collision" in codes(cfg)
+
+
+def test_route_match_no_collision_different_matchers():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"match": {"team": "infra"}, "receiver": "a"},
+            {"match": {"team": "platform"}, "receiver": "b"},
+        ]},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    assert "route-match-collision" not in codes(cfg)
+
+
+def test_route_match_no_collision_catch_all():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"receiver": "a"},  # catch-all — no matchers, not a collision candidate
+            {"receiver": "b"},
+        ]},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    assert "route-match-collision" not in codes(cfg)
+
+
+def test_cli_list():
+    assert main(["list"]) == 0
+
+
 def test_msteams_with_webhook_url_ok():
     cfg = {
         "route": {"receiver": "a"},

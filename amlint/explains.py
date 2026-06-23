@@ -463,6 +463,29 @@ global:
   opsgenie_api_key: 'your-opsgenie-api-key'""",
     },
 
+    "route-match-collision": {
+        "level": "warn",
+        "summary": "Two sibling routes have identical matchers — the second never receives alerts.",
+        "why": (
+            "Alertmanager evaluates siblings in order and stops at the first match."
+            " A duplicate matcher set means the second route is dead code."
+        ),
+        "bad": """\
+routes:
+  - match: {team: infra, severity: critical}
+    receiver: pager
+  - match: {team: infra, severity: critical}   # identical — never reached
+    receiver: slack-infra""",
+        "good": """\
+routes:
+  - match: {team: infra, severity: critical}
+    receiver: pager
+    continue: true          # deliver to both
+  - match: {team: infra, severity: critical}
+    receiver: slack-infra
+# or: use distinct matchers for each route""",
+    },
+
     "msteams-no-webhook-url": {
         "level": "error",
         "summary": "An msteams_configs entry has no webhook_url or webhook_url_file.",

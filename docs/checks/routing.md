@@ -151,6 +151,42 @@ A route has `continue: true` but it is the last sibling — there are no subsequ
 
 ---
 
+## route-match-collision
+
+**Level:** warn
+
+Two sibling routes have identical matchers. Alertmanager evaluates siblings in order and stops at the first match — the second route with the same matchers will never receive any alerts.
+
+=== "Bad"
+    ```yaml
+    routes:
+      - match: {team: infra, severity: critical}
+        receiver: pager
+      - match: {team: infra, severity: critical}   # identical — dead code
+        receiver: slack-infra
+    ```
+
+=== "Fixed — use continue"
+    ```yaml
+    routes:
+      - match: {team: infra, severity: critical}
+        receiver: pager
+        continue: true          # pass to next sibling too
+      - match: {team: infra, severity: critical}
+        receiver: slack-infra
+    ```
+
+=== "Fixed — distinct matchers"
+    ```yaml
+    routes:
+      - match: {team: infra, severity: critical}
+        receiver: pager
+      - match: {team: infra, severity: warning}    # different severity
+        receiver: slack-infra
+    ```
+
+---
+
 ## deep-nesting
 
 **Level:** info

@@ -107,6 +107,14 @@ Generate a minimal valid `alertmanager.yml` to start from:
 amlint init > alertmanager.yml
 ```
 
+## list
+
+Print all check codes with their level and a one-line description:
+
+```bash
+amlint list
+```
+
 ## explain
 
 Show a detailed description, why it matters, and bad/good examples for any check code:

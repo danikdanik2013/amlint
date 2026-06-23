@@ -486,6 +486,47 @@ def check_msteams_no_webhook_url(cfg: dict) -> List[Finding]:
     return out
 
 
+# CHECK 21: two sibling routes with identical matchers
+def _matcher_key(node: dict):
+    match = tuple(sorted((node.get("match") or {}).items()))
+    match_re = tuple(sorted((node.get("match_re") or {}).items()))
+    matchers = frozenset(str(m) for m in (node.get("matchers") or []))
+    return (match, match_re, matchers)
+
+
+def check_route_match_collision(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    route = cfg.get("route")
+    if not route:
+        return out
+
+    def scan(routes, parent_path):
+        if not routes:
+            return
+        seen: dict = {}
+        for i, child in enumerate(routes or []):
+            path = f"{parent_path}.routes[{i}]"
+            has_matcher = bool(
+                child.get("match") or child.get("match_re") or child.get("matchers")
+            )
+            if has_matcher:
+                key = _matcher_key(child)
+                if key in seen:
+                    prev = seen[key]
+                    out.append(Finding(
+                        WARN, "route-match-collision",
+                        f"Matchers are identical to {prev} — this route will never "
+                        f"receive alerts because the earlier sibling always matches first.",
+                        path,
+                    ))
+                else:
+                    seen[key] = path
+            scan(child.get("routes"), path)
+
+    scan(route.get("routes"), "route")
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -507,6 +548,7 @@ ALL_CHECKS = [
     check_slack_no_api_url,
     check_opsgenie_no_api_key,
     check_msteams_no_webhook_url,
+    check_route_match_collision,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}

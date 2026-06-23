@@ -28,6 +28,7 @@ except ImportError:
 from rich.console import Console
 from rich.rule import Rule
 from rich.syntax import Syntax
+from rich.table import Table
 from rich.text import Text
 
 from .config import load_project_config
@@ -221,6 +222,30 @@ def _cmd_diff(args):
     return 1 if added else 0
 
 
+def _cmd_list():
+    from .explains import EXPLAINS
+    level_order = {ERROR: 0, WARN: 1, INFO: 2}
+    sorted_items = sorted(
+        EXPLAINS.items(),
+        key=lambda kv: (level_order.get(kv[1]["level"].split()[0], 3), kv[0]),
+    )
+    table = Table(show_header=True, header_style="bold dim", box=None, padding=(0, 2))
+    table.add_column("code", no_wrap=True)
+    table.add_column("level", no_wrap=True)
+    table.add_column("description")
+    for code, e in sorted_items:
+        level = e["level"].split()[0]
+        table.add_row(
+            Text(code, style="dim"),
+            Text(level, style=STYLE[level]),
+            e["summary"],
+        )
+    console.print()
+    console.print(table)
+    console.print()
+    return 0
+
+
 def _cmd_explain(args):
     from .explains import EXPLAINS
     code = args.code
@@ -280,6 +305,8 @@ def main(argv=None):
 
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 
+    sub.add_parser("list", help="list all check codes with level and description")
+
     pe = sub.add_parser("explain", help="show description and examples for a check code")
     pe.add_argument("code", help="check code to explain, e.g. undefined-receiver")
 
@@ -293,6 +320,8 @@ def main(argv=None):
         return _cmd_diff(args)
     if args.cmd == "init":
         return _cmd_init()
+    if args.cmd == "list":
+        return _cmd_list()
     if args.cmd == "explain":
         return _cmd_explain(args)
 

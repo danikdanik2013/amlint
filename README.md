@@ -50,6 +50,7 @@ amlint check alertmanager.yml --format json
 amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint diff old.yml new.yml                 # show what changed
 amlint init > alertmanager.yml              # generate minimal valid config
+amlint list                                 # all check codes with level + description
 amlint explain undefined-receiver           # detailed explanation + examples
 ```
 
@@ -125,6 +126,7 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `inhibit-same-match` | info | source and target match the same label value |
 | `useless-continue` | info | `continue:true` on the last sibling route has no effect |
 | `deep-nesting` | info | route tree deeper than 5 levels |
+| `route-match-collision` | warn | two sibling routes with identical matchers |
 
 Run `amlint explain <code>` for detailed description and examples of any check.
 
