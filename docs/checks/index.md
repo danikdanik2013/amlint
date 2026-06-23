@@ -1,6 +1,6 @@
 # Checks overview
 
-amlint runs **17 checks** grouped into four categories.
+amlint runs **22 checks** grouped into four categories.
 
 | code | level | category |
 |------|-------|----------|
@@ -14,6 +14,11 @@ amlint runs **17 checks** grouped into four categories.
 | [`duplicate-receiver`](receivers.md#duplicate-receiver) | error | Receivers |
 | [`empty-receiver`](receivers.md#empty-receiver) | warn/info | Receivers |
 | [`email-no-smarthost`](receivers.md#email-no-smarthost) | error | Receivers |
+| [`webhook-no-url`](receivers.md#webhook-no-url) | error | Receivers |
+| [`pagerduty-no-routing-key`](receivers.md#pagerduty-no-routing-key) | error | Receivers |
+| [`slack-no-api-url`](receivers.md#slack-no-api-url) | error | Receivers |
+| [`opsgenie-no-api-key`](receivers.md#opsgenie-no-api-key) | error | Receivers |
+| [`msteams-no-webhook-url`](receivers.md#msteams-no-webhook-url) | error | Receivers |
 | [`unused-receiver`](receivers.md#unused-receiver) | info | Receivers |
 | [`inhibit-no-equal`](inhibition.md#inhibit-no-equal) | warn | Inhibition |
 | [`circular-inhibition`](inhibition.md#circular-inhibition) | warn | Inhibition |

@@ -342,6 +342,47 @@ def test_slack_with_api_url_ok():
     assert "slack-no-api-url" not in codes(cfg)
 
 
+def test_opsgenie_no_api_key():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "opsgenie_configs": [{"priority": "P1"}]}],
+    }
+    assert "opsgenie-no-api-key" in codes(cfg)
+
+
+def test_opsgenie_with_api_key_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "opsgenie_configs": [{"api_key": "secret"}]}],
+    }
+    assert "opsgenie-no-api-key" not in codes(cfg)
+
+
+def test_opsgenie_global_api_key_ok():
+    cfg = {
+        "global": {"opsgenie_api_key": "secret"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "opsgenie_configs": [{"priority": "P1"}]}],
+    }
+    assert "opsgenie-no-api-key" not in codes(cfg)
+
+
+def test_msteams_no_webhook_url():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "msteams_configs": [{"title": "Alert"}]}],
+    }
+    assert "msteams-no-webhook-url" in codes(cfg)
+
+
+def test_msteams_with_webhook_url_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "msteams_configs": [{"webhook_url": "https://outlook.office.com/..."}]}],
+    }
+    assert "msteams-no-webhook-url" not in codes(cfg)
+
+
 def test_slack_global_api_url_ok():
     cfg = {
         "global": {"slack_api_url": "https://hooks.slack.com/global"},
@@ -352,6 +393,14 @@ def test_slack_global_api_url_ok():
 
 
 # ── Severity overrides ────────────────────────────────────────────────
+
+def test_explain_known_code(capsys):
+    assert main(["explain", "undefined-receiver"]) == 0
+
+
+def test_explain_unknown_code():
+    assert main(["explain", "not-a-real-code"]) == 2
+
 
 def test_lint_severity_override():
     cfg = {

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.6] - 2026-06-23
+
+### Added
+- 2 new integration checks:
+  - `opsgenie-no-api-key` (error) — opsgenie_configs without `api_key` and no global
+  - `msteams-no-webhook-url` (error) — msteams_configs without `webhook_url`
+- `amlint explain <code>` — detailed description, why it matters, bad/good YAML examples for all 22 checks
+- Updated docs: checks table (17→22), usage page with `--ignore` and `.amlint.yml` docs, `explain` command
+
 ## [0.1.5] - 2026-06-23
 
 ### Added

@@ -38,7 +38,7 @@ Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure t
 | Invalid regex | ❌ | ✅ |
 | Timing misconfig | ❌ | ✅ |
 
-## 17 checks, zero false positives
+## 22 checks, zero false positives
 
 amlint catches mistakes that are **syntactically valid** but **semantically broken**.
 See [all checks](checks/index.md) for the full list.

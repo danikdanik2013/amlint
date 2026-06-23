@@ -43,12 +43,24 @@ docker run --rm -v $(pwd):/cfg ghcr.io/danikdanik2013/amlint check /cfg/alertman
 
 ```bash
 amlint check alertmanager.yml
-amlint check prod.yml staging.yml        # multiple files
-cat alertmanager.yml | amlint check -    # stdin
-amlint check alertmanager.yml --strict   # WARN also exits non-zero
+amlint check prod.yml staging.yml           # multiple files
+cat alertmanager.yml | amlint check -       # stdin
+amlint check alertmanager.yml --strict      # WARN also exits non-zero
 amlint check alertmanager.yml --format json
-amlint diff old.yml new.yml              # show what changed
-amlint init > alertmanager.yml           # generate minimal valid config
+amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
+amlint diff old.yml new.yml                 # show what changed
+amlint init > alertmanager.yml              # generate minimal valid config
+amlint explain undefined-receiver           # detailed explanation + examples
+```
+
+**Project config** — create `.amlint.yml` in your repo root:
+
+```yaml
+ignore:
+  - empty-receiver
+strict: true
+severity:
+  unused-receiver: error   # upgrade info → error
 ```
 
 **Shell completions (bash/zsh):**
@@ -86,18 +98,27 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `undefined-receiver` | error | route references a receiver that doesn't exist |
 | `bad-regex` | error | `match_re` pattern fails to compile |
 | `no-root-route` | error | no root `route` defined |
+| `duplicate-receiver` | error | receiver name defined more than once |
+| `undefined-time-interval` | error | `mute_time_intervals` / `active_time_intervals` references unknown interval |
+| `email-no-smarthost` | error | `email_configs` without `smarthost` and no global SMTP |
+| `webhook-no-url` | error | `webhook_configs` without `url` or `url_file` |
+| `pagerduty-no-routing-key` | error | `pagerduty_configs` without `routing_key` |
+| `slack-no-api-url` | error | `slack_configs` without `api_url` and no global |
+| `opsgenie-no-api-key` | error | `opsgenie_configs` without `api_key` and no global |
+| `msteams-no-webhook-url` | error | `msteams_configs` without `webhook_url` |
 | `inhibit-no-equal` | warn | inhibition without `equal` silences too broadly |
 | `unreachable-route` | warn | catch-all hides subsequent sibling routes |
 | `groupby-ellipsis` | warn | `...` mixed with explicit labels in `group_by` |
-| `inhibit-same-match` | info | source and target match the same label value |
-| `unused-receiver` | info | receiver defined but not used in any route |
-| `duplicate-receiver` | error | receiver name defined more than once |
-| `empty-receiver` | warn/info | receiver has no integration configured — alerts will be dropped |
-| `undefined-time-interval` | error | `mute_time_intervals` / `active_time_intervals` references unknown interval |
 | `repeat-before-group` | warn | `repeat_interval` shorter than `group_interval` |
 | `circular-inhibition` | warn | two inhibition rules that silence each other |
 | `wait-exceeds-interval` | warn | `group_wait` longer than `group_interval` |
+| `empty-receiver` | warn/info | receiver has no integration configured — alerts will be dropped |
+| `unused-receiver` | info | receiver defined but not used in any route |
+| `inhibit-same-match` | info | source and target match the same label value |
 | `useless-continue` | info | `continue:true` on the last sibling route has no effect |
+| `deep-nesting` | info | route tree deeper than 5 levels |
+
+Run `amlint explain <code>` for detailed description and examples of any check.
 
 ## Tests
 

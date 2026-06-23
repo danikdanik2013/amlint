@@ -27,6 +27,7 @@ except ImportError:
 
 from rich.console import Console
 from rich.rule import Rule
+from rich.syntax import Syntax
 from rich.text import Text
 
 from .config import load_project_config
@@ -220,6 +221,39 @@ def _cmd_diff(args):
     return 1 if added else 0
 
 
+def _cmd_explain(args):
+    from .explains import EXPLAINS
+    code = args.code
+    if code not in EXPLAINS:
+        err_console.print(f"[red]Unknown check code:[/red] {code}\n")
+        err_console.print("Available codes:")
+        for c in sorted(EXPLAINS):
+            err_console.print(f"  {c}")
+        return 2
+    e = EXPLAINS[code]
+    level_style = STYLE.get(e["level"].split()[0], "bold")
+    console.print()
+    console.print(Rule(f"[bold]{code}[/bold]", style="dim"))
+    console.print()
+    console.print(f"  Level:  [{level_style}]{e['level'].upper()}[/{level_style}]")
+    console.print()
+    console.print(f"  {e['summary']}")
+    console.print()
+    if e.get("why"):
+        console.print("  [bold]Why this matters:[/bold]")
+        console.print(f"  {e['why']}")
+        console.print()
+    console.print("  [bold dim]Bad:[/bold dim]")
+    console.print(Syntax(e["bad"], "yaml", theme="ansi_dark", background_color="default",
+                         indent_guides=False, padding=(0, 4)))
+    console.print()
+    console.print("  [bold dim]Fixed:[/bold dim]")
+    console.print(Syntax(e["good"], "yaml", theme="ansi_dark", background_color="default",
+                         indent_guides=False, padding=(0, 4)))
+    console.print()
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(
         prog="amlint",
@@ -246,6 +280,9 @@ def main(argv=None):
 
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 
+    pe = sub.add_parser("explain", help="show description and examples for a check code")
+    pe.add_argument("code", help="check code to explain, e.g. undefined-receiver")
+
     if _ARGCOMPLETE:
         argcomplete.autocomplete(p)
 
@@ -256,6 +293,8 @@ def main(argv=None):
         return _cmd_diff(args)
     if args.cmd == "init":
         return _cmd_init()
+    if args.cmd == "explain":
+        return _cmd_explain(args)
 
 
 if __name__ == "__main__":

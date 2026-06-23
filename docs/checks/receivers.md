@@ -106,6 +106,147 @@ An `email_configs` entry has no `smarthost` and `global.smtp_smarthost` is not s
 
 ---
 
+## webhook-no-url
+
+**Level:** error
+
+A `webhook_configs` entry has no `url` or `url_file`. Alertmanager cannot deliver alerts without a target URL — they fail silently.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        webhook_configs:
+          - send_resolved: true   # missing url!
+    ```
+
+=== "Fixed"
+    ```yaml
+    receivers:
+      - name: team
+        webhook_configs:
+          - url: 'http://my-service/webhook'
+            send_resolved: true
+    ```
+
+---
+
+## pagerduty-no-routing-key
+
+**Level:** error
+
+A `pagerduty_configs` entry has no `routing_key` or `routing_key_file`. PagerDuty requires an integration key to accept events.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: pager
+        pagerduty_configs:
+          - severity: critical   # missing routing_key!
+    ```
+
+=== "Fixed"
+    ```yaml
+    receivers:
+      - name: pager
+        pagerduty_configs:
+          - routing_key: 'your-pagerduty-integration-key'
+            severity: critical
+    ```
+
+---
+
+## slack-no-api-url
+
+**Level:** error
+
+A `slack_configs` entry has no `api_url` or `api_url_file`, and `global.slack_api_url` is not set. Slack requires an incoming webhook URL to receive messages.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        slack_configs:
+          - channel: '#alerts'   # missing api_url!
+    ```
+
+=== "Fixed — per receiver"
+    ```yaml
+    receivers:
+      - name: team
+        slack_configs:
+          - api_url: 'https://hooks.slack.com/services/...'
+            channel: '#alerts'
+    ```
+
+=== "Fixed — global"
+    ```yaml
+    global:
+      slack_api_url: 'https://hooks.slack.com/services/...'
+    receivers:
+      - name: team
+        slack_configs:
+          - channel: '#alerts'
+    ```
+
+---
+
+## opsgenie-no-api-key
+
+**Level:** error
+
+An `opsgenie_configs` entry has no `api_key` or `api_key_file`, and `global.opsgenie_api_key` is not set. OpsGenie requires an API key to accept alerts.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        opsgenie_configs:
+          - priority: P1   # missing api_key!
+    ```
+
+=== "Fixed — per receiver"
+    ```yaml
+    receivers:
+      - name: team
+        opsgenie_configs:
+          - api_key: 'your-opsgenie-api-key'
+            priority: P1
+    ```
+
+=== "Fixed — global"
+    ```yaml
+    global:
+      opsgenie_api_key: 'your-opsgenie-api-key'
+    ```
+
+---
+
+## msteams-no-webhook-url
+
+**Level:** error
+
+An `msteams_configs` entry has no `webhook_url` or `webhook_url_file`. MS Teams requires an incoming webhook URL to receive messages.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        msteams_configs:
+          - title: 'Alert'   # missing webhook_url!
+    ```
+
+=== "Fixed"
+    ```yaml
+    receivers:
+      - name: team
+        msteams_configs:
+          - webhook_url: 'https://outlook.office.com/webhook/...'
+            title: 'Alert'
+    ```
+
+---
+
 ## unused-receiver
 
 **Level:** info

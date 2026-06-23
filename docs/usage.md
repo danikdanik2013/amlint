@@ -16,6 +16,22 @@ cat alertmanager.yml | amlint check -  # stdin
 |------|-------------|
 | `--strict` | Exit non-zero on WARN as well as ERROR |
 | `--format json` | Machine-readable JSON output |
+| `--ignore CODE` | Skip findings with these codes; repeat or comma-separate |
+
+**`.amlint.yml` project config** — place in your repo root, loaded automatically:
+
+```yaml
+# .amlint.yml
+ignore:
+  - empty-receiver
+  - unused-receiver
+strict: true
+severity:
+  empty-receiver: info      # downgrade warn → info
+  unused-receiver: error    # upgrade info → error
+```
+
+`--ignore` on the CLI merges with the `ignore:` list in the config file.
 
 ### Exit codes
 
@@ -79,11 +95,21 @@ Generate a minimal valid `alertmanager.yml` to start from:
 amlint init > alertmanager.yml
 ```
 
+## explain
+
+Show a detailed description, why it matters, and bad/good examples for any check code:
+
+```bash
+amlint explain undefined-receiver
+amlint explain inhibit-no-equal
+```
+
+Useful for onboarding new team members or understanding an unfamiliar finding.
+
 ## --version
 
 ```bash
 amlint --version
-# amlint 0.1.2
 ```
 
 ## CI integration

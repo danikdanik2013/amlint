@@ -452,6 +452,39 @@ def check_slack_no_api_url(cfg: dict) -> List[Finding]:
     return out
 
 
+# CHECK 19: opsgenie_configs without api_key (no global fallback either)
+def check_opsgenie_no_api_key(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    g = cfg.get("global") or {}
+    global_key = g.get("opsgenie_api_key") or g.get("opsgenie_api_key_file")
+    for r in cfg.get("receivers", []) or []:
+        for i, og in enumerate(r.get("opsgenie_configs", []) or []):
+            if not og.get("api_key") and not og.get("api_key_file") and not global_key:
+                out.append(Finding(
+                    ERROR, "opsgenie-no-api-key",
+                    f"opsgenie_configs[{i}] in receiver '{r.get('name')}' has no 'api_key' or "
+                    f"'api_key_file', and global.opsgenie_api_key is not set. "
+                    f"OpsGenie alerts cannot be sent.",
+                    f"receivers[{r.get('name')}].opsgenie_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 20: msteams_configs without webhook_url or webhook_url_file
+def check_msteams_no_webhook_url(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    for r in cfg.get("receivers", []) or []:
+        for i, ms in enumerate(r.get("msteams_configs", []) or []):
+            if not ms.get("webhook_url") and not ms.get("webhook_url_file"):
+                out.append(Finding(
+                    ERROR, "msteams-no-webhook-url",
+                    f"msteams_configs[{i}] in receiver '{r.get('name')}' has no 'webhook_url' or "
+                    f"'webhook_url_file'. MS Teams notifications cannot be sent.",
+                    f"receivers[{r.get('name')}].msteams_configs[{i}]",
+                ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -471,6 +504,8 @@ ALL_CHECKS = [
     check_webhook_no_url,
     check_pagerduty_no_routing_key,
     check_slack_no_api_url,
+    check_opsgenie_no_api_key,
+    check_msteams_no_webhook_url,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}
