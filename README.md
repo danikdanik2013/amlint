@@ -47,6 +47,7 @@ amlint check prod.yml staging.yml           # multiple files
 cat alertmanager.yml | amlint check -       # stdin
 amlint check alertmanager.yml --strict      # WARN also exits non-zero
 amlint check alertmanager.yml --format json
+amlint check alertmanager.yml --format sarif > results.sarif  # GitHub Code Scanning
 amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint diff old.yml new.yml                 # show what changed
 amlint init > alertmanager.yml              # generate minimal valid config
@@ -126,6 +127,7 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `inhibit-same-match` | info | source and target match the same label value |
 | `useless-continue` | info | `continue:true` on the last sibling route has no effect |
 | `deep-nesting` | info | route tree deeper than 5 levels |
+| `global-resolve-timeout-missing` | info | `global.resolve_timeout` not set; defaults to 5m |
 | `route-match-collision` | warn | two sibling routes with identical matchers |
 
 Run `amlint explain <code>` for detailed description and examples of any check.

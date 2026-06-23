@@ -527,6 +527,19 @@ def check_route_match_collision(cfg: dict) -> List[Finding]:
     return out
 
 
+# CHECK 22: global.resolve_timeout not set — Alertmanager default (5m) may surprise
+def check_global_resolve_timeout(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    if not (cfg.get("global") or {}).get("resolve_timeout"):
+        out.append(Finding(
+            INFO, "global-resolve-timeout-missing",
+            "global.resolve_timeout is not set. Alertmanager defaults to 5m — "
+            "set it explicitly so the intent is clear and reviewable.",
+            "global",
+        ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -549,6 +562,7 @@ ALL_CHECKS = [
     check_opsgenie_no_api_key,
     check_msteams_no_webhook_url,
     check_route_match_collision,
+    check_global_resolve_timeout,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}

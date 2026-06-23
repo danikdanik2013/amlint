@@ -91,3 +91,29 @@ A route references a time interval name in `mute_time_intervals` or `active_time
               - start_time: '00:00'
                 end_time: '24:00'
     ```
+
+---
+
+## global-resolve-timeout-missing
+
+**Level:** info
+
+`global.resolve_timeout` is not set. Alertmanager uses a default of `5m` — after 5 minutes without a firing alert, it marks the alert resolved and sends a resolve notification.
+
+This may be too short (spurious resolves for flapping alerts) or too long (delayed recovery notices). Setting it explicitly makes the intent clear and reviewable in code.
+
+=== "Bad"
+    ```yaml
+    route:
+      receiver: default
+    # no global: section — resolve_timeout silently defaults to 5m
+    ```
+
+=== "Fixed"
+    ```yaml
+    global:
+      resolve_timeout: 5m   # explicit: 5m, 15m, 1h — whatever fits your alerts
+
+    route:
+      receiver: default
+    ```

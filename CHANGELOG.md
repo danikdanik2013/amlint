@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.9] - 2026-06-23
+
+### Added
+- `global-resolve-timeout-missing` (info) — `global.resolve_timeout` not set; Alertmanager defaults to 5m silently
+- `--format sarif` — GitHub Code Scanning SARIF 2.1.0 output; upload with `github/codeql-action/upload-sarif` to get findings as PR annotations
+
 ## [0.1.8] - 2026-06-23
 
 ### Added

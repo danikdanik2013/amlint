@@ -102,6 +102,70 @@ def _print_findings(findings, label=None):
     console.print()
 
 
+_SARIF_LEVEL = {ERROR: "error", WARN: "warning", INFO: "note"}
+_DOCS_BASE = "https://danikdanik2013.github.io/amlint/checks/"
+
+
+def _to_sarif(all_findings, version: str) -> dict:
+    from .explains import EXPLAINS
+
+    def pascal(code: str) -> str:
+        return "".join(w.capitalize() for w in code.split("-"))
+
+    rules = [
+        {
+            "id": code,
+            "name": pascal(code),
+            "shortDescription": {"text": e["summary"]},
+            "defaultConfiguration": {
+                "level": _SARIF_LEVEL.get(e["level"].split()[0], "note")
+            },
+            "helpUri": f"{_DOCS_BASE}",
+        }
+        for code, e in EXPLAINS.items()
+    ]
+
+    results = []
+    for path, findings in all_findings:
+        uri = path if path != "-" else "<stdin>"
+        for f in findings:
+            result: dict = {
+                "ruleId": f.code,
+                "level": _SARIF_LEVEL.get(f.level, "note"),
+                "message": {"text": f.msg},
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
+                        "region": {"startLine": 1},
+                    },
+                }],
+            }
+            if f.where:
+                result["locations"][0]["logicalLocations"] = [
+                    {"name": f.where, "kind": "member"}
+                ]
+            results.append(result)
+
+    return {
+        "$schema": (
+            "https://raw.githubusercontent.com/oasis-tcs/sarif-spec"
+            "/master/Schemata/sarif-schema-2.1.0.json"
+        ),
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "amlint",
+                    "version": version,
+                    "informationUri": "https://github.com/danikdanik2013/amlint",
+                    "rules": rules,
+                }
+            },
+            "results": results,
+        }],
+    }
+
+
 def _cmd_check(args):
     proj = load_project_config()
     ignore = _build_ignore(args.ignore, proj.get("ignore"))
@@ -121,6 +185,8 @@ def _cmd_check(args):
              for path, findings in all_findings for f in findings],
             ensure_ascii=False, indent=2,
         ))
+    elif args.format == "sarif":
+        print(json.dumps(_to_sarif(all_findings, _VERSION), ensure_ascii=False, indent=2))
     else:
         for path, findings in all_findings:
             _print_findings(findings, label=path if multi else None)
@@ -290,7 +356,7 @@ def main(argv=None):
     pc = sub.add_parser("check", help="validate one or more config files")
     pc.add_argument("files", nargs="+", metavar="file",
                     help="path(s) to alertmanager.yml, or - for stdin")
-    pc.add_argument("--format", choices=["text", "json"], default="text")
+    pc.add_argument("--format", choices=["text", "json", "sarif"], default="text")
     pc.add_argument("--strict", action="store_true", help="exit non-zero on WARN as well")
     pc.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes (comma-separated or repeat the flag); "

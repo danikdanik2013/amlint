@@ -16,6 +16,7 @@ cat alertmanager.yml | amlint check -  # stdin
 |------|-------------|
 | `--strict` | Exit non-zero on WARN as well as ERROR |
 | `--format json` | Machine-readable JSON output |
+| `--format sarif` | GitHub Code Scanning SARIF output |
 | `--ignore CODE` | Skip findings with these codes; repeat or comma-separate |
 
 **Project config** — amlint loads config automatically. Two options (first found wins):
@@ -130,6 +131,20 @@ Useful for onboarding new team members or understanding an unfamiliar finding.
 
 ```bash
 amlint --version
+```
+
+### SARIF (GitHub Code Scanning)
+
+SARIF output lets GitHub show findings as annotations directly on the PR diff — no plugins required:
+
+```yaml
+- name: Run amlint
+  run: amlint check alertmanager.yml --format sarif > results.sarif
+
+- name: Upload to GitHub Code Scanning
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
 ```
 
 ## CI integration

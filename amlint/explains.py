@@ -463,6 +463,34 @@ global:
   opsgenie_api_key: 'your-opsgenie-api-key'""",
     },
 
+    "global-resolve-timeout-missing": {
+        "level": "info",
+        "summary": "global.resolve_timeout is not set; Alertmanager defaults to 5m.",
+        "why": (
+            "The default 5m means alerts are marked resolved 5 minutes after they stop firing."
+            " This may be too short or too long for your environment."
+            " Setting it explicitly makes the intent reviewable in code."
+        ),
+        "bad": """\
+route:
+  receiver: default
+receivers:
+  - name: default
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/...'
+# no global: section — resolve_timeout defaults to 5m""",
+        "good": """\
+global:
+  resolve_timeout: 5m   # or 15m, 1h — whatever fits your alert lifecycle
+
+route:
+  receiver: default
+receivers:
+  - name: default
+    slack_configs:
+      - api_url: 'https://hooks.slack.com/...'""",
+    },
+
     "route-match-collision": {
         "level": "warn",
         "summary": "Two sibling routes have identical matchers — the second never receives alerts.",

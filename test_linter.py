@@ -1,5 +1,6 @@
 """Tests for amlint. Run: python3 -m pytest test_linter.py -v"""
 
+import json
 import os
 import yaml
 import pytest
@@ -243,7 +244,6 @@ def test_cli_check_json(tmp_path, capsys):
     cfg = tmp_path / "am.yml"
     cfg.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
     main(["check", "--format", "json", str(cfg)])
-    import json
     out = json.loads(capsys.readouterr().out)
     assert any(f["code"] == "undefined-receiver" for f in out)
 
@@ -373,6 +373,45 @@ def test_msteams_no_webhook_url():
         "receivers": [{"name": "a", "msteams_configs": [{"title": "Alert"}]}],
     }
     assert "msteams-no-webhook-url" in codes(cfg)
+
+
+def test_global_resolve_timeout_missing():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "webhook_configs": [{"url": "http://fake"}]}],
+    }
+    assert "global-resolve-timeout-missing" in codes(cfg)
+
+
+def test_global_resolve_timeout_set_ok():
+    cfg = {
+        "global": {"resolve_timeout": "5m"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "webhook_configs": [{"url": "http://fake"}]}],
+    }
+    assert "global-resolve-timeout-missing" not in codes(cfg)
+
+
+def test_cli_check_sarif(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
+    main(["check", "--format", "sarif", str(cfg)])
+    out = json.loads(capsys.readouterr().out)
+    assert out["version"] == "2.1.0"
+    results = out["runs"][0]["results"]
+    assert any(r["ruleId"] == "undefined-receiver" for r in results)
+    assert all(r["level"] in ("error", "warning", "note") for r in results)
+
+
+def test_sarif_rules_cover_all_checks(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n"
+                   "    webhook_configs: [{url: 'http://fake'}]\n")
+    main(["check", "--format", "sarif", str(cfg)])
+    out = json.loads(capsys.readouterr().out)
+    rule_ids = {r["id"] for r in out["runs"][0]["tool"]["driver"]["rules"]}
+    assert "undefined-receiver" in rule_ids
+    assert "global-resolve-timeout-missing" in rule_ids
 
 
 def test_route_match_collision():
@@ -592,6 +631,7 @@ def test_broken_yml_integration():
         "bad-regex",
         "inhibit-no-equal",
         "unreachable-route",
+        "global-resolve-timeout-missing",
         "groupby-ellipsis",
         "unused-receiver",
         "empty-receiver",

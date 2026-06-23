@@ -1,6 +1,6 @@
 # Checks overview
 
-amlint runs **23 checks** grouped into four categories.
+amlint runs **24 checks** grouped into four categories.
 
 | code | level | category |
 |------|-------|----------|
@@ -27,6 +27,7 @@ amlint runs **23 checks** grouped into four categories.
 | [`repeat-before-group`](timing.md#repeat-before-group) | warn | Timing |
 | [`wait-exceeds-interval`](timing.md#wait-exceeds-interval) | warn | Timing |
 | [`undefined-time-interval`](timing.md#undefined-time-interval) | error | Timing |
+| [`global-resolve-timeout-missing`](timing.md#global-resolve-timeout-missing) | info | Timing |
 
 ## Severity levels
 
