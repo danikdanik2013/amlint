@@ -514,6 +514,25 @@ routes:
 # or: use distinct matchers for each route""",
     },
 
+    "template-file-missing": {
+        "level": "error (warn for globs)",
+        "summary": "templates: references a file path that does not exist on disk.",
+        "why": (
+            "Alertmanager loads template files at startup. "
+            "A missing literal path causes startup failure. "
+            "A glob that matches no files silently loads no templates."
+        ),
+        "bad": """\
+templates:
+  - /etc/alertmanager/templates/custom.tmpl   # file does not exist""",
+        "good": """\
+templates:
+  - /etc/alertmanager/templates/custom.tmpl   # ensure the file exists before deploying
+# or use a glob that matches existing files:
+templates:
+  - /etc/alertmanager/templates/*.tmpl""",
+    },
+
     "msteams-no-webhook-url": {
         "level": "error",
         "summary": "An msteams_configs entry has no webhook_url or webhook_url_file.",

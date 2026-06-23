@@ -247,6 +247,40 @@ An `msteams_configs` entry has no `webhook_url` or `webhook_url_file`. MS Teams 
 
 ---
 
+## template-file-missing
+
+**Level:** error (warn for globs)
+
+A path in `templates:` does not exist on disk. Alertmanager loads template files at startup — a missing literal path causes startup failure; a glob that matches no files silently loads no templates.
+
+This check only runs when linting a file (not stdin) and resolves paths relative to the config file's directory.
+
+!!! tip
+    If your templates live at a runtime path (e.g. `/etc/alertmanager/templates/`) that isn't present in CI, add `template-file-missing` to your `.amlint.yml` ignore list.
+
+=== "Bad — literal path"
+    ```yaml
+    templates:
+      - /etc/alertmanager/templates/custom.tmpl   # file does not exist
+    ```
+
+=== "Bad — glob no match"
+    ```yaml
+    templates:
+      - templates/*.tmpl   # no files match this pattern
+    ```
+
+=== "Fixed"
+    ```yaml
+    templates:
+      - templates/custom.tmpl   # file exists in the repo alongside the config
+    # or use a glob that actually matches:
+    templates:
+      - templates/*.tmpl        # and ensure at least one .tmpl file is present
+    ```
+
+---
+
 ## unused-receiver
 
 **Level:** info

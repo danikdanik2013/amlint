@@ -49,6 +49,8 @@ amlint check alertmanager.yml --strict      # WARN also exits non-zero
 amlint check alertmanager.yml --format json
 amlint check alertmanager.yml --format sarif > results.sarif  # GitHub Code Scanning
 amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
+amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
+amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
 amlint diff old.yml new.yml                 # show what changed
 amlint init > alertmanager.yml              # generate minimal valid config
 amlint list                                 # all check codes with level + description
@@ -116,6 +118,7 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `slack-no-api-url` | error | `slack_configs` without `api_url` and no global |
 | `opsgenie-no-api-key` | error | `opsgenie_configs` without `api_key` and no global |
 | `msteams-no-webhook-url` | error | `msteams_configs` without `webhook_url` |
+| `template-file-missing` | error/warn | `templates:` references a file that doesn't exist |
 | `inhibit-no-equal` | warn | inhibition without `equal` silences too broadly |
 | `unreachable-route` | warn | catch-all hides subsequent sibling routes |
 | `groupby-ellipsis` | warn | `...` mixed with explicit labels in `group_by` |

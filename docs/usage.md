@@ -18,6 +18,8 @@ cat alertmanager.yml | amlint check -  # stdin
 | `--format json` | Machine-readable JSON output |
 | `--format sarif` | GitHub Code Scanning SARIF output |
 | `--ignore CODE` | Skip findings with these codes; repeat or comma-separate |
+| `--only CODE` | Show only findings with these codes; repeat or comma-separate |
+| `--exit-zero` | Always exit 0 regardless of findings; useful for informational CI runs |
 
 **Project config** — amlint loads config automatically. Two options (first found wins):
 

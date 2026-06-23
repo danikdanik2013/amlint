@@ -1,6 +1,6 @@
 [project]
 name = "amlint"
-version = "0.1.9"
+version = "0.1.10"
 description = "Semantic linter for Prometheus Alertmanager configs"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Monitoring",
     "Topic :: Utilities",
 ]

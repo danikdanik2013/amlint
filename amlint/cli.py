@@ -50,6 +50,15 @@ def _build_ignore(args_ignore, project_ignore) -> set:
     return codes
 
 
+def _build_only(args_only) -> set:
+    codes: set = set()
+    for val in (args_only or []):
+        for code in val.split(","):
+            if code.strip():
+                codes.add(code.strip())
+    return codes
+
+
 def load(path):
     try:
         if path == "-":
@@ -169,6 +178,7 @@ def _to_sarif(all_findings, version: str) -> dict:
 def _cmd_check(args):
     proj = load_project_config()
     ignore = _build_ignore(args.ignore, proj.get("ignore"))
+    only = _build_only(args.only)
     strict = args.strict or proj.get("strict", False)
     severity = proj.get("severity") or {}
 
@@ -176,7 +186,10 @@ def _cmd_check(args):
     all_findings = []
     for path in args.files:
         cfg = load(path)
-        all_findings.append((path, lint(cfg, ignore=ignore, severity=severity)))
+        basedir = os.path.dirname(os.path.abspath(path)) if path != "-" else None
+        all_findings.append((path, lint(
+            cfg, ignore=ignore, severity=severity, only=only or None, basedir=basedir,
+        )))
 
     if args.format == "json":
         print(json.dumps(
@@ -191,6 +204,8 @@ def _cmd_check(args):
         for path, findings in all_findings:
             _print_findings(findings, label=path if multi else None)
 
+    if getattr(args, "exit_zero", False):
+        return 0
     has_err  = any(f.level == ERROR for _, fs in all_findings for f in fs)
     has_warn = any(f.level == WARN  for _, fs in all_findings for f in fs)
     return 1 if has_err or (strict and has_warn) else 0
@@ -225,9 +240,10 @@ def _cmd_init() -> int:
 def _cmd_diff(args):
     proj = load_project_config()
     ignore = _build_ignore(args.ignore, proj.get("ignore"))
+    only = _build_only(getattr(args, "only", None))
     severity = proj.get("severity") or {}
-    old_findings = lint(load(args.old), ignore=ignore, severity=severity)
-    new_findings = lint(load(args.new), ignore=ignore, severity=severity)
+    old_findings = lint(load(args.old), ignore=ignore, severity=severity, only=only or None)
+    new_findings = lint(load(args.new), ignore=ignore, severity=severity, only=only or None)
 
     def key(f):
         return (f.code, f.where)
@@ -361,6 +377,10 @@ def main(argv=None):
     pc.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes (comma-separated or repeat the flag); "
                          "also configurable via .amlint.yml")
+    pc.add_argument("--only", action="append", metavar="CODE",
+                    help="run only findings with these codes (comma-separated or repeat the flag)")
+    pc.add_argument("--exit-zero", action="store_true", dest="exit_zero",
+                    help="always exit 0 regardless of findings; useful for informational CI runs")
 
     pd = sub.add_parser("diff", help="show findings that changed between two configs")
     pd.add_argument("old", help="baseline config")
@@ -368,6 +388,8 @@ def main(argv=None):
     pd.add_argument("--format", choices=["text", "json"], default="text")
     pd.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes")
+    pd.add_argument("--only", action="append", metavar="CODE",
+                    help="consider only findings with these codes")
 
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 

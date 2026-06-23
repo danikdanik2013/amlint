@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.10] - 2026-06-23
+
+### Added
+- `template-file-missing` (error/warn) — `templates:` references a file that doesn't exist;
+  literal paths → error, globs with no matches → warn
+- `--only CODE,CODE` — run only findings with the specified codes (inverse of `--ignore`);
+  works on both `check` and `diff` subcommands
+- `--exit-zero` — always exit 0 regardless of findings; for informational CI steps
+- Python 3.13 added to CI matrix and PyPI classifiers
+
 ## [0.1.9] - 2026-06-23
 
 ### Added

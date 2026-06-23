@@ -11,6 +11,8 @@ Usage:
     amlint check alertmanager.yml --format json
 """
 
+import glob as _glob
+import os
 import re
 from typing import Generator, List, Set, Tuple
 
@@ -527,7 +529,32 @@ def check_route_match_collision(cfg: dict) -> List[Finding]:
     return out
 
 
-# CHECK 22: global.resolve_timeout not set — Alertmanager default (5m) may surprise
+# CHECK 22: templates: references files that do not exist on disk
+def check_template_files(cfg: dict, basedir: str) -> List[Finding]:
+    out: List[Finding] = []
+    for tpl in cfg.get("templates", []) or []:
+        full = tpl if os.path.isabs(tpl) else os.path.join(basedir, tpl)
+        if _glob.glob(full):
+            continue
+        is_glob = any(c in tpl for c in "*?[")
+        if is_glob:
+            out.append(Finding(
+                WARN, "template-file-missing",
+                f"templates glob '{tpl}' matches no files. "
+                f"Alertmanager will load no custom templates.",
+                "templates",
+            ))
+        else:
+            out.append(Finding(
+                ERROR, "template-file-missing",
+                f"Template file '{tpl}' does not exist. "
+                f"Alertmanager will fail to start.",
+                "templates",
+            ))
+    return out
+
+
+# CHECK 23: global.resolve_timeout not set — Alertmanager default (5m) may surprise
 def check_global_resolve_timeout(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
     if not (cfg.get("global") or {}).get("resolve_timeout"):
@@ -568,16 +595,20 @@ ALL_CHECKS = [
 _VALID_LEVELS = {ERROR, WARN, INFO}
 
 
-def lint(cfg: dict, ignore=None, severity=None) -> List[Finding]:
+def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None) -> List[Finding]:
     findings: List[Finding] = []
     for check in ALL_CHECKS:
         findings.extend(check(cfg))
+    if basedir is not None:
+        findings.extend(check_template_files(cfg, basedir))
     if severity:
         for f in findings:
             if f.code in severity and severity[f.code] in _VALID_LEVELS:
                 f.level = severity[f.code]
     order = {ERROR: 0, WARN: 1, INFO: 2}
     findings.sort(key=lambda f: order[f.level])
+    if only:
+        findings = [f for f in findings if f.code in only]
     if ignore:
         findings = [f for f in findings if f.code not in ignore]
     return findings

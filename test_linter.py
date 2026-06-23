@@ -620,6 +620,93 @@ def test_cli_config_file_strict(tmp_path, monkeypatch):
     assert main(["check", str(cfg)]) == 1
 
 
+# ── --only flag ────────────────────────────────────────────────────────
+
+def test_lint_only_single():
+    cfg = {
+        "route": {"receiver": "ghost"},
+        "receivers": [{"name": "real"}],
+    }
+    found = {f.code for f in lint(cfg, only={"undefined-receiver"})}
+    assert found == {"undefined-receiver"}
+
+
+def test_lint_only_excludes_others():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    found = {f.code for f in lint(cfg, only={"undefined-receiver"})}
+    assert "unused-receiver" not in found
+    assert "global-resolve-timeout-missing" not in found
+
+
+def test_cli_only_flag(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
+    # --only undefined-receiver: only that check runs, no empty-receiver/unused etc.
+    main(["check", "--only", "undefined-receiver", str(cfg)])
+
+
+# ── --exit-zero flag ────────────────────────────────────────────────────
+
+def test_cli_exit_zero_suppresses_error(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
+    # would normally exit 1 (undefined-receiver)
+    assert main(["check", "--exit-zero", str(cfg)]) == 0
+
+
+def test_cli_exit_zero_clean_still_zero(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n"
+                   "    webhook_configs: [{url: 'http://fake'}]\n")
+    assert main(["check", "--exit-zero", str(cfg)]) == 0
+
+
+# ── template-file-missing ───────────────────────────────────────────────
+
+def test_template_literal_missing(tmp_path):
+    basedir = str(tmp_path)
+    cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
+           "templates": ["/nonexistent/path/custom.tmpl"]}
+    found = {f.code for f in lint(cfg, basedir=basedir)}
+    assert "template-file-missing" in found
+
+
+def test_template_literal_exists_ok(tmp_path):
+    tpl = tmp_path / "custom.tmpl"
+    tpl.write_text("{{ define 'test' }}ok{{ end }}")
+    cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
+           "templates": [str(tpl)]}
+    found = {f.code for f in lint(cfg, basedir=str(tmp_path))}
+    assert "template-file-missing" not in found
+
+
+def test_template_glob_no_match(tmp_path):
+    from amlint.linter import lint as _lint, WARN
+    cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
+           "templates": ["*.tmpl"]}
+    findings = _lint(cfg, basedir=str(tmp_path))
+    f = [x for x in findings if x.code == "template-file-missing"]
+    assert f and f[0].level == WARN
+
+
+def test_template_glob_matches_ok(tmp_path):
+    (tmp_path / "a.tmpl").write_text("x")
+    cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
+           "templates": ["*.tmpl"]}
+    found = {f.code for f in lint(cfg, basedir=str(tmp_path))}
+    assert "template-file-missing" not in found
+
+
+def test_template_check_skipped_without_basedir():
+    cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
+           "templates": ["/nonexistent/path/custom.tmpl"]}
+    found = {f.code for f in lint(cfg)}
+    assert "template-file-missing" not in found
+
+
 def test_broken_yml_integration():
     """Smoke test: broken.yml must produce the expected set of finding codes."""
     broken = os.path.join(os.path.dirname(__file__), "broken.yml")
