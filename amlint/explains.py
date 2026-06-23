@@ -98,10 +98,14 @@ receivers:
 
     "empty-receiver": {
         "level": "warn (info if it is the default receiver)",
-        "summary": "A receiver has no integration configured — no slack_configs, pagerduty_configs, etc.",
+        "summary": (
+            "A receiver has no integration configured"
+            " — no slack_configs, pagerduty_configs, etc."
+        ),
         "why": (
             "Alerts routed here will be silently dropped. "
-            "An empty default receiver is sometimes intentional (blackhole) — that case triggers info, not warn."
+            "An empty default receiver is sometimes intentional (blackhole)"
+            " — that case triggers info, not warn."
         ),
         "bad": """\
 receivers:
@@ -165,8 +169,10 @@ routes:
         "level": "warn",
         "summary": "An inhibition rule has no equal: field.",
         "why": (
-            "Without equal:, the rule silences target alerts regardless of which instance fired the source. "
-            "A critical alert on host-A will silence warnings on host-B, which is almost never intended."
+            "Without equal:, the rule silences target alerts"
+            " regardless of which instance fired the source. "
+            "A critical alert on host-A will silence warnings on host-B,"
+            " which is almost never intended."
         ),
         "bad": """\
 inhibit_rules:
@@ -232,7 +238,10 @@ inhibit_rules:
 
     "unreachable-route": {
         "level": "warn",
-        "summary": "A catch-all route (no matchers) with continue:false appears before sibling routes.",
+        "summary": (
+            "A catch-all route (no matchers) with continue:false"
+            " appears before sibling routes."
+        ),
         "why": (
             "Alertmanager evaluates siblings in order and stops at the first match. "
             "All routes after the catch-all will never receive alerts."
@@ -341,7 +350,10 @@ route:
 
     "undefined-time-interval": {
         "level": "error",
-        "summary": "mute_time_intervals or active_time_intervals references an interval not in time_intervals:",
+        "summary": (
+            "mute_time_intervals or active_time_intervals"
+            " references an interval not in time_intervals:"
+        ),
         "why": "Alertmanager will reject this config at startup.",
         "bad": """\
 route:
@@ -361,7 +373,10 @@ time_intervals:
     "webhook-no-url": {
         "level": "error",
         "summary": "A webhook_configs entry has no url or url_file.",
-        "why": "Alertmanager cannot deliver alerts without a target URL. Alerts will fail silently.",
+        "why": (
+            "Alertmanager cannot deliver alerts without a target URL."
+            " Alerts will fail silently."
+        ),
         "bad": """\
 receivers:
   - name: team
@@ -378,7 +393,10 @@ receivers:
     "pagerduty-no-routing-key": {
         "level": "error",
         "summary": "A pagerduty_configs entry has no routing_key or routing_key_file.",
-        "why": "PagerDuty requires an integration key to accept events. Without it, alerts cannot be sent.",
+        "why": (
+            "PagerDuty requires an integration key to accept events."
+            " Without it, alerts cannot be sent."
+        ),
         "bad": """\
 receivers:
   - name: pager
@@ -395,7 +413,10 @@ receivers:
     "slack-no-api-url": {
         "level": "error",
         "summary": "A slack_configs entry has no api_url and global.slack_api_url is not set.",
-        "why": "Slack requires an incoming webhook URL to receive messages. Without it, notifications fail.",
+        "why": (
+            "Slack requires an incoming webhook URL to receive messages."
+            " Without it, notifications fail."
+        ),
         "bad": """\
 receivers:
   - name: team
@@ -416,8 +437,14 @@ global:
 
     "opsgenie-no-api-key": {
         "level": "error",
-        "summary": "An opsgenie_configs entry has no api_key and global.opsgenie_api_key is not set.",
-        "why": "OpsGenie requires an API key to accept alerts. Without it, notifications cannot be sent.",
+        "summary": (
+            "An opsgenie_configs entry has no api_key"
+            " and global.opsgenie_api_key is not set."
+        ),
+        "why": (
+            "OpsGenie requires an API key to accept alerts."
+            " Without it, notifications cannot be sent."
+        ),
         "bad": """\
 receivers:
   - name: team
@@ -439,7 +466,10 @@ global:
     "msteams-no-webhook-url": {
         "level": "error",
         "summary": "An msteams_configs entry has no webhook_url or webhook_url_file.",
-        "why": "MS Teams requires an incoming webhook URL to receive messages. Without it, notifications fail.",
+        "why": (
+            "MS Teams requires an incoming webhook URL to receive messages."
+            " Without it, notifications fail."
+        ),
         "bad": """\
 receivers:
   - name: team

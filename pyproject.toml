@@ -1,6 +1,6 @@
 [project]
 name = "amlint"
-version = "0.1.6"
+version = "0.1.7"
 description = "Semantic linter for Prometheus Alertmanager configs"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -23,7 +23,7 @@ classifiers = [
 dependencies = ["pyyaml>=5.1", "rich>=13"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "argcomplete>=3"]
+dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "argcomplete>=3", "tomli>=2; python_version<'3.11'"]
 completions = ["argcomplete>=3"]
 docs = ["mkdocs-material>=9"]
 

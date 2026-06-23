@@ -432,6 +432,36 @@ def test_lint_severity_invalid_value_ignored():
     assert f.level == "info"  # unchanged
 
 
+def test_pyproject_toml_config(tmp_path, monkeypatch):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(
+        "route:\n  receiver: a\nreceivers:\n  - name: a\n"
+        "  - name: b\n"
+    )
+    toml = tmp_path / "pyproject.toml"
+    toml.write_text("[tool.amlint]\nignore = ['unused-receiver']\n")
+    monkeypatch.chdir(tmp_path)
+    # unused-receiver is ignored via pyproject.toml — no findings → exit 0
+    assert main(["check", str(cfg)]) == 0
+
+
+def test_amlint_yml_takes_priority_over_pyproject(tmp_path, monkeypatch):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(
+        "route:\n  receiver: a\nreceivers:\n  - name: a\n"
+        "  - name: b\n"
+    )
+    # pyproject.toml ignores unused-receiver
+    toml = tmp_path / "pyproject.toml"
+    toml.write_text("[tool.amlint]\nignore = ['unused-receiver']\n")
+    # .amlint.yml does NOT ignore it — takes priority
+    rc = tmp_path / ".amlint.yml"
+    rc.write_text("ignore: []\n")
+    monkeypatch.chdir(tmp_path)
+    # .amlint.yml wins — unused-receiver is info, exit 0 still (not error)
+    assert main(["check", str(cfg)]) == 0
+
+
 def test_cli_config_severity_override(tmp_path, monkeypatch):
     cfg = tmp_path / "am.yml"
     cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n  - name: b\n")

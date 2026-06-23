@@ -18,20 +18,32 @@ cat alertmanager.yml | amlint check -  # stdin
 | `--format json` | Machine-readable JSON output |
 | `--ignore CODE` | Skip findings with these codes; repeat or comma-separate |
 
-**`.amlint.yml` project config** — place in your repo root, loaded automatically:
+**Project config** — amlint loads config automatically. Two options (first found wins):
 
-```yaml
-# .amlint.yml
-ignore:
-  - empty-receiver
-  - unused-receiver
-strict: true
-severity:
-  empty-receiver: info      # downgrade warn → info
-  unused-receiver: error    # upgrade info → error
-```
+=== ".amlint.yml"
+    ```yaml
+    ignore:
+      - empty-receiver
+      - unused-receiver
+    strict: true
+    severity:
+      empty-receiver: info      # downgrade warn → info
+      unused-receiver: error    # upgrade info → error
+    ```
 
-`--ignore` on the CLI merges with the `ignore:` list in the config file.
+=== "pyproject.toml"
+    ```toml
+    [tool.amlint]
+    ignore = ["empty-receiver", "unused-receiver"]
+    strict = true
+
+    [tool.amlint.severity]
+    empty-receiver = "info"
+    unused-receiver = "error"
+    ```
+
+`.amlint.yml` takes priority over `pyproject.toml` if both exist.
+`--ignore` on the CLI merges with the `ignore:` list from the config file.
 
 ### Exit codes
 

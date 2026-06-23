@@ -406,13 +406,14 @@ def check_email_smarthost(cfg: dict) -> List[Finding]:
 def check_webhook_no_url(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
     for r in cfg.get("receivers", []) or []:
+        name = r.get("name")
         for i, wh in enumerate(r.get("webhook_configs", []) or []):
             if not wh.get("url") and not wh.get("url_file"):
                 out.append(Finding(
                     ERROR, "webhook-no-url",
-                    f"webhook_configs[{i}] in receiver '{r.get('name')}' has no 'url' or 'url_file'. "
+                    f"webhook_configs[{i}] in receiver '{name}' has no 'url' or 'url_file'. "
                     f"Alerts sent here will fail to deliver.",
-                    f"receivers[{r.get('name')}].webhook_configs[{i}]",
+                    f"receivers[{name}].webhook_configs[{i}]",
                 ))
     return out
 

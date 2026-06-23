@@ -53,14 +53,22 @@ amlint init > alertmanager.yml              # generate minimal valid config
 amlint explain undefined-receiver           # detailed explanation + examples
 ```
 
-**Project config** — create `.amlint.yml` in your repo root:
+**Project config** — `.amlint.yml` or `pyproject.toml [tool.amlint]`:
 
 ```yaml
+# .amlint.yml
 ignore:
   - empty-receiver
 strict: true
 severity:
   unused-receiver: error   # upgrade info → error
+```
+
+```toml
+# pyproject.toml
+[tool.amlint]
+ignore = ["empty-receiver"]
+strict = true
 ```
 
 **Shell completions (bash/zsh):**

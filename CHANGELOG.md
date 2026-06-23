@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.7] - 2026-06-23
+
+### Added
+- `pyproject.toml [tool.amlint]` support — configure ignore/strict/severity without a separate file
+- `.amlint.yml` still takes priority if both files exist
+- Python 3.11+ uses stdlib `tomllib`; 3.9/3.10 use `tomli` (optional install)
+
+### Fixed
+- ruff E501 in `explains.py` and `linter.py` — all long lines split
+
 ## [0.1.6] - 2026-06-23
 
 ### Added
