@@ -276,6 +276,67 @@ def test_cli_file_not_found():
     assert exc.value.code == 2
 
 
+def test_lint_ignore_single():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    assert "unused-receiver" in codes(cfg)
+    filtered = {f.code for f in lint(cfg, ignore={"unused-receiver"})}
+    assert "unused-receiver" not in filtered
+
+
+def test_lint_ignore_multiple():
+    cfg = {
+        "route": {"receiver": "ghost"},
+        "receivers": [{"name": "real"}],
+    }
+    found = {f.code for f in lint(cfg, ignore={"undefined-receiver", "empty-receiver"})}
+    assert "undefined-receiver" not in found
+
+
+def test_cli_ignore_flag(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
+    # Without ignore — exits 1 (undefined-receiver is an error)
+    assert main(["check", str(cfg)]) == 1
+    # With ignore — the error is suppressed, exits 0
+    assert main(["check", "--ignore", "undefined-receiver", str(cfg)]) == 0
+
+
+def test_cli_ignore_comma_separated(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+                   "inhibit_rules:\n  - source_match: {severity: critical}\n"
+                   "    target_match: {severity: warning}\n")
+    # inhibit-no-equal would trigger --strict failure; ignore it
+    assert main(["check", "--strict", "--ignore", "inhibit-no-equal", str(cfg)]) == 0
+
+
+def test_cli_config_file_ignore(tmp_path, monkeypatch):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+                   "inhibit_rules:\n  - source_match: {severity: critical}\n"
+                   "    target_match: {severity: warning}\n")
+    rc = tmp_path / ".amlint.yml"
+    rc.write_text("ignore:\n  - inhibit-no-equal\nstrict: true\n")
+    monkeypatch.chdir(tmp_path)
+    # strict comes from config file, inhibit-no-equal is ignored — should pass
+    assert main(["check", str(cfg)]) == 0
+
+
+def test_cli_config_file_strict(tmp_path, monkeypatch):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+                   "inhibit_rules:\n  - source_match: {severity: critical}\n"
+                   "    target_match: {severity: warning}\n")
+    rc = tmp_path / ".amlint.yml"
+    rc.write_text("strict: true\n")
+    monkeypatch.chdir(tmp_path)
+    # strict from config file — inhibit-no-equal is WARN, should fail
+    assert main(["check", str(cfg)]) == 1
+
+
 def test_broken_yml_integration():
     """Smoke test: broken.yml must produce the expected set of finding codes."""
     broken = os.path.join(os.path.dirname(__file__), "broken.yml")

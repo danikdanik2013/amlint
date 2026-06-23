@@ -29,6 +29,7 @@ from rich.console import Console
 from rich.rule import Rule
 from rich.text import Text
 
+from .config import load_project_config
 from .linter import ERROR, INFO, WARN, lint
 
 console = Console(highlight=False)
@@ -36,6 +37,15 @@ err_console = Console(stderr=True, highlight=False)
 
 ICON  = {ERROR: "✖", WARN: "⚠", INFO: "ℹ"}
 STYLE = {ERROR: "bold red", WARN: "bold yellow", INFO: "bold cyan"}
+
+
+def _build_ignore(args_ignore, project_ignore) -> set:
+    codes = set(project_ignore or [])
+    for val in (args_ignore or []):
+        for code in val.split(","):
+            if code.strip():
+                codes.add(code.strip())
+    return codes
 
 
 def load(path):
@@ -91,11 +101,15 @@ def _print_findings(findings, label=None):
 
 
 def _cmd_check(args):
+    proj = load_project_config()
+    ignore = _build_ignore(args.ignore, proj.get("ignore"))
+    strict = args.strict or proj.get("strict", False)
+
     multi = len(args.files) > 1
     all_findings = []
     for path in args.files:
         cfg = load(path)
-        all_findings.append((path, lint(cfg)))
+        all_findings.append((path, lint(cfg, ignore=ignore)))
 
     if args.format == "json":
         print(json.dumps(
@@ -110,7 +124,7 @@ def _cmd_check(args):
 
     has_err  = any(f.level == ERROR for _, fs in all_findings for f in fs)
     has_warn = any(f.level == WARN  for _, fs in all_findings for f in fs)
-    return 1 if has_err or (args.strict and has_warn) else 0
+    return 1 if has_err or (strict and has_warn) else 0
 
 
 _INIT_TEMPLATE = """\
@@ -140,8 +154,10 @@ def _cmd_init() -> int:
 
 
 def _cmd_diff(args):
-    old_findings = lint(load(args.old))
-    new_findings = lint(load(args.new))
+    proj = load_project_config()
+    ignore = _build_ignore(args.ignore, proj.get("ignore"))
+    old_findings = lint(load(args.old), ignore=ignore)
+    new_findings = lint(load(args.new), ignore=ignore)
 
     def key(f):
         return (f.code, f.where)
@@ -215,11 +231,16 @@ def main(argv=None):
                     help="path(s) to alertmanager.yml, or - for stdin")
     pc.add_argument("--format", choices=["text", "json"], default="text")
     pc.add_argument("--strict", action="store_true", help="exit non-zero on WARN as well")
+    pc.add_argument("--ignore", action="append", metavar="CODE",
+                    help="skip findings with these codes (comma-separated or repeat the flag); "
+                         "also configurable via .amlint.yml")
 
     pd = sub.add_parser("diff", help="show findings that changed between two configs")
     pd.add_argument("old", help="baseline config")
     pd.add_argument("new", help="updated config")
     pd.add_argument("--format", choices=["text", "json"], default="text")
+    pd.add_argument("--ignore", action="append", metavar="CODE",
+                    help="skip findings with these codes")
 
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 

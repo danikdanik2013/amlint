@@ -421,10 +421,12 @@ ALL_CHECKS = [
 ]
 
 
-def lint(cfg: dict) -> List[Finding]:
+def lint(cfg: dict, ignore=None) -> List[Finding]:
     findings: List[Finding] = []
     for check in ALL_CHECKS:
         findings.extend(check(cfg))
     order = {ERROR: 0, WARN: 1, INFO: 2}
     findings.sort(key=lambda f: order[f.level])
+    if ignore:
+        findings = [f for f in findings if f.code not in ignore]
     return findings

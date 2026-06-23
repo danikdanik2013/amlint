@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4] - 2026-06-23
+
+### Added
+- `--ignore CODE,CODE` flag — skip specific checks per invocation
+- `.amlint.yml` project config file — set `ignore:` list and `strict: true` once instead of repeating flags
+- Config file and CLI `--ignore` merge (union of both)
+
 ## [0.1.3] - 2026-06-22
 
 ### Changed
