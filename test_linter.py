@@ -221,7 +221,7 @@ def test_wait_exceeds_interval():
 
 def test_cli_check_clean(tmp_path):
     cfg = tmp_path / "am.yml"
-    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n")
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    webhook_configs: [{url: 'http://fake'}]\n")
     assert main(["check", str(cfg)]) == 0
 
 
@@ -233,7 +233,7 @@ def test_cli_check_errors(tmp_path):
 
 def test_cli_check_strict(tmp_path):
     cfg = tmp_path / "am.yml"
-    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    webhook_configs: [{url: 'http://fake'}]\n"
                    "inhibit_rules:\n  - source_match: {severity: critical}\n"
                    "    target_match: {severity: warning}\n")
     assert main(["check", "--strict", str(cfg)]) == 1
@@ -251,21 +251,21 @@ def test_cli_check_json(tmp_path, capsys):
 def test_cli_check_stdin(tmp_path, monkeypatch):
     import io
     monkeypatch.setattr("sys.stdin", io.StringIO(
-        "route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+        "route:\n  receiver: a\nreceivers:\n  - name: a\n    webhook_configs: [{url: 'http://fake'}]\n"
     ))
     assert main(["check", "-"]) == 0
 
 
 def test_cli_diff_no_change(tmp_path):
     cfg = tmp_path / "am.yml"
-    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n")
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    webhook_configs: [{url: 'http://fake'}]\n")
     assert main(["diff", str(cfg), str(cfg)]) == 0
 
 
 def test_cli_diff_regression(tmp_path):
     good = tmp_path / "good.yml"
     bad  = tmp_path / "bad.yml"
-    good.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n")
+    good.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    webhook_configs: [{url: 'http://fake'}]\n")
     bad.write_text("route:\n  receiver: ghost\nreceivers:\n  - name: real\n")
     assert main(["diff", str(good), str(bad)]) == 1
 
@@ -274,6 +274,123 @@ def test_cli_file_not_found():
     with pytest.raises(SystemExit) as exc:
         main(["check", "/nonexistent/path.yml"])
     assert exc.value.code == 2
+
+
+# ── Integration field checks ─────────────────────────────────────────
+
+def test_webhook_no_url():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "webhook_configs": [{}]}],
+    }
+    assert "webhook-no-url" in codes(cfg)
+
+
+def test_webhook_with_url_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "webhook_configs": [{"url": "http://example.com"}]}],
+    }
+    assert "webhook-no-url" not in codes(cfg)
+
+
+def test_webhook_url_file_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "webhook_configs": [{"url_file": "/run/secrets/url"}]}],
+    }
+    assert "webhook-no-url" not in codes(cfg)
+
+
+def test_pagerduty_no_routing_key():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "pagerduty_configs": [{"severity": "critical"}]}],
+    }
+    assert "pagerduty-no-routing-key" in codes(cfg)
+
+
+def test_pagerduty_with_routing_key_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "pagerduty_configs": [{"routing_key": "abc123"}]}],
+    }
+    assert "pagerduty-no-routing-key" not in codes(cfg)
+
+
+def test_pagerduty_service_key_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "pagerduty_configs": [{"service_key": "abc123"}]}],
+    }
+    assert "pagerduty-no-routing-key" not in codes(cfg)
+
+
+def test_slack_no_api_url():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "slack_configs": [{"channel": "#alerts"}]}],
+    }
+    assert "slack-no-api-url" in codes(cfg)
+
+
+def test_slack_with_api_url_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "slack_configs": [{"api_url": "https://hooks.slack.com/xxx"}]}],
+    }
+    assert "slack-no-api-url" not in codes(cfg)
+
+
+def test_slack_global_api_url_ok():
+    cfg = {
+        "global": {"slack_api_url": "https://hooks.slack.com/global"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "slack_configs": [{"channel": "#alerts"}]}],
+    }
+    assert "slack-no-api-url" not in codes(cfg)
+
+
+# ── Severity overrides ────────────────────────────────────────────────
+
+def test_lint_severity_override():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    findings = lint(cfg, severity={"unused-receiver": "error"})
+    f = next(f for f in findings if f.code == "unused-receiver")
+    assert f.level == "error"
+
+
+def test_lint_severity_override_downgrade():
+    cfg = {
+        "route": {"receiver": "ghost"},
+        "receivers": [{"name": "real"}],
+    }
+    findings = lint(cfg, severity={"undefined-receiver": "warn"})
+    f = next(f for f in findings if f.code == "undefined-receiver")
+    assert f.level == "warn"
+
+
+def test_lint_severity_invalid_value_ignored():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    findings = lint(cfg, severity={"unused-receiver": "critical"})  # invalid level
+    f = next(f for f in findings if f.code == "unused-receiver")
+    assert f.level == "info"  # unchanged
+
+
+def test_cli_config_severity_override(tmp_path, monkeypatch):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n  - name: b\n")
+    rc = tmp_path / ".amlint.yml"
+    rc.write_text("severity:\n  unused-receiver: error\n")
+    monkeypatch.chdir(tmp_path)
+    # unused-receiver upgraded to error → exit 1
+    assert main(["check", str(cfg)]) == 1
 
 
 def test_lint_ignore_single():
@@ -306,7 +423,7 @@ def test_cli_ignore_flag(tmp_path):
 
 def test_cli_ignore_comma_separated(tmp_path):
     cfg = tmp_path / "am.yml"
-    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    webhook_configs: [{url: 'http://fake'}]\n"
                    "inhibit_rules:\n  - source_match: {severity: critical}\n"
                    "    target_match: {severity: warning}\n")
     # inhibit-no-equal would trigger --strict failure; ignore it
@@ -315,7 +432,7 @@ def test_cli_ignore_comma_separated(tmp_path):
 
 def test_cli_config_file_ignore(tmp_path, monkeypatch):
     cfg = tmp_path / "am.yml"
-    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    webhook_configs: [{url: 'http://fake'}]\n"
                    "inhibit_rules:\n  - source_match: {severity: critical}\n"
                    "    target_match: {severity: warning}\n")
     rc = tmp_path / ".amlint.yml"
@@ -327,7 +444,7 @@ def test_cli_config_file_ignore(tmp_path, monkeypatch):
 
 def test_cli_config_file_strict(tmp_path, monkeypatch):
     cfg = tmp_path / "am.yml"
-    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    slack_configs: [{}]\n"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n    webhook_configs: [{url: 'http://fake'}]\n"
                    "inhibit_rules:\n  - source_match: {severity: critical}\n"
                    "    target_match: {severity: warning}\n")
     rc = tmp_path / ".amlint.yml"

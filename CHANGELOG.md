@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.1.5] - 2026-06-23
+
+### Added
+- 3 new checks for missing required integration fields:
+  - `webhook-no-url` (error) — webhook_configs without `url` or `url_file`
+  - `pagerduty-no-routing-key` (error) — pagerduty_configs without `routing_key`/`service_key`
+  - `slack-no-api-url` (error) — slack_configs without `api_url` and no `global.slack_api_url`
+- `.amlint.yml` `severity:` map — override the level of any check per-project:
+  ```yaml
+  severity:
+    empty-receiver: info   # downgrade
+    unused-receiver: error # upgrade
+  ```
+
 ## [0.1.4] - 2026-06-23
 
 ### Added

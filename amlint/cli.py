@@ -104,12 +104,13 @@ def _cmd_check(args):
     proj = load_project_config()
     ignore = _build_ignore(args.ignore, proj.get("ignore"))
     strict = args.strict or proj.get("strict", False)
+    severity = proj.get("severity") or {}
 
     multi = len(args.files) > 1
     all_findings = []
     for path in args.files:
         cfg = load(path)
-        all_findings.append((path, lint(cfg, ignore=ignore)))
+        all_findings.append((path, lint(cfg, ignore=ignore, severity=severity)))
 
     if args.format == "json":
         print(json.dumps(
@@ -156,8 +157,9 @@ def _cmd_init() -> int:
 def _cmd_diff(args):
     proj = load_project_config()
     ignore = _build_ignore(args.ignore, proj.get("ignore"))
-    old_findings = lint(load(args.old), ignore=ignore)
-    new_findings = lint(load(args.new), ignore=ignore)
+    severity = proj.get("severity") or {}
+    old_findings = lint(load(args.old), ignore=ignore, severity=severity)
+    new_findings = lint(load(args.new), ignore=ignore, severity=severity)
 
     def key(f):
         return (f.code, f.where)

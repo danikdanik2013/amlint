@@ -402,6 +402,56 @@ def check_email_smarthost(cfg: dict) -> List[Finding]:
     return out
 
 
+# CHECK 16: webhook_configs without url or url_file
+def check_webhook_no_url(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    for r in cfg.get("receivers", []) or []:
+        for i, wh in enumerate(r.get("webhook_configs", []) or []):
+            if not wh.get("url") and not wh.get("url_file"):
+                out.append(Finding(
+                    ERROR, "webhook-no-url",
+                    f"webhook_configs[{i}] in receiver '{r.get('name')}' has no 'url' or 'url_file'. "
+                    f"Alerts sent here will fail to deliver.",
+                    f"receivers[{r.get('name')}].webhook_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 17: pagerduty_configs without routing_key / service_key (or file variants)
+def check_pagerduty_no_routing_key(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    for r in cfg.get("receivers", []) or []:
+        for i, pd in enumerate(r.get("pagerduty_configs", []) or []):
+            has_key = any(pd.get(k) for k in (
+                "routing_key", "routing_key_file", "service_key", "service_key_file"
+            ))
+            if not has_key:
+                out.append(Finding(
+                    ERROR, "pagerduty-no-routing-key",
+                    f"pagerduty_configs[{i}] in receiver '{r.get('name')}' has no 'routing_key' or "
+                    f"'routing_key_file'. PagerDuty alerts cannot be sent.",
+                    f"receivers[{r.get('name')}].pagerduty_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 18: slack_configs without api_url (and no global.slack_api_url)
+def check_slack_no_api_url(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    global_url = (cfg.get("global") or {}).get("slack_api_url")
+    for r in cfg.get("receivers", []) or []:
+        for i, sl in enumerate(r.get("slack_configs", []) or []):
+            if not sl.get("api_url") and not sl.get("api_url_file") and not global_url:
+                out.append(Finding(
+                    ERROR, "slack-no-api-url",
+                    f"slack_configs[{i}] in receiver '{r.get('name')}' has no 'api_url' or "
+                    f"'api_url_file', and global.slack_api_url is not set. "
+                    f"Slack notifications cannot be sent.",
+                    f"receivers[{r.get('name')}].slack_configs[{i}]",
+                ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -418,13 +468,22 @@ ALL_CHECKS = [
     check_group_wait,
     check_deep_nesting,
     check_email_smarthost,
+    check_webhook_no_url,
+    check_pagerduty_no_routing_key,
+    check_slack_no_api_url,
 ]
 
+_VALID_LEVELS = {ERROR, WARN, INFO}
 
-def lint(cfg: dict, ignore=None) -> List[Finding]:
+
+def lint(cfg: dict, ignore=None, severity=None) -> List[Finding]:
     findings: List[Finding] = []
     for check in ALL_CHECKS:
         findings.extend(check(cfg))
+    if severity:
+        for f in findings:
+            if f.code in severity and severity[f.code] in _VALID_LEVELS:
+                f.level = severity[f.code]
     order = {ERROR: 0, WARN: 1, INFO: 2}
     findings.sort(key=lambda f: order[f.level])
     if ignore:
