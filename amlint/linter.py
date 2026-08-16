@@ -567,6 +567,36 @@ def check_global_resolve_timeout(cfg: dict) -> List[Finding]:
     return out
 
 
+# CHECK 24: telegram_configs without bot_token / bot_token_file
+def check_telegram_no_bot_token(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    for r in cfg.get("receivers", []) or []:
+        for i, tg in enumerate(r.get("telegram_configs", []) or []):
+            if not tg.get("bot_token") and not tg.get("bot_token_file"):
+                out.append(Finding(
+                    ERROR, "telegram-no-bot-token",
+                    f"telegram_configs[{i}] in receiver '{r.get('name')}' has no 'bot_token' or "
+                    f"'bot_token_file'. Telegram messages cannot be sent.",
+                    f"receivers[{r.get('name')}].telegram_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 25: discord_configs without webhook_url / webhook_url_file
+def check_discord_no_webhook_url(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    for r in cfg.get("receivers", []) or []:
+        for i, dc in enumerate(r.get("discord_configs", []) or []):
+            if not dc.get("webhook_url") and not dc.get("webhook_url_file"):
+                out.append(Finding(
+                    ERROR, "discord-no-webhook-url",
+                    f"discord_configs[{i}] in receiver '{r.get('name')}' has no 'webhook_url' or "
+                    f"'webhook_url_file'. Discord notifications cannot be sent.",
+                    f"receivers[{r.get('name')}].discord_configs[{i}]",
+                ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -590,6 +620,8 @@ ALL_CHECKS = [
     check_msteams_no_webhook_url,
     check_route_match_collision,
     check_global_resolve_timeout,
+    check_telegram_no_bot_token,
+    check_discord_no_webhook_url,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}

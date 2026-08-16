@@ -479,6 +479,46 @@ def test_slack_global_api_url_ok():
     assert "slack-no-api-url" not in codes(cfg)
 
 
+def test_telegram_no_bot_token():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "telegram_configs": [{"chat_id": -100123}]}],
+    }
+    assert "telegram-no-bot-token" in codes(cfg)
+
+
+def test_telegram_with_bot_token_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "telegram_configs": [{"bot_token": "123:ABC", "chat_id": -100123}]}],
+    }
+    assert "telegram-no-bot-token" not in codes(cfg)
+
+
+def test_telegram_with_bot_token_file_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "telegram_configs": [{"bot_token_file": "/etc/secrets/bot_token"}]}],
+    }
+    assert "telegram-no-bot-token" not in codes(cfg)
+
+
+def test_discord_no_webhook_url():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "discord_configs": [{"title": "Alert"}]}],
+    }
+    assert "discord-no-webhook-url" in codes(cfg)
+
+
+def test_discord_with_webhook_url_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "discord_configs": [{"webhook_url": "https://discord.com/api/webhooks/..."}]}],
+    }
+    assert "discord-no-webhook-url" not in codes(cfg)
+
+
 # ── Severity overrides ────────────────────────────────────────────────
 
 def test_explain_known_code(capsys):

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.11] - 2026-08-16
+
+### Added
+- `telegram-no-bot-token` (error) — `telegram_configs` without `bot_token`/`bot_token_file`
+- `discord-no-webhook-url` (error) — `discord_configs` without `webhook_url`/`webhook_url_file`
+- 2 new receiver-integration checks bring the total to 25 → 27
+
 ## [0.1.10] - 2026-06-23
 
 ### Added

@@ -552,4 +552,44 @@ receivers:
       - webhook_url: 'https://outlook.office.com/webhook/...'
         title: 'Alert'""",
     },
+
+    "telegram-no-bot-token": {
+        "level": "error",
+        "summary": "A telegram_configs entry has no bot_token or bot_token_file.",
+        "why": (
+            "Telegram requires a bot token to authenticate with the Bot API."
+            " Without it, messages fail to send."
+        ),
+        "bad": """\
+receivers:
+  - name: team
+    telegram_configs:
+      - chat_id: -1001234567890   # missing bot_token!""",
+        "good": """\
+receivers:
+  - name: team
+    telegram_configs:
+      - bot_token: '123456:ABC-DEF...'
+        chat_id: -1001234567890""",
+    },
+
+    "discord-no-webhook-url": {
+        "level": "error",
+        "summary": "A discord_configs entry has no webhook_url or webhook_url_file.",
+        "why": (
+            "Discord requires an incoming webhook URL to post messages to a channel."
+            " Without it, notifications fail."
+        ),
+        "bad": """\
+receivers:
+  - name: team
+    discord_configs:
+      - title: 'Alert'   # missing webhook_url!""",
+        "good": """\
+receivers:
+  - name: team
+    discord_configs:
+      - webhook_url: 'https://discord.com/api/webhooks/...'
+        title: 'Alert'""",
+    },
 }

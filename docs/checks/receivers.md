@@ -247,6 +247,56 @@ An `msteams_configs` entry has no `webhook_url` or `webhook_url_file`. MS Teams 
 
 ---
 
+## telegram-no-bot-token
+
+**Level:** error
+
+A `telegram_configs` entry has no `bot_token` or `bot_token_file`. Telegram requires a bot token to authenticate with the Bot API.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        telegram_configs:
+          - chat_id: -1001234567890   # missing bot_token!
+    ```
+
+=== "Fixed"
+    ```yaml
+    receivers:
+      - name: team
+        telegram_configs:
+          - bot_token: '123456:ABC-DEF...'
+            chat_id: -1001234567890
+    ```
+
+---
+
+## discord-no-webhook-url
+
+**Level:** error
+
+A `discord_configs` entry has no `webhook_url` or `webhook_url_file`. Discord requires an incoming webhook URL to post messages to a channel.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        discord_configs:
+          - title: 'Alert'   # missing webhook_url!
+    ```
+
+=== "Fixed"
+    ```yaml
+    receivers:
+      - name: team
+        discord_configs:
+          - webhook_url: 'https://discord.com/api/webhooks/...'
+            title: 'Alert'
+    ```
+
+---
+
 ## template-file-missing
 
 **Level:** error (warn for globs)

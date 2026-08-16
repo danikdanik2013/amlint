@@ -1,6 +1,6 @@
 # Checks overview
 
-amlint runs **25 checks** grouped into four categories.
+amlint runs **27 checks** grouped into four categories.
 
 | code | level | category |
 |------|-------|----------|
@@ -20,6 +20,8 @@ amlint runs **25 checks** grouped into four categories.
 | [`slack-no-api-url`](receivers.md#slack-no-api-url) | error | Receivers |
 | [`opsgenie-no-api-key`](receivers.md#opsgenie-no-api-key) | error | Receivers |
 | [`msteams-no-webhook-url`](receivers.md#msteams-no-webhook-url) | error | Receivers |
+| [`telegram-no-bot-token`](receivers.md#telegram-no-bot-token) | error | Receivers |
+| [`discord-no-webhook-url`](receivers.md#discord-no-webhook-url) | error | Receivers |
 | [`template-file-missing`](receivers.md#template-file-missing) | error/warn | Receivers |
 | [`unused-receiver`](receivers.md#unused-receiver) | info | Receivers |
 | [`inhibit-no-equal`](inhibition.md#inhibit-no-equal) | warn | Inhibition |
