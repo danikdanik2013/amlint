@@ -2,9 +2,12 @@
 
 **Semantic linter for Prometheus Alertmanager configs.**
 
-`amtool check-config` validates syntax. **amlint validates semantics** — will alerts actually reach a receiver, does the inhibition rule do anything, are there unreachable routing branches?
-
-These are the bugs that burn teams on-call: config is valid, CI passes, alerts silently vanish.
+Alertmanager's own `amtool check-config` already validates most schema-level mistakes and
+refuses to start over them. **amlint covers that same ground in one dependency-free CLI
+with JSON/SARIF/diff/tree output, plus checks that amtool doesn't do** — configs that load
+fine, that Alertmanager runs without complaint, and that still silently don't do what you
+meant: unreachable routes behind a catch-all, timing that contradicts itself, inhibition
+rules that silence too broadly.
 
 ## Quick example
 
@@ -32,13 +35,21 @@ Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure t
 | | amtool | amlint |
 |---|---|---|
 | Syntax errors | ✅ | ✅ |
-| Undefined receiver | ❌ | ✅ |
-| Unreachable routes | ❌ | ✅ |
-| Bad inhibition rules | ❌ | ✅ |
-| Invalid regex | ❌ | ✅ |
-| Timing misconfig | ❌ | ✅ |
+| Undefined receiver | ✅ | ✅ |
+| Missing integration fields (webhook url, PagerDuty key, etc.) | ✅ | ✅ |
+| Bad regex in matchers | ✅ | ✅ |
+| Unreachable routes (catch-all swallows siblings) | ❌ | ✅ |
+| Route matcher collisions | ❌ | ✅ |
+| Inhibition rules that silence too broadly, or never fire | ❌ | ✅ |
+| Timing misconfig (`group_wait`/`group_interval`/`repeat_interval`) | ❌ | ✅ |
+| Unused or empty receivers | ❌ | ✅ |
 
-## 30 checks, zero false positives
+amtool already covers the first four rows — amlint re-implements those so you get one
+tool with unified JSON/SARIF/diff/tree output instead of needing the Go binary too, not
+because amtool misses them. Run `amlint list` to see exactly which of the 30 checks
+duplicate amtool and which don't; `amlint explain <code>` says so for any individual check.
 
-amlint catches mistakes that are **syntactically valid** but **semantically broken**.
-See [all checks](checks/index.md) for the full list.
+## 30 checks — 13 of them amtool can't do
+
+See [all checks](checks/index.md) for the full list, and which column each falls in.
+
