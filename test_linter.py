@@ -933,3 +933,208 @@ def test_tree_ignore_flag(tmp_path, capsys):
     assert main(["tree", str(cfg_path), "--ignore", "groupby-ellipsis"]) == 0
     out = capsys.readouterr().out
     assert "groupby-ellipsis" not in out
+
+
+# ── simulate_route (unit) ────────────────────────────────────────────
+
+def test_simulate_deepest_match_wins():
+    """A matched parent with a matched child does NOT also fire — only the
+    deepest match does. Verified against amtool config routes test."""
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{
+            "matchers": ['team="infra"'],
+            "receiver": "infra-slack",
+            "continue": True,
+            "routes": [{"match": {"severity": "critical"}, "receiver": "infra-pager"}],
+        }],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "critical"})]
+    assert result == ["infra-pager"]
+
+
+def test_simulate_parent_fires_when_no_child_matches():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{
+            "match": {"team": "infra"}, "receiver": "infra-slack",
+            "routes": [{"match": {"severity": "critical"}, "receiver": "infra-pager"}],
+        }],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "warning"})]
+    assert result == ["infra-slack"]
+
+
+def test_simulate_continue_fans_out_to_siblings():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [
+            {"match": {"team": "infra"}, "receiver": "infra-slack", "continue": True},
+            {"match": {"severity": "critical"}, "receiver": "pager"},
+        ],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "critical"})]
+    assert result == ["infra-slack", "pager"]
+
+
+def test_simulate_without_continue_stops_at_first_match():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [
+            {"match": {"team": "infra"}, "receiver": "infra-slack"},
+            {"match": {"severity": "critical"}, "receiver": "pager"},
+        ],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "critical"})]
+    assert result == ["infra-slack"]
+
+
+def test_simulate_receiver_inheritance():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{
+            "match": {"team": "infra"}, "receiver": "infra-slack",
+            "routes": [{"match": {"severity": "critical"}}],  # no receiver — inherits
+        }],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "critical"})]
+    assert result == ["infra-slack"]
+
+
+def test_simulate_match_re():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{"match_re": {"service": "^db-.*"}, "receiver": "db-team"}],
+    }
+    result = [r for r, _ in simulate_route(route, {"service": "db-payments"})]
+    assert result == ["db-team"]
+
+
+def test_simulate_new_style_matchers_operators():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{"matchers": ['env!="prod"'], "receiver": "non-prod"}],
+    }
+    assert [r for r, _ in simulate_route(route, {"env": "staging"})] == ["non-prod"]
+    assert [r for r, _ in simulate_route(route, {"env": "prod"})] == ["default"]
+
+
+def test_simulate_unmatched_falls_to_root():
+    from amlint.simulate import simulate_route
+    route = {"receiver": "default", "routes": [{"match": {"team": "infra"}, "receiver": "x"}]}
+    result = [r for r, _ in simulate_route(route, {"foo": "bar"})]
+    assert result == ["default"]
+
+
+# ── amlint test (CLI) ────────────────────────────────────────────────
+
+def _write_test_config(tmp_path):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"receiver": "default", "routes": [
+            {"match": {"team": "infra"}, "receiver": "infra-slack"},
+        ]},
+        "receivers": [{"name": "default"}, {"name": "infra-slack"}],
+    }))
+    return cfg_path
+
+
+def test_cli_test_all_pass(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "infra routes to slack", "labels": {"team": "infra"}, "receiver": "infra-slack"},
+        {"name": "unmatched routes to default", "labels": {"foo": "bar"}, "receiver": "default"},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 0
+    out = capsys.readouterr().out
+    assert "2 passed" in out
+
+
+def test_cli_test_failure_exits_nonzero(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "wrong expectation", "labels": {"team": "infra"}, "receiver": "nonexistent"},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 1
+    out = capsys.readouterr().out
+    assert "expected:" in out
+    assert "nonexistent" in out
+    assert "infra-slack" in out
+
+
+def test_cli_test_drop_assertion(tmp_path, capsys):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"routes": [{"match": {"a": "b"}, "receiver": "x"}]},
+        "receivers": [{"name": "x"}],
+    }))
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "no root receiver, no match -> drop", "labels": {"foo": "bar"}, "drop": True},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 0
+
+
+def test_cli_test_malformed_case(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "bad case", "labels": {"a": "b"}},  # missing receiver/receivers/drop
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 1
+    out = capsys.readouterr().out
+    assert "must set exactly one of" in out
+
+
+def test_cli_test_no_root_route(tmp_path):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(yaml.dump({"receivers": [{"name": "x"}]}))
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": []}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 2
+
+
+def test_cli_test_invalid_tests_file(tmp_path):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"not_tests": []}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 2
+
+
+def test_cli_test_json_format(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "t1", "labels": {"team": "infra"}, "receiver": "infra-slack"},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path), "--format", "json"]) == 0
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    assert data[0]["passed"] is True
+    assert data[0]["name"] == "t1"
+
+
+def test_cli_test_multi_receiver_assertion(tmp_path):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"receiver": "default", "routes": [
+            {"match": {"team": "infra"}, "receiver": "infra-slack", "continue": True},
+            {"match": {"severity": "critical"}, "receiver": "pager"},
+        ]},
+        "receivers": [{"name": "default"}, {"name": "infra-slack"}, {"name": "pager"}],
+    }))
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "fan-out", "labels": {"team": "infra", "severity": "critical"},
+         "receivers": ["infra-slack", "pager"]},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 0

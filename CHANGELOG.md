@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.0] - 2026-08-16
+
+### Added
+- `amlint test <config> <tests-file>` — routing regression tests. Write a YAML file
+  with a `tests:` list asserting label-set → expected receiver(s), run it as a
+  suite in CI. Replicates Alertmanager's own dispatch algorithm (deepest-match-wins,
+  `continue: true` fan-out in definition order, receiver inheritance) in pure Python
+  — no Go binary or live Alertmanager needed.
+  - Verified against real `amtool config routes test` output on 7 scenarios
+    (deepest-match, no-child-match, continue fan-out with both orderings,
+    receiver inheritance) before shipping — all matched exactly.
+  - `amtool config routes test` already does single-alert interactive testing;
+    this is the missing batch/CI piece, not a wholly new idea — see docs/index.md
+    for the honest comparison.
+  - Each test case asserts one of `receiver:` (single), `receivers:` (ordered list,
+    for `continue` fan-out), or `drop: true` (no receiver reached).
+  - `--format json` for machine-readable output.
+- New module `amlint/simulate.py` with the reusable routing-simulation core.
+- 12 new tests (7 unit tests on `simulate_route`, 8 CLI-level) — 119 total.
+- docs/usage.md: new `## test` section with a full example.
+
 ## [0.2.1] - 2026-08-16
 
 ### Changed
