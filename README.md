@@ -52,6 +52,7 @@ amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
 amlint diff old.yml new.yml                 # show what changed
+amlint tree alertmanager.yml                # visualize the route tree, issues inline
 amlint init > alertmanager.yml              # generate minimal valid config
 amlint list                                 # all check codes with level + description
 amlint explain undefined-receiver           # detailed explanation + examples

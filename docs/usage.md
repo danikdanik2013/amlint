@@ -110,6 +110,36 @@ Generate a minimal valid `alertmanager.yml` to start from:
 amlint init > alertmanager.yml
 ```
 
+## tree
+
+Print the route tree with matchers, receivers, and any routing-related issues inline — a fast way to see how alerts flow without opening the YAML:
+
+```bash
+amlint tree alertmanager.yml
+cat alertmanager.yml | amlint tree -   # stdin
+```
+
+```
+⚠  (root)  →  default-team  (groupby-ellipsis)
+├── ⚠  (catch-all)  →  catch-all-team  (unreachable-route)
+├── ✖  {severity=critical}  →  pager-team  (undefined-receiver)
+└── ✖  {service=~auth([}  →  default-team  (bad-regex)
+
+  4 routing issues flagged above — run 'amlint check alertmanager.yml' for full details.
+  6 more issues outside routing (receivers, global, timing) — run 'amlint check alertmanager.yml' for full details.
+```
+
+Each node shows its matchers, the receiver it routes to, `[continue]` when set, and — if any routing check
+(`undefined-receiver`, `unreachable-route`, `route-match-collision`, `bad-regex`, `groupby-ellipsis`, and similar)
+fired on that node — an icon and the offending code(s). Findings outside the route tree (receiver config, global
+settings, timing) are counted separately since they don't map to a specific node.
+
+**Options:**
+
+| flag | description |
+|------|-------------|
+| `--ignore CODE` | Skip these codes when annotating the tree (comma-separated or repeat) |
+
 ## list
 
 Print all check codes with their level and a one-line description:
