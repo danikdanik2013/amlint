@@ -597,6 +597,39 @@ def check_discord_no_webhook_url(cfg: dict) -> List[Finding]:
     return out
 
 
+# CHECK 26: victorops_configs without api_key (no global fallback either)
+def check_victorops_no_api_key(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    g = cfg.get("global") or {}
+    global_key = g.get("victorops_api_key") or g.get("victorops_api_key_file")
+    for r in cfg.get("receivers", []) or []:
+        for i, vo in enumerate(r.get("victorops_configs", []) or []):
+            if not vo.get("api_key") and not global_key:
+                out.append(Finding(
+                    ERROR, "victorops-no-api-key",
+                    f"victorops_configs[{i}] in receiver '{r.get('name')}' has no 'api_key', and "
+                    f"global.victorops_api_key is not set. VictorOps alerts cannot be sent.",
+                    f"receivers[{r.get('name')}].victorops_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 27: wechat_configs without corp_id (no global fallback either)
+def check_wechat_no_corp_id(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    global_corp_id = (cfg.get("global") or {}).get("wechat_api_corp_id")
+    for r in cfg.get("receivers", []) or []:
+        for i, wc in enumerate(r.get("wechat_configs", []) or []):
+            if not wc.get("corp_id") and not global_corp_id:
+                out.append(Finding(
+                    ERROR, "wechat-no-corp-id",
+                    f"wechat_configs[{i}] in receiver '{r.get('name')}' has no 'corp_id', and "
+                    f"global.wechat_api_corp_id is not set. WeChat messages cannot be sent.",
+                    f"receivers[{r.get('name')}].wechat_configs[{i}]",
+                ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -622,6 +655,8 @@ ALL_CHECKS = [
     check_global_resolve_timeout,
     check_telegram_no_bot_token,
     check_discord_no_webhook_url,
+    check_victorops_no_api_key,
+    check_wechat_no_corp_id,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}

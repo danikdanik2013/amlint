@@ -592,4 +592,60 @@ receivers:
       - webhook_url: 'https://discord.com/api/webhooks/...'
         title: 'Alert'""",
     },
+
+    "victorops-no-api-key": {
+        "level": "error",
+        "summary": (
+            "A victorops_configs entry has no api_key"
+            " and global.victorops_api_key is not set."
+        ),
+        "why": (
+            "VictorOps requires an API key to accept alerts."
+            " Without it, notifications cannot be sent."
+        ),
+        "bad": """\
+receivers:
+  - name: team
+    victorops_configs:
+      - routing_key: 'team-routing-key'   # missing api_key!""",
+        "good": """\
+# Option 1 — per receiver:
+receivers:
+  - name: team
+    victorops_configs:
+      - api_key: 'your-victorops-api-key'
+        routing_key: 'team-routing-key'
+
+# Option 2 — global default:
+global:
+  victorops_api_key: 'your-victorops-api-key'""",
+    },
+
+    "wechat-no-corp-id": {
+        "level": "error",
+        "summary": (
+            "A wechat_configs entry has no corp_id"
+            " and global.wechat_api_corp_id is not set."
+        ),
+        "why": (
+            "WeChat Work requires a corp_id to identify the enterprise account."
+            " Without it, messages cannot be sent."
+        ),
+        "bad": """\
+receivers:
+  - name: team
+    wechat_configs:
+      - agent_id: '1000002'   # missing corp_id!""",
+        "good": """\
+# Option 1 — per receiver:
+receivers:
+  - name: team
+    wechat_configs:
+      - corp_id: 'your-corp-id'
+        agent_id: '1000002'
+
+# Option 2 — global default:
+global:
+  wechat_api_corp_id: 'your-corp-id'""",
+    },
 }

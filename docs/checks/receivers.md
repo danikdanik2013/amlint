@@ -297,6 +297,66 @@ A `discord_configs` entry has no `webhook_url` or `webhook_url_file`. Discord re
 
 ---
 
+## victorops-no-api-key
+
+**Level:** error
+
+A `victorops_configs` entry has no `api_key`, and `global.victorops_api_key` is not set. VictorOps requires an API key to accept alerts.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        victorops_configs:
+          - routing_key: 'team-routing-key'   # missing api_key!
+    ```
+
+=== "Fixed"
+    ```yaml
+    # Option 1 — per receiver:
+    receivers:
+      - name: team
+        victorops_configs:
+          - api_key: 'your-victorops-api-key'
+            routing_key: 'team-routing-key'
+
+    # Option 2 — global default:
+    global:
+      victorops_api_key: 'your-victorops-api-key'
+    ```
+
+---
+
+## wechat-no-corp-id
+
+**Level:** error
+
+A `wechat_configs` entry has no `corp_id`, and `global.wechat_api_corp_id` is not set. WeChat Work requires a corp_id to identify the enterprise account.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        wechat_configs:
+          - agent_id: '1000002'   # missing corp_id!
+    ```
+
+=== "Fixed"
+    ```yaml
+    # Option 1 — per receiver:
+    receivers:
+      - name: team
+        wechat_configs:
+          - corp_id: 'your-corp-id'
+            agent_id: '1000002'
+
+    # Option 2 — global default:
+    global:
+      wechat_api_corp_id: 'your-corp-id'
+    ```
+
+---
+
 ## template-file-missing
 
 **Level:** error (warn for globs)

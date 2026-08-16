@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.12] - 2026-08-16
+
+### Added
+- `victorops-no-api-key` (error) — `victorops_configs` without `api_key` and no global fallback
+- `wechat-no-corp-id` (error) — `wechat_configs` without `corp_id` and no global fallback
+- Completes required-field coverage for all `_INTEGRATION_KEYS` integrations (29 checks total)
+
 ## [0.1.11] - 2026-08-16
 
 ### Added

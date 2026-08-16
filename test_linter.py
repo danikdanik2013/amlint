@@ -519,6 +519,56 @@ def test_discord_with_webhook_url_ok():
     assert "discord-no-webhook-url" not in codes(cfg)
 
 
+def test_victorops_no_api_key():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "victorops_configs": [{"routing_key": "team-key"}]}],
+    }
+    assert "victorops-no-api-key" in codes(cfg)
+
+
+def test_victorops_with_api_key_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "victorops_configs": [{"api_key": "secret", "routing_key": "team-key"}]}],
+    }
+    assert "victorops-no-api-key" not in codes(cfg)
+
+
+def test_victorops_global_api_key_ok():
+    cfg = {
+        "global": {"victorops_api_key": "secret"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "victorops_configs": [{"routing_key": "team-key"}]}],
+    }
+    assert "victorops-no-api-key" not in codes(cfg)
+
+
+def test_wechat_no_corp_id():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "wechat_configs": [{"agent_id": "1000002"}]}],
+    }
+    assert "wechat-no-corp-id" in codes(cfg)
+
+
+def test_wechat_with_corp_id_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "wechat_configs": [{"corp_id": "abc123", "agent_id": "1000002"}]}],
+    }
+    assert "wechat-no-corp-id" not in codes(cfg)
+
+
+def test_wechat_global_corp_id_ok():
+    cfg = {
+        "global": {"wechat_api_corp_id": "abc123"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "wechat_configs": [{"agent_id": "1000002"}]}],
+    }
+    assert "wechat-no-corp-id" not in codes(cfg)
+
+
 # ── Severity overrides ────────────────────────────────────────────────
 
 def test_explain_known_code(capsys):
