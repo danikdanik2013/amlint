@@ -3,6 +3,9 @@
 ## [0.2.0] - 2026-08-16
 
 ### Added
+- `action.yml` — official GitHub Action wrapping the CLI: install + run + optional SARIF
+  upload to Code Scanning in one `uses:` step (`config-path`, `strict`, `ignore`, `only`,
+  `version`, `sarif` inputs); docs at `docs/github-action.md`
 - `amlint tree <file>` — new command, prints the route tree (matchers, receivers, `[continue]`)
   with routing-related findings (`undefined-receiver`, `unreachable-route`, `route-match-collision`,
   `bad-regex`, `groupby-ellipsis`, etc.) annotated inline on the node they apply to

@@ -104,6 +104,19 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
   run: amlint check alertmanager.yml --strict
 ```
 
+### As a GitHub Action
+
+```yaml
+- uses: actions/checkout@v7
+- uses: danikdanik2013/amlint@v0.2.0
+  with:
+    config-path: alertmanager.yml
+    strict: true
+```
+
+No `pip install` step needed. Supports `--ignore`/`--only` via inputs and optional SARIF upload
+for PR annotations — see the [GitHub Action docs](https://danikdanik2013.github.io/amlint/github-action/).
+
 ## Checks
 
 | code | level | what it catches |
@@ -119,6 +132,11 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `slack-no-api-url` | error | `slack_configs` without `api_url` and no global |
 | `opsgenie-no-api-key` | error | `opsgenie_configs` without `api_key` and no global |
 | `msteams-no-webhook-url` | error | `msteams_configs` without `webhook_url` |
+| `telegram-no-bot-token` | error | `telegram_configs` without `bot_token` |
+| `discord-no-webhook-url` | error | `discord_configs` without `webhook_url` |
+| `victorops-no-api-key` | error | `victorops_configs` without `api_key` and no global |
+| `wechat-no-corp-id` | error | `wechat_configs` without `corp_id` and no global |
+| `sns-no-target` | error | `sns_configs` missing `topic_arn`/`phone_number`/`target_arn` |
 | `template-file-missing` | error/warn | `templates:` references a file that doesn't exist |
 | `inhibit-no-equal` | warn | inhibition without `equal` silences too broadly |
 | `unreachable-route` | warn | catch-all hides subsequent sibling routes |
