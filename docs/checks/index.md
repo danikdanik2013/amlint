@@ -1,6 +1,6 @@
 # Checks overview
 
-amlint runs **29 checks** grouped into four categories.
+amlint runs **30 checks** grouped into four categories.
 
 | code | level | category |
 |------|-------|----------|
@@ -24,6 +24,7 @@ amlint runs **29 checks** grouped into four categories.
 | [`discord-no-webhook-url`](receivers.md#discord-no-webhook-url) | error | Receivers |
 | [`victorops-no-api-key`](receivers.md#victorops-no-api-key) | error | Receivers |
 | [`wechat-no-corp-id`](receivers.md#wechat-no-corp-id) | error | Receivers |
+| [`sns-no-target`](receivers.md#sns-no-target) | error | Receivers |
 | [`template-file-missing`](receivers.md#template-file-missing) | error/warn | Receivers |
 | [`unused-receiver`](receivers.md#unused-receiver) | info | Receivers |
 | [`inhibit-no-equal`](inhibition.md#inhibit-no-equal) | warn | Inhibition |

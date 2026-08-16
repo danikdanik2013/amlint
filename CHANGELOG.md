@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.13] - 2026-08-16
+
+### Added
+- `sns-no-target` (error) — `sns_configs` missing all of `topic_arn`/`phone_number`/`target_arn`
+  (exactly one destination is required; AWS rejects the publish call otherwise)
+- Completes required-field coverage for every integration key amlint tracks (30 checks total)
+
 ## [0.1.12] - 2026-08-16
 
 ### Added

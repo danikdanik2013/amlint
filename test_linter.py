@@ -569,6 +569,38 @@ def test_wechat_global_corp_id_ok():
     assert "wechat-no-corp-id" not in codes(cfg)
 
 
+def test_sns_no_target():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"subject": "Alert"}]}],
+    }
+    assert "sns-no-target" in codes(cfg)
+
+
+def test_sns_with_topic_arn_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"topic_arn": "arn:aws:sns:us-east-2:123:My-Topic"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
+def test_sns_with_phone_number_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"phone_number": "+17785522312"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
+def test_sns_with_target_arn_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"target_arn": "arn:aws:sns:us-west-2:123:endpoint/x"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
 # ── Severity overrides ────────────────────────────────────────────────
 
 def test_explain_known_code(capsys):
