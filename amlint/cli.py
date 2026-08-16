@@ -34,6 +34,7 @@ from rich.tree import Tree
 
 from .config import load_project_config
 from .linter import ERROR, INFO, WARN, lint
+from .simulate import simulate_route
 
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
@@ -293,6 +294,82 @@ def _cmd_tree(args) -> int:
     return 0
 
 
+def _cmd_test(args) -> int:
+    cfg = load(args.config)
+    route = cfg.get("route")
+    if not route:
+        err_console.print("[red]No root 'route' defined.[/red]")
+        return 2
+
+    tests_doc = load(args.tests)
+    cases = tests_doc.get("tests") if isinstance(tests_doc, dict) else None
+    if not isinstance(cases, list):
+        err_console.print(
+            f"[red]Invalid test file:[/red] {args.tests} must have a top-level "
+            f"'tests:' list."
+        )
+        return 2
+
+    results = []
+    for i, case in enumerate(cases):
+        name = case.get("name") or f"test #{i + 1}"
+        labels = case.get("labels") or {}
+        keys_set = sum(k in case for k in ("receiver", "receivers", "drop"))
+        if keys_set != 1:
+            results.append({
+                "name": name, "labels": labels, "passed": False,
+                "error": "test case must set exactly one of: receiver, receivers, drop",
+            })
+            continue
+
+        actual = [r for r, _ in simulate_route(route, labels)]
+
+        if case.get("drop"):
+            expected_desc = "(no receiver)"
+            passed = len(actual) == 0
+        elif "receiver" in case:
+            expected_desc = case["receiver"]
+            passed = actual == [case["receiver"]]
+        else:
+            expected_list = list(case["receivers"])
+            expected_desc = ", ".join(expected_list)
+            passed = actual == expected_list
+
+        results.append({
+            "name": name, "labels": labels, "passed": passed,
+            "expected": expected_desc,
+            "actual": ", ".join(actual) if actual else "(no receiver)",
+        })
+
+    if args.format == "json":
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+    else:
+        console.print()
+        for r in results:
+            if r["passed"]:
+                console.print(f"  [bold green]✓[/bold green]  {r['name']}")
+            else:
+                console.print(f"  [bold red]✗[/bold red]  {r['name']}")
+                if "error" in r:
+                    console.print(f"     [red]{r['error']}[/red]")
+                else:
+                    label_str = ", ".join(f"{k}={v}" for k, v in r["labels"].items())
+                    console.print(f"     expected: {r['expected']}")
+                    console.print(f"     actual:   {r['actual']}")
+                    if label_str:
+                        console.print(f"     labels:   {label_str}")
+                console.print()
+        passed_n = sum(1 for r in results if r["passed"])
+        failed_n = len(results) - passed_n
+        console.print(Rule(style="dim"))
+        if failed_n:
+            console.print(f"  [red]{failed_n} failed[/red]  ·  [green]{passed_n} passed[/green]\n")
+        else:
+            console.print(f"  [green]{passed_n} passed[/green]\n")
+
+    return 1 if any(not r["passed"] for r in results) else 0
+
+
 _INIT_TEMPLATE = """\
 global:
   resolve_timeout: 5m
@@ -501,6 +578,11 @@ def main(argv=None):
     pt.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes when annotating the tree")
 
+    ptst = sub.add_parser("test", help="run routing simulation tests against a config")
+    ptst.add_argument("config", help="path to alertmanager.yml")
+    ptst.add_argument("tests", help="path to a YAML file with a top-level 'tests:' list")
+    ptst.add_argument("--format", choices=["text", "json"], default="text")
+
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 
     sub.add_parser("list", help="list all check codes with level and description")
@@ -518,6 +600,8 @@ def main(argv=None):
         return _cmd_diff(args)
     if args.cmd == "tree":
         return _cmd_tree(args)
+    if args.cmd == "test":
+        return _cmd_test(args)
     if args.cmd == "init":
         return _cmd_init()
     if args.cmd == "list":

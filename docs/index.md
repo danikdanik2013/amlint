@@ -43,11 +43,17 @@ Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure t
 | Inhibition rules that silence too broadly, or never fire | ❌ | ✅ |
 | Timing misconfig (`group_wait`/`group_interval`/`repeat_interval`) | ❌ | ✅ |
 | Unused or empty receivers | ❌ | ✅ |
+| Batch routing regression tests (label-set → expected receiver, run from a file in CI) | single alert, interactive only | ✅ |
 
 amtool already covers the first four rows — amlint re-implements those so you get one
 tool with unified JSON/SARIF/diff/tree output instead of needing the Go binary too, not
 because amtool misses them. Run `amlint list` to see exactly which of the 30 checks
 duplicate amtool and which don't; `amlint explain <code>` says so for any individual check.
+
+On the last row: `amtool config routes test` already lets you test one alert's routing
+interactively — that part isn't new either. What it doesn't have is a way to run a whole
+suite of these as regression tests from a file, in CI, without a live Alertmanager. That's
+what `amlint test` adds.
 
 ## 30 checks — 13 of them amtool can't do
 
