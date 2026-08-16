@@ -30,6 +30,7 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
+from rich.tree import Tree
 
 from .config import load_project_config
 from .linter import ERROR, INFO, WARN, lint
@@ -209,6 +210,87 @@ def _cmd_check(args):
     has_err  = any(f.level == ERROR for _, fs in all_findings for f in fs)
     has_warn = any(f.level == WARN  for _, fs in all_findings for f in fs)
     return 1 if has_err or (strict and has_warn) else 0
+
+
+def _format_matchers(node: dict) -> list:
+    parts = []
+    for k, v in (node.get("match") or {}).items():
+        parts.append(f"{k}={v}")
+    for k, v in (node.get("match_re") or {}).items():
+        parts.append(f"{k}=~{v}")
+    for m in node.get("matchers") or []:
+        parts.append(str(m))
+    return parts
+
+
+def _cmd_tree(args) -> int:
+    proj = load_project_config()
+    ignore = _build_ignore(args.ignore, proj.get("ignore"))
+    severity = proj.get("severity") or {}
+
+    cfg = load(args.file)
+    route = cfg.get("route")
+    if not route:
+        err_console.print("[red]No root 'route' defined.[/red]")
+        return 2
+
+    basedir = os.path.dirname(os.path.abspath(args.file)) if args.file != "-" else None
+    findings = lint(cfg, ignore=ignore, severity=severity, basedir=basedir)
+    by_path: dict = {}
+    for f in findings:
+        by_path.setdefault(f.where, []).append(f)
+    level_order = {ERROR: 0, WARN: 1, INFO: 2}
+    shown: list = []
+
+    def label_for(node: dict, path: str) -> str:
+        parts = _format_matchers(node)
+        piece = "{" + ", ".join(parts) + "}" if parts else (
+            "(catch-all)" if path != "route" else "(root)"
+        )
+        rcv = node.get("receiver")
+        if rcv:
+            piece += f"  →  [bold]{rcv}[/bold]"
+        else:
+            piece += "  →  [dim italic](inherited)[/dim italic]"
+        if node.get("continue"):
+            piece += "  [dim]\\[continue][/dim]"
+
+        fs = by_path.get(path, [])
+        if fs:
+            shown.extend(fs)
+            worst = min(fs, key=lambda f: level_order[f.level])
+            codes = ", ".join(sorted({f.code for f in fs}))
+            style = STYLE[worst.level]
+            return f"[{style}]{ICON[worst.level]}[/{style}]  {piece}  [{style}]({codes})[/{style}]"
+        return f"   {piece}"
+
+    tree = Tree(label_for(route, "route"), guide_style="dim")
+
+    def add_children(node: dict, path: str, branch: Tree) -> None:
+        for i, child in enumerate(node.get("routes", []) or []):
+            cpath = f"{path}.routes[{i}]"
+            cbranch = branch.add(label_for(child, cpath))
+            add_children(child, cpath, cbranch)
+
+    add_children(route, "route", tree)
+
+    console.print()
+    console.print(tree)
+    console.print()
+    if shown:
+        noun = "issue" if len(shown) == 1 else "issues"
+        console.print(
+            f"  [dim]{len(shown)} routing {noun} flagged above — run "
+            f"'amlint check {args.file}' for full details.[/dim]\n"
+        )
+    other = sum(len(v) for p, v in by_path.items()) - len(shown)
+    if other:
+        noun = "issue" if other == 1 else "issues"
+        console.print(
+            f"  [dim]{other} more {noun} outside routing (receivers, global, timing) — "
+            f"run 'amlint check {args.file}' for full details.[/dim]\n"
+        )
+    return 0
 
 
 _INIT_TEMPLATE = """\
@@ -391,6 +473,11 @@ def main(argv=None):
     pd.add_argument("--only", action="append", metavar="CODE",
                     help="consider only findings with these codes")
 
+    pt = sub.add_parser("tree", help="print route tree with matchers, receivers, and issues")
+    pt.add_argument("file", help="path to alertmanager.yml, or - for stdin")
+    pt.add_argument("--ignore", action="append", metavar="CODE",
+                    help="skip findings with these codes when annotating the tree")
+
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 
     sub.add_parser("list", help="list all check codes with level and description")
@@ -406,6 +493,8 @@ def main(argv=None):
         return _cmd_check(args)
     if args.cmd == "diff":
         return _cmd_diff(args)
+    if args.cmd == "tree":
+        return _cmd_tree(args)
     if args.cmd == "init":
         return _cmd_init()
     if args.cmd == "list":

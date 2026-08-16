@@ -357,6 +357,35 @@ A `wechat_configs` entry has no `corp_id`, and `global.wechat_api_corp_id` is no
 
 ---
 
+## sns-no-target
+
+**Level:** error
+
+An `sns_configs` entry has none of `topic_arn`, `phone_number`, or `target_arn` set. SNS requires exactly one destination — a topic ARN, a phone number for SMS, or a mobile platform endpoint ARN.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        sns_configs:
+          - sigv4:
+              region: us-east-2
+            # missing topic_arn / phone_number / target_arn!
+    ```
+
+=== "Fixed"
+    ```yaml
+    receivers:
+      - name: team
+        sns_configs:
+          - topic_arn: 'arn:aws:sns:us-east-2:123456789012:My-Topic'
+            sigv4:
+              region: us-east-2
+    # or use phone_number (SMS) or target_arn (mobile endpoint) instead
+    ```
+
+---
+
 ## template-file-missing
 
 **Level:** error (warn for globs)

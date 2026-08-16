@@ -630,6 +630,26 @@ def check_wechat_no_corp_id(cfg: dict) -> List[Finding]:
     return out
 
 
+# CHECK 28: sns_configs missing all of topic_arn / phone_number / target_arn
+def check_sns_no_target(cfg: dict) -> List[Finding]:
+    """
+    SNS requires exactly one destination: a topic ARN, a phone number (SMS),
+    or a mobile platform endpoint ARN. None set means AWS rejects the publish call.
+    """
+    out: List[Finding] = []
+    for r in cfg.get("receivers", []) or []:
+        for i, sns in enumerate(r.get("sns_configs", []) or []):
+            if not any(sns.get(k) for k in ("topic_arn", "phone_number", "target_arn")):
+                out.append(Finding(
+                    ERROR, "sns-no-target",
+                    f"sns_configs[{i}] in receiver '{r.get('name')}' has none of 'topic_arn', "
+                    f"'phone_number', or 'target_arn' set. Exactly one is required — "
+                    f"AWS will reject the publish call.",
+                    f"receivers[{r.get('name')}].sns_configs[{i}]",
+                ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -657,6 +677,7 @@ ALL_CHECKS = [
     check_discord_no_webhook_url,
     check_victorops_no_api_key,
     check_wechat_no_corp_id,
+    check_sns_no_target,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}

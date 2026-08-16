@@ -569,6 +569,38 @@ def test_wechat_global_corp_id_ok():
     assert "wechat-no-corp-id" not in codes(cfg)
 
 
+def test_sns_no_target():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"subject": "Alert"}]}],
+    }
+    assert "sns-no-target" in codes(cfg)
+
+
+def test_sns_with_topic_arn_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"topic_arn": "arn:aws:sns:us-east-2:123:My-Topic"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
+def test_sns_with_phone_number_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"phone_number": "+17785522312"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
+def test_sns_with_target_arn_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"target_arn": "arn:aws:sns:us-west-2:123:endpoint/x"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
 # ── Severity overrides ────────────────────────────────────────────────
 
 def test_explain_known_code(capsys):
@@ -813,3 +845,62 @@ def test_broken_yml_integration():
         "unused-receiver",
         "empty-receiver",
     }
+
+
+# ── tree command ──────────────────────────────────────────────────────
+
+def test_tree_clean_config(tmp_path, capsys):
+    cfg_path = tmp_path / "clean.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"receiver": "default", "routes": [
+            {"match": {"team": "infra"}, "receiver": "default"},
+        ]},
+        "receivers": [{"name": "default", "webhook_configs": [{"url": "http://x"}]}],
+        "global": {"resolve_timeout": "5m"},
+    }))
+    assert main(["tree", str(cfg_path)]) == 0
+    out = capsys.readouterr().out
+    assert "default" in out
+    assert "team=infra" in out
+
+
+def test_tree_flags_route_issues(capsys):
+    broken = os.path.join(os.path.dirname(__file__), "broken.yml")
+    assert main(["tree", broken]) == 0
+    out = capsys.readouterr().out
+    assert "undefined-receiver" in out
+    assert "bad-regex" in out
+    assert "unreachable-route" in out
+    assert "routing issues flagged above" in out
+    assert "more issues outside routing" in out
+
+
+def test_tree_no_root_route(tmp_path, capsys):
+    cfg_path = tmp_path / "noroute.yml"
+    cfg_path.write_text(yaml.dump({"receivers": [{"name": "a"}]}))
+    assert main(["tree", str(cfg_path)]) == 2
+    err = capsys.readouterr().err
+    assert "No root 'route' defined" in err
+
+
+def test_tree_stdin(capsys, monkeypatch):
+    import io
+    cfg = {"route": {"receiver": "default"}, "receivers": [{"name": "default"}]}
+    monkeypatch.setattr("sys.stdin", io.StringIO(yaml.dump(cfg)))
+    assert main(["tree", "-"]) == 0
+    out = capsys.readouterr().out
+    assert "default" in out
+
+
+def test_tree_ignore_flag(tmp_path, capsys):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"receiver": "default", "group_by": ["alertname", "..."], "routes": [
+            {"match": {"a": "b"}, "receiver": "default"},
+        ]},
+        "receivers": [{"name": "default", "webhook_configs": [{"url": "http://x"}]}],
+        "global": {"resolve_timeout": "5m"},
+    }))
+    assert main(["tree", str(cfg_path), "--ignore", "groupby-ellipsis"]) == 0
+    out = capsys.readouterr().out
+    assert "groupby-ellipsis" not in out
