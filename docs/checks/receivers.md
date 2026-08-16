@@ -247,6 +247,116 @@ An `msteams_configs` entry has no `webhook_url` or `webhook_url_file`. MS Teams 
 
 ---
 
+## telegram-no-bot-token
+
+**Level:** error
+
+A `telegram_configs` entry has no `bot_token` or `bot_token_file`. Telegram requires a bot token to authenticate with the Bot API.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        telegram_configs:
+          - chat_id: -1001234567890   # missing bot_token!
+    ```
+
+=== "Fixed"
+    ```yaml
+    receivers:
+      - name: team
+        telegram_configs:
+          - bot_token: '123456:ABC-DEF...'
+            chat_id: -1001234567890
+    ```
+
+---
+
+## discord-no-webhook-url
+
+**Level:** error
+
+A `discord_configs` entry has no `webhook_url` or `webhook_url_file`. Discord requires an incoming webhook URL to post messages to a channel.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        discord_configs:
+          - title: 'Alert'   # missing webhook_url!
+    ```
+
+=== "Fixed"
+    ```yaml
+    receivers:
+      - name: team
+        discord_configs:
+          - webhook_url: 'https://discord.com/api/webhooks/...'
+            title: 'Alert'
+    ```
+
+---
+
+## victorops-no-api-key
+
+**Level:** error
+
+A `victorops_configs` entry has no `api_key`, and `global.victorops_api_key` is not set. VictorOps requires an API key to accept alerts.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        victorops_configs:
+          - routing_key: 'team-routing-key'   # missing api_key!
+    ```
+
+=== "Fixed"
+    ```yaml
+    # Option 1 — per receiver:
+    receivers:
+      - name: team
+        victorops_configs:
+          - api_key: 'your-victorops-api-key'
+            routing_key: 'team-routing-key'
+
+    # Option 2 — global default:
+    global:
+      victorops_api_key: 'your-victorops-api-key'
+    ```
+
+---
+
+## wechat-no-corp-id
+
+**Level:** error
+
+A `wechat_configs` entry has no `corp_id`, and `global.wechat_api_corp_id` is not set. WeChat Work requires a corp_id to identify the enterprise account.
+
+=== "Bad"
+    ```yaml
+    receivers:
+      - name: team
+        wechat_configs:
+          - agent_id: '1000002'   # missing corp_id!
+    ```
+
+=== "Fixed"
+    ```yaml
+    # Option 1 — per receiver:
+    receivers:
+      - name: team
+        wechat_configs:
+          - corp_id: 'your-corp-id'
+            agent_id: '1000002'
+
+    # Option 2 — global default:
+    global:
+      wechat_api_corp_id: 'your-corp-id'
+    ```
+
+---
+
 ## template-file-missing
 
 **Level:** error (warn for globs)
