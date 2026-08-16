@@ -387,7 +387,7 @@ def _cmd_diff(args):
 
 
 def _cmd_list():
-    from .explains import EXPLAINS
+    from .explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
     level_order = {ERROR: 0, WARN: 1, INFO: 2}
     sorted_items = sorted(
         EXPLAINS.items(),
@@ -396,22 +396,33 @@ def _cmd_list():
     table = Table(show_header=True, header_style="bold dim", box=None, padding=(0, 2))
     table.add_column("code", no_wrap=True)
     table.add_column("level", no_wrap=True)
+    table.add_column("amtool", no_wrap=True, justify="center")
     table.add_column("description")
     for code, e in sorted_items:
         level = e["level"].split()[0]
+        mark = Text("✓", style="dim") if code in ALSO_CAUGHT_BY_AMTOOL else Text("")
         table.add_row(
             Text(code, style="dim"),
             Text(level, style=STYLE[level]),
+            mark,
             e["summary"],
         )
     console.print()
     console.print(table)
     console.print()
+    n = len(ALSO_CAUGHT_BY_AMTOOL)
+    console.print(
+        f"  [dim]✓ in the amtool column = also caught by `amtool check-config` "
+        f"({n} of {len(EXPLAINS)} checks) — Alertmanager refuses to start on these, "
+        f"it doesn't silently misbehave. The rest are configs amtool accepts and "
+        f"Alertmanager runs fine, just not as intended.[/dim]"
+    )
+    console.print()
     return 0
 
 
 def _cmd_explain(args):
-    from .explains import EXPLAINS
+    from .explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
     code = args.code
     if code not in EXPLAINS:
         err_console.print(f"[red]Unknown check code:[/red] {code}\n")
@@ -425,6 +436,18 @@ def _cmd_explain(args):
     console.print(Rule(f"[bold]{code}[/bold]", style="dim"))
     console.print()
     console.print(f"  Level:  [{level_style}]{e['level'].upper()}[/{level_style}]")
+    if code in ALSO_CAUGHT_BY_AMTOOL:
+        console.print(
+            "  [dim]Also caught by `amtool check-config` — Alertmanager refuses to "
+            "start over this. Included here for unified JSON/SARIF/diff output "
+            "without needing the Go binary, not because amtool misses it.[/dim]"
+        )
+    else:
+        console.print(
+            "  [dim]Not caught by `amtool check-config` — this config loads and "
+            "Alertmanager runs fine with the bug in place. This is the gap amlint "
+            "exists for.[/dim]"
+        )
     console.print()
     console.print(f"  {e['summary']}")
     console.print()

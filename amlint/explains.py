@@ -1,12 +1,44 @@
 """Explanations for amlint check codes, used by `amlint explain <code>`."""
 
+# Checks in this set duplicate validation that Alertmanager's own config loader already
+# performs — confirmed empirically against amtool v0.33.1 (`amtool check-config`), which
+# ships free with every Alertmanager install and is what most teams already run in CI.
+# Alertmanager refuses to start on any of these; it does not silently misbehave.
+# amlint still runs them so you get one dependency-free tool with unified JSON/SARIF/diff
+# output, without needing the Go binary — but they are NOT gaps amtool misses.
+# The remaining checks (not in this set) are the genuine differentiator: configs that are
+# syntactically/structurally valid, load fine, and Alertmanager runs without complaint —
+# they just don't do what you meant.
+ALSO_CAUGHT_BY_AMTOOL = {
+    "undefined-receiver",
+    "undefined-time-interval",
+    "bad-regex",
+    "groupby-ellipsis",
+    "no-root-route",
+    "duplicate-receiver",
+    "email-no-smarthost",
+    "webhook-no-url",
+    "slack-no-api-url",
+    "pagerduty-no-routing-key",
+    "opsgenie-no-api-key",
+    "msteams-no-webhook-url",
+    "telegram-no-bot-token",
+    "discord-no-webhook-url",
+    "victorops-no-api-key",
+    "wechat-no-corp-id",
+    "sns-no-target",
+}
+
 EXPLAINS = {
     "undefined-receiver": {
         "level": "error",
         "summary": "A route references a receiver name that is not defined in receivers:",
         "why": (
-            "Alertmanager silently drops all alerts matched by this route. "
-            "There is no runtime error — alerts just vanish."
+            "Alertmanager refuses to start — `amtool check-config` and the alertmanager "
+            "binary both reject this config at load time with "
+            "'undefined receiver \"x\" used in route'. Still worth catching in amlint: "
+            "it means one CI failure with a clear JSON/SARIF location instead of a crashed "
+            "pod and a log line to go dig up."
         ),
         "bad": """\
 route:
@@ -56,8 +88,10 @@ receivers:
         "level": "error",
         "summary": "A match_re or matchers entry contains a regex that fails to compile.",
         "why": (
-            "The route will never match anything. "
-            "Alerts that should go through this route will fall through to the catch-all."
+            "This is a whole-config failure, not a partial one — Alertmanager refuses to "
+            "load the file at all (`error parsing regexp: ...`), so no route in the file "
+            "works, not just this one. amtool catches it too; amlint gives you the exact "
+            "route path instead of a bare regexp error."
         ),
         "bad": """\
 routes:
@@ -75,8 +109,8 @@ routes:
         "level": "error",
         "summary": "Two receivers share the same name.",
         "why": (
-            "Alertmanager uses the first definition and silently ignores the second. "
-            "If you intended different configs, only one will ever be used."
+            "Alertmanager refuses to start over this — 'notification config name \"x\" is "
+            "not unique' — it does not pick one and ignore the other. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -126,7 +160,10 @@ receivers:
     "email-no-smarthost": {
         "level": "error",
         "summary": "An email_configs entry has no smarthost and global.smtp_smarthost is not set.",
-        "why": "Alertmanager cannot send emails without knowing the SMTP server address.",
+        "why": (
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just email delivery. amtool catches it too."
+        ),
         "bad": """\
 receivers:
   - name: team
@@ -374,8 +411,8 @@ time_intervals:
         "level": "error",
         "summary": "A webhook_configs entry has no url or url_file.",
         "why": (
-            "Alertmanager cannot deliver alerts without a target URL."
-            " Alerts will fail silently."
+            "Alertmanager refuses to start without it — this isn't a silent delivery "
+            "failure, the whole instance won't come up. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -394,8 +431,8 @@ receivers:
         "level": "error",
         "summary": "A pagerduty_configs entry has no routing_key or routing_key_file.",
         "why": (
-            "PagerDuty requires an integration key to accept events."
-            " Without it, alerts cannot be sent."
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just PagerDuty delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -414,8 +451,8 @@ receivers:
         "level": "error",
         "summary": "A slack_configs entry has no api_url and global.slack_api_url is not set.",
         "why": (
-            "Slack requires an incoming webhook URL to receive messages."
-            " Without it, notifications fail."
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just Slack delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -442,8 +479,8 @@ global:
             " and global.opsgenie_api_key is not set."
         ),
         "why": (
-            "OpsGenie requires an API key to accept alerts."
-            " Without it, notifications cannot be sent."
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just OpsGenie delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -537,8 +574,8 @@ templates:
         "level": "error",
         "summary": "An msteams_configs entry has no webhook_url or webhook_url_file.",
         "why": (
-            "MS Teams requires an incoming webhook URL to receive messages."
-            " Without it, notifications fail."
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just MS Teams delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -557,8 +594,8 @@ receivers:
         "level": "error",
         "summary": "A telegram_configs entry has no bot_token or bot_token_file.",
         "why": (
-            "Telegram requires a bot token to authenticate with the Bot API."
-            " Without it, messages fail to send."
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just Telegram delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -577,8 +614,8 @@ receivers:
         "level": "error",
         "summary": "A discord_configs entry has no webhook_url or webhook_url_file.",
         "why": (
-            "Discord requires an incoming webhook URL to post messages to a channel."
-            " Without it, notifications fail."
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just Discord delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -600,8 +637,8 @@ receivers:
             " and global.victorops_api_key is not set."
         ),
         "why": (
-            "VictorOps requires an API key to accept alerts."
-            " Without it, notifications cannot be sent."
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just VictorOps delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -628,8 +665,8 @@ global:
             " and global.wechat_api_corp_id is not set."
         ),
         "why": (
-            "WeChat Work requires a corp_id to identify the enterprise account."
-            " Without it, messages cannot be sent."
+            "Alertmanager refuses to start without it — this fails the whole instance, "
+            "not just WeChat delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:
@@ -656,9 +693,8 @@ global:
             " or target_arn set."
         ),
         "why": (
-            "SNS requires exactly one destination: a topic ARN, a phone number for SMS,"
-            " or a mobile platform endpoint ARN. With none set, AWS rejects the publish call"
-            " and the alert is lost."
+            "Alertmanager refuses to start without one of these set — this fails the "
+            "whole instance, not just SNS delivery. amtool catches it too."
         ),
         "bad": """\
 receivers:

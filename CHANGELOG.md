@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.1] - 2026-08-16
+
+### Changed
+- Corrected the "why not just amtool" comparison in README.md and docs/index.md: 17 of
+  amlint's 30 checks (undefined-receiver, undefined-time-interval, bad-regex,
+  groupby-ellipsis, no-root-route, duplicate-receiver, and the 11 "-no-x" integration
+  required-field checks) duplicate validation `amtool check-config` already performs —
+  confirmed empirically against amtool v0.33.1. Alertmanager refuses to start on all of
+  these; it does not silently misbehave. Previous docs incorrectly claimed amtool misses
+  several of them.
+- Fixed misleading "why" text on 13 of those checks that claimed silent/partial failure
+  ("alerts just vanish", "notifications fail") when the actual behavior is Alertmanager
+  refusing to start entirely.
+- `amlint list` now shows an `amtool` column marking which checks duplicate amtool's own
+  validation vs. which are gaps amtool doesn't cover.
+- `amlint explain <code>` now states, for every check, whether amtool also catches it.
+- `docs/checks/index.md` overview table annotated the same way.
+
 ## [0.2.0] - 2026-08-16
 
 ### Added

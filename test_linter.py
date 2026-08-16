@@ -462,6 +462,21 @@ def test_cli_list():
     assert main(["list"]) == 0
 
 
+def test_cli_list_shows_amtool_overlap(capsys):
+    assert main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "amtool" in out
+    assert "also caught by" in out
+
+
+def test_amtool_classification_matches_known_codes():
+    """Sanity check: ALSO_CAUGHT_BY_AMTOOL must only reference real check codes."""
+    from amlint.explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
+    assert ALSO_CAUGHT_BY_AMTOOL <= set(EXPLAINS.keys())
+    assert len(ALSO_CAUGHT_BY_AMTOOL) > 0
+    assert len(ALSO_CAUGHT_BY_AMTOOL) < len(EXPLAINS)
+
+
 def test_msteams_with_webhook_url_ok():
     cfg = {
         "route": {"receiver": "a"},
@@ -605,6 +620,20 @@ def test_sns_with_target_arn_ok():
 
 def test_explain_known_code(capsys):
     assert main(["explain", "undefined-receiver"]) == 0
+
+
+def test_explain_shows_amtool_note_for_redundant_check(capsys):
+    assert main(["explain", "undefined-receiver"]) == 0
+    out = capsys.readouterr().out
+    assert "Also caught by" in out
+    assert "amtool check-config" in out
+
+
+def test_explain_shows_gap_note_for_differentiator_check(capsys):
+    assert main(["explain", "unreachable-route"]) == 0
+    out = capsys.readouterr().out
+    assert "Not caught by" in out
+    assert "gap amlint exists for" in out
 
 
 def test_explain_unknown_code():
