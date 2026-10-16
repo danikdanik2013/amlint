@@ -79,6 +79,15 @@
   another shared label, such as `alertname`, contradicts it. Now every shared `=` label
   must agree.
 
+### Fixed
+- A route tree that contains itself through a YAML alias (`route: &r` with `routes: [*r]`,
+  or an anchor deeper in the tree aliased inside its own subtree) no longer crashes every
+  command with a `RecursionError` traceback. `check`, `tree`, `route`, `test` and `diff`
+  exit 2 with the path of the alias and the route it repeats, e.g. `route.routes[0] is a
+  YAML alias of route, which contains it`; Alertmanager can't load such a config either.
+  Routes shared through an alias under several parents keep working, and the playground's
+  route tree is left empty for such a config while its findings show the message.
+
 ## [0.4.1] - 2026-10-16
 
 ### Added

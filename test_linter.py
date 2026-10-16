@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from amlint.cli import main
-from amlint.linter import ERROR, WARN, lint
+from amlint.linter import ERROR, WARN, lint, route_cycle
 
 
 def codes(cfg):
@@ -2248,6 +2248,91 @@ def test_cli_non_mapping_yaml(tmp_path):
     with pytest.raises(SystemExit) as exc:
         main(["check", str(cfg)])
     assert exc.value.code == 2
+
+
+RECURSIVE_ROUTE = "route: &r\n  receiver: a\n  routes: [*r]\nreceivers: [{name: a}]\n"
+
+
+@pytest.mark.parametrize("argv", [["check"], ["tree"], ["route", "{cfg}", "a=b"],
+                                  ["test", "{cfg}", "{tests}"], ["diff", "{cfg}", "{cfg}"]])
+def test_cli_recursive_route_exits_2(tmp_path, capsys, argv):
+    """A route aliased inside itself makes yaml.safe_load build a recursive dict, which
+    every route walk would follow until RecursionError."""
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(RECURSIVE_ROUTE)
+    tests = tmp_path / "tests.yml"
+    tests.write_text("- labels: {a: b}\n  receiver: a\n")
+    argv = [a.format(cfg=cfg, tests=tests) for a in argv]
+    if len(argv) == 1:
+        argv.append(str(cfg))
+    with pytest.raises(SystemExit) as exc:
+        main(argv)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "Route contains itself" in err
+    assert "route.routes[0] is a YAML alias of route, which contains it" in err
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize("text, cycle", [
+    (RECURSIVE_ROUTE, ("route.routes[0]", "route")),
+    # an anchor deeper in the tree, aliased two levels further down
+    ("route:\n  receiver: a\n  routes:\n    - matchers: [t=x]\n      routes:\n"
+     "        - &x\n          matchers: [s=y]\n          routes:\n"
+     "            - receiver: a\n              routes: [*x]\n",
+     ("route.routes[0].routes[0].routes[0].routes[0]", "route.routes[0].routes[0]")),
+    # the routes list aliased inside one of its own entries
+    ("route:\n  receiver: a\n  routes: &l\n    - matchers: [x=1]\n      routes: *l\n",
+     ("route.routes[0].routes[0]", "route.routes[0]")),
+])
+def test_route_cycle_names_the_alias_and_its_ancestor(text, cycle):
+    assert route_cycle(yaml.safe_load(text)["route"]) == cycle
+
+
+SHARED_ROUTES = """\
+route:
+  receiver: a
+  routes:
+    - matchers: [team="db"]
+      routes: &common
+        - matchers: [severity="critical"]
+          receiver: pager
+        - receiver: a
+    - matchers: [team="web"]
+      routes: *common
+receivers:
+  - name: a
+    webhook_configs: [{url: 'http://a'}]
+  - name: pager
+    webhook_configs: [{url: 'http://p'}]
+"""
+
+
+def test_cli_shared_route_alias_still_works(tmp_path, capsys):
+    """The same routes reused under two parents is a tree, not a cycle."""
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(SHARED_ROUTES)
+    assert route_cycle(yaml.safe_load(SHARED_ROUTES)["route"]) is None
+    assert main(["check", str(cfg), "--format", "json"]) == 0
+    found = json.loads(capsys.readouterr().out)
+    assert [f["code"] for f in found] == ["global-resolve-timeout-missing"]
+    assert main(["tree", str(cfg)]) == 0
+    assert capsys.readouterr().out.count("pager") == 2
+    assert main(["route", str(cfg), "team=web", "severity=critical", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["receivers"] == ["pager"]
+    tests = tmp_path / "tests.yml"
+    tests.write_text("- labels: {team: db, severity: critical}\n  receiver: pager\n"
+                     "- labels: {team: web}\n  receiver: a\n")
+    assert main(["test", str(cfg), str(tests)]) == 0
+    assert "2 passed" in capsys.readouterr().out
+
+
+def test_route_cycle_walks_shared_routes_once():
+    """Routes shared at every level double the paths per level; each is checked once."""
+    node = {"receiver": "a"}
+    for _ in range(64):
+        node = {"routes": [node, node]}
+    assert route_cycle(node) is None
 
 
 def test_cli_unknown_ignore_code_warns(tmp_path, capsys):
