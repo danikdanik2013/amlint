@@ -29,6 +29,7 @@ import yaml
 from yaml.constructor import SafeConstructor
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
+from .goyaml import AlertmanagerLoader, keep_strings
 from .linter import (
     _parse_duration,
     _scalar,
@@ -290,6 +291,14 @@ def _construct(node: Node):
     return SafeConstructor().construct_document(node)
 
 
+def _construct_config(node: Node):
+    """A config document Alertmanager parses itself (Go's yaml.v2): strings it reads as
+    written keep their text, so `match: {country: NO}` is "NO" (see goyaml). Helm values
+    and Kubernetes resources are not read this way: Helm and the API server type YAML 1.1
+    scalars (`NO` is false) before the config reaches Alertmanager."""
+    return SafeConstructor().construct_document(keep_strings(node))
+
+
 def _get(node: Optional[Node], key: str) -> Tuple[Optional[Node], Optional[Node]]:
     """(key node, value node) of `key` in a mapping; the last one wins, as in safe_load."""
     found: Tuple[Optional[Node], Optional[Node]] = (None, None)
@@ -505,7 +514,7 @@ def _read_base(doc: _Doc, text: str, outer: Suppressions, notes: List[Note],
                comments: list, problems: list):
     """(cfg, region, templates) of the document holding the base config."""
     if doc.cls == "alertmanager":
-        cfg = doc.value if doc.value is not None else {}
+        cfg = _construct_config(doc.node) if doc.value is not None else {}
         if not isinstance(cfg, dict):
             raise FormatError("Not an Alertmanager config",
                               f"top level must be a mapping, got {type(cfg).__name__}")
@@ -559,7 +568,7 @@ def _embedded(value, value_node: Optional[Node], key_node: Optional[Node], text:
             return line + shift[0], col + shift[1]
     try:
         smap = SourceMap(inner)
-        cfg = yaml.safe_load(inner)
+        cfg = yaml.load(inner, Loader=AlertmanagerLoader)
     except yaml.YAMLError as e:
         raise _yaml_error(what, e, place)
     if cfg is None:

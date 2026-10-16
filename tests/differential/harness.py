@@ -64,6 +64,14 @@ def dump(cfg: dict) -> str:
     return yaml.dump(cfg, Dumper=_Dumper, sort_keys=False, allow_unicode=True, width=1000)
 
 
+def amlint_config(path: str) -> dict:
+    """The config as `amlint check` / `route` / `test` read the file."""
+    from amlint.formats import load_input
+
+    with open(path, encoding="utf-8") as f:
+        return load_input(f.read()).cfg
+
+
 def write_config(cfg: dict, directory: str, name: str = "alertmanager.yml") -> str:
     path = os.path.join(directory, name)
     with open(path, "w", encoding="utf-8") as f:

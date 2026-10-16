@@ -54,7 +54,9 @@ Each fix has a regression test in `test_linter.py`.
 
 - **YAML scalars.** Alertmanager reads `match: {country: NO}` as the string `NO`, where
   YAML 1.1 (and amlint, until now) says `false`. `1.10`, `0x1F`, `yes` and the like keep
-  their text too.
+  their text too, in a plain config and in one held in a Secret or a Mimir config. Helm
+  values are different: Helm reads `values.yaml` as YAML 1.1 before it renders the config,
+  so there `NO` really is `false`, and amlint reads it that way.
 - **Bare regexes with braces.** Alertmanager's classic matcher parser strips one trailing
   `}` from a `matchers:` entry even when it doesn't start with `{`, so a bare
   `code=~[0-9]{3}` is the regex `[0-9]{3`, which matches `1{3` and not `123`. Quote the

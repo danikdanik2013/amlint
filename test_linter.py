@@ -1187,24 +1187,42 @@ def test_route_label_values_are_strings():
 # The tests below each pin a difference from Alertmanager that the differential tests in
 # tests/differential found (amlint used to route these alerts differently from amtool).
 
-def test_route_yaml_scalars_keep_their_text(tmp_path):
-    """Alertmanager (Go yaml.v2) reads `NO` into a string as "NO"; YAML 1.1 says False."""
-    from amlint.cli import load
-    cfg_path = tmp_path / "am.yml"
-    cfg_path.write_text(
-        "route:\n"
-        "  receiver: default\n"
-        "  routes:\n"
-        "    - match: {country: NO, version: 1.10, code: 0x1F, on: yes, empty: ~}\n"
-        "      receiver: matched\n"
-        "      continue: true\n"
-        "receivers: [{name: default}, {name: matched}]\n"
-    )
-    cfg = load(str(cfg_path))
+_YAML_SCALARS_CONFIG = (
+    "route:\n"
+    "  receiver: default\n"
+    "  routes:\n"
+    "    - match: {country: NO, version: 1.10, code: 0x1F, on: yes, empty: ~}\n"
+    "      receiver: matched\n"
+    "      continue: true\n"
+    "receivers: [{name: default}, {name: matched}]\n"
+)
+
+
+def test_route_yaml_scalars_keep_their_text():
+    """Alertmanager (Go yaml.v2) reads `NO` into a string as "NO"; YAML 1.1 says False.
+    The same holds for a config inside a Secret, which Alertmanager parses itself."""
+    import textwrap
+
+    from amlint.formats import load_input
+    secret = ("apiVersion: v1\nkind: Secret\nmetadata: {name: am}\nstringData:\n"
+              "  alertmanager.yaml: |\n" + textwrap.indent(_YAML_SCALARS_CONFIG, "    "))
     labels = {"country": "NO", "version": "1.10", "code": "0x1F", "on": "yes"}
-    assert _receivers(cfg["route"], labels) == ["matched"]
-    assert _receivers(cfg["route"], {**labels, "country": "false"}) == ["default"]
-    assert cfg["route"]["routes"][0]["continue"] is True  # other fields keep their types
+    for text in (_YAML_SCALARS_CONFIG, secret):
+        cfg = load_input(text).cfg
+        assert _receivers(cfg["route"], labels) == ["matched"]
+        assert _receivers(cfg["route"], {**labels, "country": "false"}) == ["default"]
+        assert cfg["route"]["routes"][0]["continue"] is True  # other fields keep their types
+
+
+def test_helm_values_keep_yaml_1_1_types():
+    """Helm reads values.yaml as YAML 1.1 (NO is false) before it renders the config, so
+    `alertmanager.config` in Helm values stays typed."""
+    import textwrap
+
+    from amlint.formats import load_input
+    helm = "alertmanager:\n  config:\n" + textwrap.indent(_YAML_SCALARS_CONFIG, "    ")
+    match = load_input(helm).cfg["route"]["routes"][0]["match"]
+    assert match["country"] is False and match["version"] == 1.1
 
 
 def test_route_unquoted_matcher_value_is_unescaped():
