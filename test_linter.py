@@ -1294,6 +1294,112 @@ def test_router_rejects_matchers_alertmanager_rejects(route, message):
         Router({"receiver": "d", "routes": [route]})
 
 
+# ── Matchers: entries Alertmanager rejects or reads differently ──────
+
+def _route_matchers(*entries):
+    return {"route": {"receiver": "d", "routes": [{"receiver": "d", "matchers": list(entries)}]},
+            "receivers": [{"name": "d"}]}
+
+
+@pytest.mark.parametrize("entry", [
+    "a=b,,c=d",            # empty matcher between the commas
+    'a=b"c',               # unescaped double quote
+    r'"x.y"="a\.b"',       # quoted label name: Go string, \. is no escape
+    r'"x.y"=~\d+',         # quoted label name: a bare value can't hold a backslash
+    "a=b, c=~x{1,2}",      # the comma in the bare regex splits the entry
+    '{a="b"}}',            # the classic parser keeps the second brace after the quote
+    "=b", "a", "foo bar=b", 123,
+])
+def test_bad_matcher(entry):
+    """`amtool check-config` rejects each of these: 'bad matcher format' or 'matcher value
+    contains unescaped double quote'."""
+    found = [f for f in lint(_route_matchers(entry)) if f.code in ("bad-matcher", "bad-regex")]
+    assert [(f.code, f.level, f.where) for f in found] == [
+        ("bad-matcher", ERROR, "route.routes[0]")]
+    assert f"matchers entry '{entry}'" in found[0].msg
+
+
+@pytest.mark.parametrize("entry", [
+    "", None, "{}", "a=", "a=b,", "{a=b", "a=b}}", r"a=b\\", '"a"=b', "a = b",
+    r'"x.y"=~"a\\.b"', r'a=~"\u0041+"', '{"service.name"="api", tier=~"a|b"}',
+])
+def test_bad_matcher_not_for_entries_alertmanager_accepts(entry):
+    assert "bad-matcher" not in codes(_route_matchers(entry))
+
+
+def test_bad_matcher_leaves_invalid_regexes_to_bad_regex():
+    assert codes(_route_matchers("a=~(")) & {"bad-matcher", "bad-regex"} == {"bad-regex"}
+
+
+def test_bad_matcher_hint_depends_on_the_parser():
+    [quoted] = [f for f in lint(_route_matchers(r'"x.y"="a\.b"')) if f.code == "bad-matcher"]
+    assert "UTF-8 parser" in quoted.msg and "Go strings" in quoted.msg
+    [plain] = [f for f in lint(_route_matchers("a=b,,c=d")) if f.code == "bad-matcher"]
+    assert "one comma between matchers" in plain.msg
+
+
+def test_bad_matcher_in_inhibit_rule():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_matchers": ["a=b,,c=d"], "target_matchers": ['x=y"'],
+                           "equal": ["a"]}],
+    }
+    found = [f for f in lint(cfg) if f.code == "bad-matcher"]
+    assert [f.where for f in found] == ["inhibit_rules[0]", "inhibit_rules[0]"]
+    assert "source_matchers entry" in found[0].msg and "target_matchers entry" in found[1].msg
+
+
+def test_bad_matcher_also_caught_by_amtool():
+    from amlint.explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
+    assert "bad-matcher" in ALSO_CAUGHT_BY_AMTOOL
+    assert EXPLAINS["bad-matcher"]["level"] == "error"
+    assert "stripped-brace" not in ALSO_CAUGHT_BY_AMTOOL
+    assert EXPLAINS["stripped-brace"]["level"] == "warn"
+
+
+def test_stripped_brace():
+    """Alertmanager reads bare `code=~[0-9]{3}` as the regex [0-9]{3 and loads the config."""
+    [f] = [f for f in lint(_route_matchers("code=~[0-9]{3}")) if f.code == "stripped-brace"]
+    assert f.level == WARN and f.where == "route.routes[0]"
+    assert "the regex for 'code' is '[0-9]{3', not '[0-9]{3}'" in f.msg
+    assert 'code=~"[0-9]{3}"' in f.msg
+    assert "bad-matcher" not in codes(_route_matchers("code=~[0-9]{3}"))
+
+
+@pytest.mark.parametrize("entry", [
+    "code=~[0-9]{3}", r"code=~\d{3}", "a=b, code!~x{1}", "a=b}", "a=b}}", r"a=x\ny}",
+    r"a=x\\}",
+])
+def test_stripped_brace_suggestion_means_what_was_meant(entry):
+    """The quoted value the message suggests reads back as the value with its brace."""
+    from amlint.linter import _parse_matcher_entry
+    [f] = [f for f in lint(_route_matchers(entry)) if f.code == "stripped-brace"]
+    suggestion = re.search(r"Quote the value \((.*)\) or wrap", f.msg).group(1)
+    meant = _parse_matcher_entry("{" + entry + "}")[-1]
+    assert _parse_matcher_entry(suggestion) == (meant,)
+    assert "stripped-brace" not in codes(_route_matchers(suggestion))
+
+
+@pytest.mark.parametrize("entry", [
+    'code=~"[0-9]{3}"', "{code=~[0-9]{3}}", "{a=b}", 'a="b"}', "{a=b",
+    "a=b} ", '"x.y"=~"[0-9]{3}"', "a=b,,c=d}",
+])
+def test_stripped_brace_not_for_entries_that_keep_their_meaning(entry):
+    assert "stripped-brace" not in codes(_route_matchers(entry))
+
+
+def test_stripped_brace_in_inhibit_rule():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_matchers": ["code=~5[0-9]{2}"],
+                           "target_matchers": ['code=~"5[0-9]{2}"'], "equal": ["a"]}],
+    }
+    [f] = [f for f in lint(cfg) if f.code == "stripped-brace"]
+    assert f.where == "inhibit_rules[0]" and "source_matchers entry" in f.msg
+
+
 @pytest.mark.parametrize("route, message", [
     ({"receiver": "d", "routes": [{"matchers": ['a=~"(?=x)"']}]}, "lookahead"),
     ({"receiver": "d", "routes": [{"matchers": ['a=~"\\\\pL+"']}]}, "cannot evaluate"),

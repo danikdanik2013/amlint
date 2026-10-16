@@ -389,6 +389,21 @@ VALID_REGEXES = ("crit|warn", "a\\.b", "(?i)crit", "\\d{3}", "[[:alpha:]]+", "(?
 INVALID_REGEXES = ("(?=a)", "(?<=a)b", "(a)\\1", "a{1001}", "(", "[a", "a**", "(?x)a",
                    "\\Z", "a++", "(?P=x)", "\\8", "\\p{Foo}", "[z-a]", "x{2,1}", "\\e")
 
+# matchers: entries that neither of Alertmanager's matcher parsers reads ("bad matcher
+# format", "matcher value contains unescaped double quote"), and so amlint's bad-matcher.
+BAD_MATCHERS = (
+    "sev=crit,,team=a",           # an empty matcher between two commas
+    "sev=crit,,",
+    'sev=cr"it',                  # a stray double quote
+    'sev="crit',
+    '"k8s.ns"="a\\.b"',           # quoted label name: Go string, \. is no escape there
+    '"k8s.ns"=~\\d+',             # quoted label name: a bare value can't hold a backslash
+    '"k8s.ns"=~[0-9]{3}',         # ... nor a brace
+    "team=a, sev=~x{1,2}",        # the comma in the bare regex splits the entry
+    '{sev="crit"}}',
+    "=crit", "sev", "sev crit", "team name=a",
+)
+
 
 @st.composite
 def _integration(draw, kind: str, broken: bool = False) -> dict:
@@ -406,10 +421,11 @@ def _integration(draw, kind: str, broken: bool = False) -> dict:
     return entry
 
 
-# Each mistake is made in 1 of N configs, independently. Integration fields and regexes
-# have many variants each (11 integrations with globals and _file forms, 16 regexes).
+# Each mistake is made in 1 of N configs, independently. Integration fields, regexes and
+# matchers have many variants each (11 integrations with globals and _file forms, 16
+# regexes, 13 matchers in a route or an inhibit rule).
 MISTAKES = {
-    "undefined-receiver": 12, "undefined-time-interval": 12, "bad-regex": 4,
+    "undefined-receiver": 12, "undefined-time-interval": 12, "bad-regex": 4, "bad-matcher": 4,
     "groupby-ellipsis": 12, "no-root-route": 20, "root-receiver": 20, "root-matchers": 20,
     "root-match": 20, "root-continue": 20, "root-time-intervals": 20,
     "duplicate-receiver": 12, "integration-key": 3,
@@ -466,6 +482,14 @@ def validation_configs(draw) -> dict:
     if "bad-regex" in mistakes:
         regex = draw(pick(INVALID_REGEXES))
         draw(pick(children))["matchers"] = [f"sev=~{quote(regex)}"]
+    rule = {"source_matchers": ['sev="crit"'], "target_matchers": ['sev="warn"'],
+            "equal": ["team"]}
+    if "bad-matcher" in mistakes:
+        node, key = draw(pick([(child, "matchers") for child in children]
+                              + [(rule, "source_matchers"), (rule, "target_matchers")]))
+        entries = list(node[key])
+        entries.insert(draw(pick(range(len(entries) + 1))), draw(pick(BAD_MATCHERS)))
+        node[key] = entries
     if "groupby-ellipsis" in mistakes:
         some_route()["group_by"] = ["...", "alertname"]
     if "root-receiver" in mistakes:
@@ -483,6 +507,7 @@ def validation_configs(draw) -> dict:
     if "no-root-route" not in mistakes:
         cfg["route"] = root
     cfg["receivers"] = receivers
+    cfg["inhibit_rules"] = [rule]
     cfg["time_intervals"] = [{"name": "night", "time_intervals": [
         {"times": [{"start_time": "00:00", "end_time": "06:00"}]}]}]
     return cfg

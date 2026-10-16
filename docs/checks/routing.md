@@ -116,6 +116,75 @@ Regexes in routes (`match_re`, `matchers`) and in inhibit rules (`source_match_r
 
 ---
 
+## bad-matcher
+
+**Level:** error
+
+A `matchers:` entry that Alertmanager can't parse, so it refuses to load the config
+(`bad matcher format`, or `matcher value contains unescaped double quote`). Alertmanager
+reads each entry with its classic matcher parser, and with the UTF-8 parser only when the
+classic one fails. This check fires when both fail. Entries in routes (`matchers`) and in
+inhibit rules (`source_matchers`, `target_matchers`) are all checked. Common causes:
+
+- an empty matcher between two commas: `a=b,,c=d`
+- a stray double quote: `a=b"c`
+- a comma in a bare value, which splits the entry: `a=b, c=~x{1,2}`
+- a quoted label name (`"service.name"=...`). Alertmanager then reads the whole entry with
+  the UTF-8 parser, where values are Go strings. `"x.y"="a\.b"` is an error there, since
+  `\.` is no Go escape, and a bare value can't hold a backslash or a brace
+  (`"x.y"=~\d+`).
+
+=== "Bad"
+    ```yaml
+    route:
+      receiver: default
+      routes:
+        - matchers:
+            - 'service=api,,env=prod'        # empty matcher between the commas
+            - '"service.name"=~"api\.v2"'   # quoted label name: \. is not a Go escape
+          receiver: team
+    ```
+
+=== "Fixed"
+    ```yaml
+        - matchers:
+            - 'service="api", env="prod"'
+            - '"service.name"=~"api\\.v2"'  # Go string: \\ is one backslash
+          receiver: team
+    ```
+
+---
+
+## stripped-brace
+
+**Level:** warn
+
+A bare (unquoted) value at the end of a `matchers:` entry ends in `}`, and the entry doesn't
+start with `{`. Alertmanager's classic parser strips one trailing `}` from every entry,
+braces or not. So `code=~[0-9]{3}` is the regex `[0-9]{3`, which matches the text `1{3` and
+not `123`. The config loads and `amtool check-config` accepts it. The route just never
+matches what you meant. Quote the value, or wrap the whole entry in braces.
+
+=== "Bad"
+    ```yaml
+    route:
+      receiver: default
+      routes:
+        - matchers:
+            - code=~[0-9]{3}        # the regex is [0-9]{3: matches "1{3", not "123"
+          receiver: http-errors
+    ```
+
+=== "Fixed"
+    ```yaml
+        - matchers:
+            - code=~"[0-9]{3}"      # quoted: the regex is [0-9]{3}
+          receiver: http-errors
+    # or: - '{code=~[0-9]{3}}'
+    ```
+
+---
+
 ## unreachable-route
 
 **Level:** warn

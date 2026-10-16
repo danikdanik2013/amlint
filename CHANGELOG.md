@@ -18,6 +18,16 @@
   Alertmanager" (`docs/fidelity.md`) are backed by it. The page also lists the known
   differences, such as Alertmanager before 0.34.1 missing some inhibitions depending on the
   order alerts arrive (fixed upstream in 0.34.1, which amlint follows).
+- `bad-matcher` (error): a `matchers:`, `source_matchers:` or `target_matchers:` entry that
+  neither of Alertmanager's matcher parsers can read, such as `a=b,,c=d`, `a=b"c`,
+  `"x.y"="a\.b"` (a Go string, where `\.` is no escape) or `"x.y"=~\d+`. Alertmanager
+  refuses to load the config ("bad matcher format"), so `amtool check-config` catches it
+  too; `amlint check` used to say nothing. The differential config-error test now
+  generates such entries in routes and inhibit rules.
+- `stripped-brace` (warn): a bare value at the end of a `matchers:` entry that loses its
+  closing brace. Alertmanager reads `code=~[0-9]{3}` as the regex `[0-9]{3`, which matches
+  `1{3` and not `123`, and loads the config without a word. The finding says which value
+  Alertmanager reads and suggests the quoted one (`code=~"[0-9]{3}"`).
 
 ### Changed
 - `groupby-ellipsis` is an error instead of a warning: Alertmanager refuses to load
