@@ -37,6 +37,7 @@ from rich.tree import Tree
 
 from .config import load_project_config
 from .linter import ERROR, INFO, WARN, _dict_items, _scalar, lint
+from .markdown import diff_report
 from .routing import GROUP_BY_ALL, Router, RoutingError, diff_routing
 from .source import apply_source
 
@@ -705,6 +706,9 @@ def _cmd_diff(args):
                                        only=only or None)
     new_cfg, new_findings = _lint_file(args.new, ignore=ignore, severity=severity,
                                        only=only or None)
+    if not old_cfg:
+        # An empty old file (e.g. the config is new): nothing to fix, and nothing was routed.
+        old_cfg, old_findings = {"route": {}}, []
     rdiff, skipped = (None, None) if args.no_routing else _routing_diff(old_cfg, new_cfg)
 
     def key(f):
@@ -743,6 +747,11 @@ def _cmd_diff(args):
         if not args.no_routing:
             doc["routing"] = _routing_diff_json(rdiff, skipped)
         print(json.dumps(doc, ensure_ascii=False, indent=2))
+        return 1 if added else 0
+
+    if args.format == "markdown":
+        print(diff_report(_display(args.old), _display(args.new), added, fixed, unchanged,
+                          rdiff, skipped, routing=not args.no_routing), end="")
         return 1 if added else 0
 
     if not added and not fixed:
@@ -883,7 +892,8 @@ def main(argv=None):
     pd = sub.add_parser("diff", help="show findings that changed between two configs")
     pd.add_argument("old", help="baseline config")
     pd.add_argument("new", help="updated config")
-    pd.add_argument("--format", choices=["text", "json"], default="text")
+    pd.add_argument("--format", choices=["text", "json", "markdown"], default="text",
+                    help="markdown is a compact report for a pull-request comment")
     pd.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes")
     pd.add_argument("--only", action="append", metavar="CODE",

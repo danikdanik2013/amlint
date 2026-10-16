@@ -186,11 +186,59 @@ With `--format json`, a `routing` key holds `checked`, `truncated` and `changes`
 with the `labels`, the `differences`, the full `old` / `new` routes, and how many `similar`
 label sets were folded into it — or `skipped` with the reason.
 
+An empty old file (`/dev/null`, or a config that is new in a PR) counts as no config at
+all: every finding is new, none is fixed, and every label set's receivers were `(none)`
+before.
+
+### Markdown report
+
+`--format markdown` prints a compact report meant for a pull-request comment:
+
+```bash
+amlint diff main.yml alertmanager.yml --format markdown
+```
+
+```markdown
+### amlint diff
+
+**2 routing changes** · **1 new finding** · 0 fixed · 4 unchanged · 18 label sets checked
+
+#### Receivers
+
+| labels | before | after |
+| --- | --- | --- |
+| `team=db, severity=critical` | `pagerduty-db` | `slack-db` |
+
+#### Grouping and timings
+
+| labels | receiver | setting | before | after |
+| --- | --- | --- | --- | --- |
+| `team=infra` (+5 similar) | `infra-slack` | `group_wait` | `30s` | `10s` |
+
+#### New findings
+
+| level | check | location | message |
+| --- | --- | --- | --- |
+| ✖ error | `undefined-receiver` | `alertmanager.yml:12:7` (`route.routes[1]`) | Route references receiver 'pager-team' which is not defined in receivers. Alerts matched here will be dropped. |
+```
+
+The summary line always comes first. The tables and finding sections only appear when
+there is something in them, so an unchanged config gives just the heading and the summary.
+`(+5 similar)` means five more label sets with exactly the same change. New findings point
+into the new file and fixed ones into the old file. Each table stops after 50 rows with
+`…and N more`, so a large config can't produce a huge comment. The output is deterministic,
+and names from the config are escaped, so a receiver called `@team` doesn't ping anyone.
+Exit codes are the same as for text output.
+
+The [GitHub Action](github-action.md#routing-diff-as-a-pr-comment) posts this report as a
+PR comment and keeps it up to date.
+
 **Options:**
 
 | flag | description |
 |------|-------------|
 | `--format json` | Machine-readable output |
+| `--format markdown` | Compact report for a PR comment |
 | `--no-routing` | Compare findings only |
 
 ### In CI (PR check)
@@ -201,6 +249,9 @@ label sets were folded into it — or `skipped` with the reason.
     git show origin/main:alertmanager.yml > /tmp/main.yml
     amlint diff /tmp/main.yml alertmanager.yml
 ```
+
+To get the routing diff as a PR comment, use the GitHub Action's
+[`diff-base`](github-action.md#routing-diff-as-a-pr-comment) input.
 
 ## init
 
