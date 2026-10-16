@@ -52,6 +52,7 @@ cat alertmanager.yml | amlint check -       # stdin
 amlint check alertmanager.yml --strict      # WARN also exits non-zero
 amlint check alertmanager.yml --format json
 amlint check alertmanager.yml --format sarif > results.sarif  # GitHub Code Scanning
+amlint check alertmanager.yml --format github  # PR annotations straight from a workflow step
 amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
@@ -81,6 +82,17 @@ ignore = ["empty-receiver"]
 strict = true
 ```
 
+**Inline suppressions** — silence a check for one spot, with the reason next to it:
+
+```yaml
+# amlint: disable-file=global-resolve-timeout-missing     ← top of file: whole file
+
+receivers:
+  - name: blackhole   # amlint: disable=empty-receiver     ← this line
+  # amlint: disable=unused-receiver                       ← or the line below
+  - name: spare
+```
+
 **Shell completions (bash/zsh):**
 ```bash
 pip install "amlint[completions]"
@@ -90,14 +102,16 @@ eval "$(register-python-argcomplete amlint)"  # add to ~/.zshrc or ~/.bashrc
 Example output:
 
 ```
-  ERROR  Route references receiver 'pager-team' which is not defined in receivers. Alerts matched here will be dropped.
-  ↳ route.routes[1]  [undefined-receiver]
+  ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:10:7  ·  route.routes[1]
+     Route references receiver 'pager-team' which is not defined in receivers. Alerts matched here will be dropped.
 
-  WARN   Catch-all route (no matchers) with continue:false will intercept all alerts — 2 subsequent sibling(s) are unreachable.
-  ↳ route.routes[0]  [unreachable-route]
+  ⚠  WARN   [unreachable-route]  ·  alertmanager.yml:8:7  ·  route.routes[0]
+     Catch-all route (no matchers) with continue:false will intercept all alerts — 2 subsequent sibling(s) are unreachable.
 
-  2 error · 3 warn · 1 info
+  ✖ 2 errors  ·  ⚠ 5 warnings  ·  ℹ 3 info
 ```
+
+Every finding carries `file:line:col`, so terminals and editors can jump straight to it.
 
 Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 
@@ -106,7 +120,7 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 ```yaml
 # .github/workflows/lint.yml
 - name: Lint Alertmanager config
-  run: amlint check alertmanager.yml --strict
+  run: amlint check alertmanager.yml --strict --format github  # findings annotate the PR diff
 ```
 
 ### As a GitHub Action

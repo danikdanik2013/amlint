@@ -37,6 +37,7 @@ from rich.tree import Tree
 from .config import load_project_config
 from .linter import ERROR, INFO, WARN, _dict_items, lint
 from .simulate import simulate_route
+from .source import apply_source
 
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
@@ -91,26 +92,31 @@ def _basedir(path):
     return os.path.dirname(os.path.abspath(path)) if path != "-" else None
 
 
-def _read_yaml(path):
+def _read(path) -> str:
+    """Text of a file, or stdin for "-"; exits 2 if the file is missing."""
+    if path == "-":
+        return sys.stdin.read()
+    if not os.path.exists(path):
+        err_console.print(f"[red]File not found:[/red] {path}")
+        sys.exit(2)
+    with open(path) as f:
+        return f.read()
+
+
+def _read_yaml(path, content=None):
     """Parse a YAML file, or stdin for "-"; exits 2 if it is missing or unparsable."""
+    if content is None:
+        content = _read(path)
     try:
-        if path == "-":
-            content = sys.stdin.read()
-        else:
-            if not os.path.exists(path):
-                err_console.print(f"[red]File not found:[/red] {path}")
-                sys.exit(2)
-            with open(path) as f:
-                content = f.read()
         return yaml.safe_load(content)
     except yaml.YAMLError as e:
         err_console.print(f"[red]Failed to parse YAML[/red] ({path}): {e}")
         sys.exit(2)
 
 
-def load(path):
+def load(path, content=None):
     """Load an Alertmanager config; exits 2 unless its top level is a mapping."""
-    cfg = _read_yaml(path)
+    cfg = _read_yaml(path, content)
     if cfg is None:
         return {}
     if not isinstance(cfg, dict):
@@ -122,7 +128,30 @@ def load(path):
     return cfg
 
 
-def _print_findings(findings, label=None):
+def _display(path) -> str:
+    return "<stdin>" if path == "-" else path
+
+
+def _lint_file(path, **kwargs):
+    """Load and lint one file. Findings get their line/col, and the ones disabled by
+    `# amlint:` comments in the file are dropped. Returns (cfg, findings)."""
+    content = _read(path)
+    cfg = load(path, content)
+    findings, suppressions = apply_source(lint(cfg, basedir=_basedir(path), **kwargs), content)
+    where = escape(_display(path))
+    for line, codes in suppressions.comments:
+        _warn_unknown_codes(codes, f"'# amlint:' comment at {where}:{line}")
+    for line, problem in suppressions.problems:
+        err_console.print(f"[yellow]warning:[/yellow] {where}:{line}: {escape(problem)}",
+                          soft_wrap=True)
+    return cfg, findings
+
+
+def _location(path, f) -> str:
+    return f"{_display(path)}:{f.line}:{f.col}"
+
+
+def _print_findings(findings, path, label=None):
     if label:
         console.print(Rule(f"[bold]{label}[/bold]", style="dim"))
 
@@ -136,9 +165,10 @@ def _print_findings(findings, label=None):
         header.append(f"  {ICON[f.level]}  ", style=STYLE[f.level])
         header.append(f.level.upper().ljust(5), style=STYLE[f.level])
         header.append(f"  [{f.code}]", style="dim")
+        header.append(f"  ·  {_location(path, f)}")
         if f.where:
             header.append(f"  ·  {f.where}", style="dim")
-        console.print(header)
+        console.print(header, soft_wrap=True)  # keep file:line:col in one piece
         console.print(f"     {f.msg}")
         console.print()
 
@@ -192,7 +222,7 @@ def _to_sarif(all_findings, version: str) -> dict:
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": {"uri": uri, "uriBaseId": "%SRCROOT%"},
-                        "region": {"startLine": 1},
+                        "region": {"startLine": f.line, "startColumn": f.col},
                     },
                 }],
             }
@@ -222,6 +252,43 @@ def _to_sarif(all_findings, version: str) -> dict:
     }
 
 
+_GITHUB_LEVEL = {ERROR: "error", WARN: "warning", INFO: "notice"}
+
+
+def _github_escape(value: str, prop: bool = False) -> str:
+    """Escape a workflow-command message, or (prop=True) a property value."""
+    value = value.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    if prop:
+        value = value.replace(":", "%3A").replace(",", "%2C")
+    return value
+
+
+def _github_path(path: str) -> str:
+    """Annotations need the path relative to the repository root ($GITHUB_WORKSPACE)."""
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    if workspace:
+        try:
+            rel = os.path.relpath(os.path.abspath(path), workspace)
+        except ValueError:  # another drive on Windows
+            return path
+        if rel != ".." and not rel.startswith(".." + os.sep):
+            return rel.replace(os.sep, "/")
+    return path
+
+
+def _print_github(all_findings) -> None:
+    """GitHub Actions workflow commands: each finding becomes a PR annotation."""
+    for path, findings in all_findings:
+        for f in findings:
+            props = []
+            if path != "-":
+                props += [f"file={_github_escape(_github_path(path), prop=True)}",
+                          f"line={f.line}", f"col={f.col}"]
+            props.append(f"title={_github_escape(f'amlint {f.code}', prop=True)}")
+            msg = f"{f.msg} ({f.where})" if f.where else f.msg
+            print(f"::{_GITHUB_LEVEL[f.level]} {','.join(props)}::{_github_escape(msg)}")
+
+
 def _cmd_check(args):
     proj, ignore, only, severity = _project_settings(args)
     strict = args.strict or proj.get("strict", False)
@@ -229,23 +296,23 @@ def _cmd_check(args):
     multi = len(args.files) > 1
     all_findings = []
     for path in args.files:
-        cfg = load(path)
-        all_findings.append((path, lint(
-            cfg, ignore=ignore, severity=severity, only=only or None, basedir=_basedir(path),
-        )))
+        _, findings = _lint_file(path, ignore=ignore, severity=severity, only=only or None)
+        all_findings.append((path, findings))
 
     if args.format == "json":
         print(json.dumps(
-            [{"file": path, "level": f.level, "code": f.code,
-              "message": f.msg, "where": f.where}
+            [{"file": path, "line": f.line, "column": f.col, "level": f.level,
+              "code": f.code, "message": f.msg, "where": f.where}
              for path, findings in all_findings for f in findings],
             ensure_ascii=False, indent=2,
         ))
     elif args.format == "sarif":
         print(json.dumps(_to_sarif(all_findings, _VERSION), ensure_ascii=False, indent=2))
+    elif args.format == "github":
+        _print_github(all_findings)
     else:
         for path, findings in all_findings:
-            _print_findings(findings, label=path if multi else None)
+            _print_findings(findings, path, label=path if multi else None)
 
     if getattr(args, "exit_zero", False):
         return 0
@@ -268,13 +335,12 @@ def _format_matchers(node: dict) -> list:
 def _cmd_tree(args) -> int:
     _, ignore, _, severity = _project_settings(args)
 
-    cfg = load(args.file)
+    cfg, findings = _lint_file(args.file, ignore=ignore, severity=severity)
     route = cfg.get("route")
     if not isinstance(route, dict):
         err_console.print("[red]No root 'route' defined.[/red]")
         return 2
 
-    findings = lint(cfg, ignore=ignore, severity=severity, basedir=_basedir(args.file))
     by_path: dict = {}
     for f in findings:
         by_path.setdefault(f.where, []).append(f)
@@ -436,10 +502,8 @@ def _cmd_init() -> int:
 
 def _cmd_diff(args):
     _, ignore, only, severity = _project_settings(args)
-    old_findings = lint(load(args.old), ignore=ignore, severity=severity, only=only or None,
-                        basedir=_basedir(args.old))
-    new_findings = lint(load(args.new), ignore=ignore, severity=severity, only=only or None,
-                        basedir=_basedir(args.new))
+    _, old_findings = _lint_file(args.old, ignore=ignore, severity=severity, only=only or None)
+    _, new_findings = _lint_file(args.new, ignore=ignore, severity=severity, only=only or None)
 
     def key(f):
         return (f.code, f.where)
@@ -466,11 +530,12 @@ def _cmd_diff(args):
     unchanged = len(old_findings) - len(fixed)
 
     if args.format == "json":
+        def entry(f):
+            return {"code": f.code, "level": f.level, "message": f.msg, "where": f.where,
+                    "line": f.line, "column": f.col}
         print(json.dumps({
-            "added":  [{"code": f.code, "level": f.level, "message": f.msg, "where": f.where}
-                       for f in added],
-            "fixed":  [{"code": f.code, "level": f.level, "message": f.msg, "where": f.where}
-                       for f in fixed],
+            "added":  [entry(f) for f in added],
+            "fixed":  [entry(f) for f in fixed],
             "unchanged": unchanged,
         }, ensure_ascii=False, indent=2))
         return 1 if added else 0
@@ -481,13 +546,17 @@ def _cmd_diff(args):
 
     console.print()
     for f in fixed:
-        console.print(f"  [bold green]FIXED[/bold green]  [{f.code}]"
-                      + (f"  ·  [dim]{f.where}[/dim]" if f.where else ""))
+        console.print(f"  [bold green]FIXED[/bold green]  {escape(f'[{f.code}]')}"
+                      f"  ·  {escape(_location(args.old, f))}"
+                      + (f"  ·  [dim]{escape(f.where)}[/dim]" if f.where else ""),
+                      soft_wrap=True)
         console.print(f"     {f.msg}")
         console.print()
     for f in added:
-        console.print(f"  [bold red]NEW  [/bold red]  [{f.code}]"
-                      + (f"  ·  [dim]{f.where}[/dim]" if f.where else ""))
+        console.print(f"  [bold red]NEW  [/bold red]  {escape(f'[{f.code}]')}"
+                      f"  ·  {escape(_location(args.new, f))}"
+                      + (f"  ·  [dim]{escape(f.where)}[/dim]" if f.where else ""),
+                      soft_wrap=True)
         console.print(f"     {f.msg}")
         console.print()
 
@@ -591,7 +660,8 @@ def main(argv=None):
     pc = sub.add_parser("check", help="validate one or more config files")
     pc.add_argument("files", nargs="+", metavar="file",
                     help="path(s) to alertmanager.yml, or - for stdin")
-    pc.add_argument("--format", choices=["text", "json", "sarif"], default="text")
+    pc.add_argument("--format", choices=["text", "json", "sarif", "github"], default="text",
+                    help="github prints GitHub Actions annotations (::error file=...::)")
     pc.add_argument("--strict", action="store_true", help="exit non-zero on WARN as well")
     pc.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes (comma-separated or repeat the flag); "

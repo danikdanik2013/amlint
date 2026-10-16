@@ -17,6 +17,7 @@ cat alertmanager.yml | amlint check -  # stdin
 | `--strict` | Exit non-zero on WARN as well as ERROR |
 | `--format json` | Machine-readable JSON output |
 | `--format sarif` | GitHub Code Scanning SARIF output |
+| `--format github` | GitHub Actions annotations (`::error file=...,line=...::`) |
 | `--ignore CODE` | Skip findings with these codes; repeat or comma-separate |
 | `--only CODE` | Show only findings with these codes; repeat or comma-separate |
 | `--exit-zero` | Always exit 0 regardless of findings; useful for informational CI runs |
@@ -48,6 +49,53 @@ cat alertmanager.yml | amlint check -  # stdin
 `.amlint.yml` takes priority over `pyproject.toml` if both exist.
 `--ignore` on the CLI merges with the `ignore:` list from the config file.
 
+### Locations
+
+Every finding points at a line in the file. Text output prints it as `file:line:col`, which
+terminals and editors turn into a jump link:
+
+```
+  ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:10:7  ·  route.routes[1]
+     Route references receiver 'pager-team' which is not defined in receivers. ...
+```
+
+The line is the start of the part of the config the finding is about: the `- ` entry for a
+route, receiver or inhibit rule, the key for things like `route` or `global`. When that part
+doesn't exist in the file (`global-resolve-timeout-missing` with no `global:` block), the
+finding points at the nearest enclosing part that does. JSON and SARIF output carry the same
+line and column; stdin (`-`) works the same way.
+
+### Inline suppressions
+
+Turn a check off for one spot with a comment, so the exception and its reason live next to
+the config instead of in a global `ignore:` list:
+
+```yaml
+# amlint: disable-file=global-resolve-timeout-missing
+
+route:
+  receiver: default
+  routes:
+    - receiver: catch-all   # amlint: disable=unreachable-route
+    - matchers: [team="infra"]
+      receiver: infra
+
+receivers:
+  # amlint: disable=empty-receiver, unused-receiver
+  # drops alerts on purpose
+  - name: blackhole
+```
+
+| comment | where | suppresses |
+|---------|-------|------------|
+| `# amlint: disable=code1,code2` | at the end of a line | those codes for findings on that line |
+| `# amlint: disable=code1,code2` | on a line of its own | those codes for findings on the next line of YAML (other comment lines in between are fine) |
+| `# amlint: disable-file=code1,code2` | in the comment block at the top of the file, before any YAML | those codes for the whole file |
+
+A finding's line is the one shown in the output. Unknown codes get the same "did you mean"
+warning as `--ignore`, and a `disable-file` comment further down the file is ignored with a
+warning. Suppressions also apply to `diff` and `tree`.
+
 ### Exit codes
 
 | code | meaning |
@@ -65,6 +113,9 @@ amlint check alertmanager.yml --format json
 ```json
 [
   {
+    "file": "alertmanager.yml",
+    "line": 10,
+    "column": 7,
     "level": "error",
     "code": "undefined-receiver",
     "message": "Route references receiver 'pager' which is not defined...",
@@ -72,6 +123,9 @@ amlint check alertmanager.yml --format json
   }
 ]
 ```
+
+`file` is `-` for stdin. `amlint diff --format json` adds `line` and `column` to each
+finding too: from the new file for `added`, from the old one for `fixed`.
 
 ## diff
 
@@ -228,9 +282,30 @@ Useful for onboarding new team members or understanding an unfamiliar finding.
 amlint --version
 ```
 
+### GitHub annotations
+
+`--format github` prints [workflow commands](https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions)
+that GitHub turns into annotations on the PR diff, with no SARIF upload and no Code
+Scanning needed:
+
+```yaml
+- name: Lint Alertmanager config
+  run: amlint check alertmanager.yml --strict --format github
+```
+
+```
+::error file=alertmanager.yml,line=10,col=7,title=amlint undefined-receiver::Route references receiver 'pager-team' ... (route.routes[1])
+::warning file=alertmanager.yml,line=8,col=7,title=amlint unreachable-route::Catch-all route ... (route.routes[0])
+```
+
+ERROR becomes `::error`, WARN `::warning` and INFO `::notice`. Paths are made relative to
+`$GITHUB_WORKSPACE`, so annotations land on the right file even when you pass an absolute
+path. Exit codes are the same as for text output.
+
 ### SARIF (GitHub Code Scanning)
 
-SARIF output lets GitHub show findings as annotations directly on the PR diff — no plugins required:
+SARIF output lets GitHub show findings as annotations directly on the PR diff, on the line
+each finding points at — no plugins required:
 
 ```yaml
 - name: Run amlint
