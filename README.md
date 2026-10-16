@@ -56,6 +56,7 @@ amlint check alertmanager.yml --format github  # PR annotations straight from a 
 amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
+amlint check alertmanager.yml --rules 'rules/*.yml'  # also check against Prometheus alerting rules
 amlint diff old.yml new.yml                 # what changed: findings, and alerts routed differently
 amlint tree alertmanager.yml                # visualize the route tree, issues inline
 amlint route alertmanager.yml team=infra severity=critical  # where does this alert go?
@@ -140,6 +141,29 @@ inherited settings, fully anchored Go RE2 regexes, missing labels matching as `"
 route differently, e.g. `team=db, severity=critical: pagerduty-db → slack-db`.
 Details in [docs/usage.md](docs/usage.md#route).
 
+## Checking against Prometheus rules
+
+Pass your alerting rules and amlint checks the config against the alerts that actually
+exist: a route or inhibit rule on an `alertname` no rule produces (with a "did you mean"),
+and alerts that, by their static labels, match no child route and land on the root
+receiver:
+
+```bash
+amlint check alertmanager.yml --rules 'rules/*.yml'   # quote the glob; repeat for more
+```
+
+```
+  ⚠  WARN   [route-unknown-alertname]  ·  alertmanager.yml:4:7  ·  route.routes[0]
+     Route matches alertname 'HighCpuUsage', which no alerting rule in the --rules files
+     produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source,
+     this branch is dead.
+```
+
+Prometheus rule files and prometheus-operator `PrometheusRule` manifests both work. At
+runtime alerts also carry labels from their PromQL series and `external_labels`, so amlint
+goes by the rule's static labels only and skips anything that depends on a label it can't
+know. Details in [docs/checks/rules.md](docs/checks/rules.md).
+
 ## CI example
 
 ```yaml
@@ -196,6 +220,9 @@ for PR annotations — see the [GitHub Action docs](https://danikdanik2013.githu
 | `deep-nesting` | info | route tree deeper than 5 levels |
 | `global-resolve-timeout-missing` | info | `global.resolve_timeout` not set; defaults to 5m |
 | `route-match-collision` | warn | two sibling routes with identical matchers |
+| `route-unknown-alertname` | warn | with `--rules`: route matches an `alertname` no alerting rule produces |
+| `inhibit-unknown-alertname` | warn | with `--rules`: inhibit rule matches an `alertname` no alerting rule produces |
+| `alert-hits-default-receiver` | info | with `--rules`: by its static labels, an alert matches no child route |
 
 Run `amlint explain <code>` for detailed description and examples of any check.
 

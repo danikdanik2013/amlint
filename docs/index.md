@@ -43,6 +43,7 @@ Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure t
 | Inhibition rules that silence too broadly, or never fire | ❌ | ✅ |
 | Timing misconfig (`group_wait`/`group_interval`/`repeat_interval`) | ❌ | ✅ |
 | Unused or empty receivers | ❌ | ✅ |
+| Routes and inhibit rules on alert names your Prometheus rules don't define (`--rules`) | ❌ | ✅ |
 | Batch routing regression tests (label-set → expected receiver, run from a file in CI) | single alert, interactive only | ✅ |
 
 amtool already covers the first four rows — amlint re-implements those so you get one

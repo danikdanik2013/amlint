@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `amlint check --rules GLOB` (repeatable) checks the config against Prometheus alerting
+  rules: rule files (`groups:`) and prometheus-operator `PrometheusRule` manifests
+  (`spec.groups:`, also several per file or in a `kind: List`). Recording rules are skipped.
+  Each alert is described by its static labels, `alertname` plus the rule's `labels:`, with
+  templated values unknown. Three new checks, which run only with `--rules`:
+  - `route-unknown-alertname` (warn) — a route matches an `alertname` no rule produces, with
+    a "did you mean" suggestion. Checks `=` and `!=`, each name of a plain `=~"A|B|C"` list,
+    and any other regex that matches none of the alert names
+  - `inhibit-unknown-alertname` (warn) — the same for inhibit rule source and target matchers
+  - `alert-hits-default-receiver` (info) — based on its static labels, an alert matches no
+    child route and goes to the root receiver. Alerts whose route depends on a templated
+    label, or on a label no rule sets (so it comes from the series or `external_labels`),
+    are skipped
+- A `--rules` glob that matches no files, or a rule file that isn't valid YAML, exits 2. A
+  config to check that looks like a rule file (an unquoted `--rules` glob the shell
+  expanded) gets a warning
+
 ## [0.4.0] - 2026-10-16
 
 First PyPI release since 0.2.0: it also ships everything under 0.2.1 and 0.3.0 below, which

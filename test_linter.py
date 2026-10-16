@@ -2288,3 +2288,356 @@ def test_cli_diff_routing_skipped_when_config_cannot_be_simulated(tmp_path, caps
     assert "Routing not compared" in capsys.readouterr().out
     main(["diff", str(old_path), str(new_path), "--format", "json"])
     assert "old config" in json.loads(capsys.readouterr().out)["routing"]["skipped"]
+
+
+# ── --rules: checks against Prometheus alerting rules ────────────────
+
+RULE_CODES = {"route-unknown-alertname", "inhibit-unknown-alertname",
+              "alert-hits-default-receiver"}
+
+NODE_RULES = """\
+groups:
+  - name: node
+    rules:
+      - record: node:cpu_busy:ratio
+        expr: avg(rate(node_cpu_seconds_total{mode!="idle"}[5m]))
+      - alert: HighCPUUsage
+        expr: node:cpu_busy:ratio > 0.9
+        labels:
+          severity: warning
+      - alert: DiskFull
+        expr: node_filesystem_free_ratio < 0.05
+        labels:
+          severity: critical
+      - alert: QueueBacklog
+        expr: queue_depth > 1000
+"""
+
+
+def _rule_alerts(tmp_path, text, name="rules.yml"):
+    from amlint.rules import load_rules
+    path = tmp_path / name
+    path.write_text(text)
+    alerts, _ = load_rules([str(path)])
+    return alerts
+
+
+def _rules_lint(tmp_path, route, rules=NODE_RULES, inhibit_rules=None, code=None):
+    cfg = {"route": route, "inhibit_rules": inhibit_rules or []}
+    return [f for f in lint(cfg, rules=_rule_alerts(tmp_path, rules))
+            if f.code in RULE_CODES and (code is None or f.code == code)]
+
+
+def _routes(*matchers):
+    return {"receiver": "default",
+            "routes": [{"matchers": [m], "receiver": "team"} for m in matchers]}
+
+
+def test_rules_loader_keeps_alerting_rules_only(tmp_path):
+    alerts = _rule_alerts(tmp_path, NODE_RULES)
+    assert [a.name for a in alerts] == ["HighCPUUsage", "DiskFull", "QueueBacklog"]
+    assert alerts[0].labels == {"alertname": "HighCPUUsage", "severity": "warning"}
+    assert alerts[2].labels == {"alertname": "QueueBacklog"}
+    assert alerts[2].location.endswith("rules.yml:14")
+
+
+def test_rules_recording_rule_name_is_not_an_alert(tmp_path):
+    [f] = _rules_lint(tmp_path, _routes('alertname="node:cpu_busy:ratio"'),
+                      code="route-unknown-alertname")
+    assert "'node:cpu_busy:ratio'" in f.msg
+
+
+def test_rules_label_values_read_like_prometheus(tmp_path):
+    [alert] = _rule_alerts(tmp_path, """\
+groups:
+  - name: g
+    rules:
+      - alert: Weird
+        expr: up == 0
+        labels: {code: 0x1F, enabled: yes, empty: "", gone: null, alertname: Other,
+                 owner: "{{ $labels.team }}", nested: [a]}
+""")
+    # Go reads scalars as their text; an empty value drops the label; alertname is the rule's
+    assert alert.labels == {"alertname": "Weird", "code": "0x1F", "enabled": "yes"}
+    assert alert.unknown == {"owner", "nested"}
+
+
+def test_rules_prometheus_operator_shapes(tmp_path):
+    alerts = _rule_alerts(tmp_path, """\
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata: {name: k8s}
+spec:
+  groups:
+    - name: k8s
+      rules:
+        - alert: KubePodCrashLooping
+          expr: kube_pod_restarts > 3
+          labels: {severity: warning}
+---
+apiVersion: v1
+kind: List
+items:
+  - apiVersion: monitoring.coreos.com/v1
+    kind: PrometheusRule
+    spec:
+      groups:
+        - name: nodes
+          rules:
+            - alert: KubeNodeNotReady
+              expr: kube_node_ready == 0
+""", name="prometheusrule.yaml")
+    assert [a.name for a in alerts] == ["KubePodCrashLooping", "KubeNodeNotReady"]
+    assert alerts[0].labels["severity"] == "warning"
+    assert alerts[0].line == 8 and alerts[1].line == 21
+
+
+def test_route_unknown_alertname_typo_has_hint(tmp_path):
+    route = _routes('alertname="HighCpuUsage"', 'alertname="DiskFull"')
+    [f] = _rules_lint(tmp_path, route, code="route-unknown-alertname")
+    assert f.level == WARN and f.where == "route.routes[0]"
+    assert "'HighCpuUsage'" in f.msg and "did you mean 'HighCPUUsage'?" in f.msg
+    assert "this branch is dead" in f.msg
+
+
+def test_route_unknown_alertname_match_spellings(tmp_path):
+    route = {"receiver": "default", "routes": [
+        {"match": {"alertname": "DiskFul"}, "receiver": "a"},
+        {"match_re": {"alertname": "Disk.*"}, "receiver": "a"},
+        {"match": {"severity": "critical"}, "receiver": "a"},
+    ]}
+    found = _rules_lint(tmp_path, route, code="route-unknown-alertname")
+    assert [(f.where, "did you mean 'DiskFull'?" in f.msg) for f in found] == [
+        ("route.routes[0]", True)]
+
+
+@pytest.mark.parametrize("matcher, expected", [
+    ('alertname=~"HighCPUUsage|DiskFull"', []),
+    ('alertname=~"Disk.+|Queue.+"', []),
+    ('alertname=~"(?i)highcpu.*"', []),
+    ('alertname=~"HighCPUUsage|DiskFul"',
+     ["'DiskFul' (in alertname=~\"HighCPUUsage|DiskFul\")", "that part of the regex never"]),
+    ('alertname=~"^(?:DiskFul)$"', ["'DiskFul'", "did you mean 'DiskFull'?", "branch is dead"]),
+    ('alertname=~"Node.*"', ["matches none of the 3 alert names", "branch is dead"]),
+])
+def test_route_unknown_alertname_regex(tmp_path, matcher, expected):
+    found = _rules_lint(tmp_path, _routes(matcher), code="route-unknown-alertname")
+    if not expected:
+        assert found == []
+    else:
+        [f] = found
+        for text in expected:
+            assert text in f.msg
+
+
+def test_route_unknown_alertname_negative_matchers(tmp_path):
+    route = _routes('alertname!="Watchdgo"', 'alertname!="DiskFull"',
+                    'alertname!~"DiskFull|Watchdgo"')
+    found = _rules_lint(tmp_path, route, code="route-unknown-alertname")
+    assert [f.where for f in found] == ["route.routes[0]", "route.routes[2]"]
+    assert "excludes alertname 'Watchdgo'" in found[0].msg
+    assert "the matcher excludes nothing" in found[0].msg
+    assert "that part of the regex excludes nothing" in found[1].msg
+
+
+def test_inhibit_unknown_alertname(tmp_path):
+    inhibit = [
+        {"source_matchers": ['alertname="DiskFul"'],
+         "target_matchers": ['alertname="HighCPUUsage"'], "equal": ["instance"]},
+        {"source_match": {"alertname": "DiskFull"},
+         "target_match_re": {"alertname": "Node.*"}, "equal": ["instance"]},
+        {"source_match": {"alertname": "DiskFull"},
+         "target_match": {"severity": "warning"}, "equal": ["instance"]},
+    ]
+    found = _rules_lint(tmp_path, {"receiver": "default"}, inhibit_rules=inhibit,
+                        code="inhibit-unknown-alertname")
+    assert [f.where for f in found] == ["inhibit_rules[0]", "inhibit_rules[1]"]
+    assert found[0].msg.startswith("Inhibit rule source matches alertname 'DiskFul'")
+    assert "did you mean 'DiskFull'?" in found[0].msg
+    assert found[1].msg.startswith('Inhibit rule target matches alertname=~"Node.*"')
+    assert "never mutes anything" in found[1].msg
+    assert all(f.level == WARN for f in found)
+
+
+def test_alert_hits_default_receiver(tmp_path):
+    route = _routes('severity="critical"', 'severity="warning"')
+    [f] = _rules_lint(tmp_path, route, code="alert-hits-default-receiver")
+    assert f.level == "info" and f.where == "route"
+    assert f.msg.startswith("Based on static rule labels (alertname=QueueBacklog), "
+                            "alert 'QueueBacklog' from ")
+    assert "rules.yml:14" in f.msg and "root receiver 'default'" in f.msg
+    assert "external_labels" in f.msg
+
+
+def test_alert_hits_default_receiver_skips_templated_labels(tmp_path):
+    rules = """\
+groups:
+  - name: g
+    rules:
+      - alert: DiskFull
+        expr: disk_free_ratio < 0.05
+        labels:
+          severity: '{{ if lt $value 0.01 }}critical{{ else }}info{{ end }}'
+      - alert: QueueBacklog
+        expr: queue_depth > 1000
+        labels: {severity: info}
+"""
+    found = _rules_lint(tmp_path, _routes('severity="critical"'), rules=rules,
+                        code="alert-hits-default-receiver")
+    assert ["'QueueBacklog'" in f.msg for f in found] == [True]
+
+
+def test_alert_hits_default_receiver_skips_labels_no_rule_sets(tmp_path):
+    # namespace comes from the PromQL series: it may route HighCPUUsage anywhere
+    route = _routes('severity="critical"', 'namespace="prod"')
+    assert _rules_lint(tmp_path, route, code="alert-hits-default-receiver") == []
+
+
+def test_alert_hits_default_receiver_quiet_without_child_routes(tmp_path):
+    assert _rules_lint(tmp_path, {"receiver": "default"}) == []
+
+
+def test_alert_hits_default_receiver_not_for_alerts_reaching_a_child(tmp_path):
+    route = {"receiver": "default", "routes": [
+        {"matchers": ['alertname=~"HighCPUUsage|DiskFull|QueueBacklog"'], "continue": True,
+         "receiver": "log"},
+        {"matchers": ['severity="critical"'], "receiver": "pager"},
+    ]}
+    assert _rules_lint(tmp_path, route) == []
+
+
+def test_rules_checks_skip_regexes_amlint_cannot_evaluate(tmp_path):
+    # \pL: Router refuses the tree and the matcher can't be tested; amlint says nothing
+    route = _routes('alertname=~"\\pL+"', 'severity="critical"')
+    assert _rules_lint(tmp_path, route) == []
+
+
+def test_rules_checks_off_without_rules():
+    cfg = {"route": _routes('alertname="Nope"'), "receivers": [{"name": "default"}]}
+    assert not codes(cfg) & RULE_CODES
+    assert not {f.code for f in lint(cfg, rules=[])} & RULE_CODES
+
+
+def test_router_match_partial():
+    from amlint.routing import Router
+    router = Router({"receiver": "d", "routes": [
+        {"matchers": ['team="infra"', 'env="prod"'], "receiver": "a"},
+        {"matchers": ['severity="critical"'], "receiver": "b"},
+    ]})
+    # team decides the first child whatever env is; only then does severity count
+    assert [m.path for m in router.match_partial({"team": "db"}, {"env"})] == [("route",)]
+    assert router.match_partial({"team": "infra"}, {"env"}) is None
+    [m] = router.match_partial({"severity": "critical"}, {"env"})
+    assert m.receiver == "b"
+    assert router.match_partial({"team": "db"}, {"severity"}) is None
+
+
+RULES_AM = """\
+global:
+  resolve_timeout: 5m
+route:
+  receiver: default
+  routes:
+    - matchers: [alertname="HighCpuUsage"]{suppress}
+      receiver: default
+receivers:
+  - name: default
+    webhook_configs: [{{url: 'http://fake'}}]
+"""
+
+
+def _rules_dir(tmp_path):
+    rules = tmp_path / "rules"
+    rules.mkdir()
+    (rules / "node.yml").write_text(NODE_RULES)
+    (rules / "k8s.yaml").write_text(
+        "spec:\n  groups:\n    - name: k8s\n      rules:\n"
+        "        - alert: KubePodCrashLooping\n          expr: x > 0\n")
+    return rules
+
+
+def test_cli_check_rules_json(tmp_path, capsys):
+    rules = _rules_dir(tmp_path)
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(RULES_AM.format(suppress=""))
+    args = ["check", str(cfg), "--format", "json",
+            "--rules", str(rules / "*.yml"), "--rules", str(rules / "*.yaml")]
+    assert main(args) == 0
+    out = json.loads(capsys.readouterr().out)
+    [f] = [f for f in out if f["code"] == "route-unknown-alertname"]
+    assert (f["file"], f["line"], f["column"], f["where"]) == (
+        str(cfg), 6, 7, "route.routes[0]")
+    assert "did you mean 'HighCPUUsage'?" in f["message"]
+    assert main([*args, "--strict"]) == 1
+
+
+def test_cli_check_rules_suppression(tmp_path, capsys):
+    rules = _rules_dir(tmp_path)
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(RULES_AM.format(suppress="  # amlint: disable=route-unknown-alertname"))
+    main(["check", str(cfg), "--format", "json", "--rules", str(rules / "*.yml")])
+    captured = capsys.readouterr()
+    assert "route-unknown-alertname" not in {f["code"] for f in json.loads(captured.out)}
+    assert captured.err == ""
+
+
+def test_cli_check_rules_glob_without_matches_exits_2(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(RULES_AM.format(suppress=""))
+    with pytest.raises(SystemExit) as exc:
+        main(["check", str(cfg), "--rules", str(tmp_path / "missing" / "*.yml")])
+    assert exc.value.code == 2
+    assert "matches no files" in capsys.readouterr().err
+    with pytest.raises(SystemExit) as exc:
+        main(["check", str(cfg), "--rules", str(tmp_path)])
+    assert exc.value.code == 2
+    assert "is a directory; use a glob like" in capsys.readouterr().err
+
+
+def test_cli_check_rules_unparsable_exits_2(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(RULES_AM.format(suppress=""))
+    bad = tmp_path / "bad.yml"
+    bad.write_text("groups: [\n")
+    with pytest.raises(SystemExit) as exc:
+        main(["check", str(cfg), "--rules", str(bad)])
+    assert exc.value.code == 2
+    assert "failed to parse YAML" in capsys.readouterr().err
+
+
+def test_cli_check_rules_without_alerting_rules_warns(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(RULES_AM.format(suppress=""))
+    recording = tmp_path / "recording.yml"
+    recording.write_text("groups:\n  - name: r\n    rules:\n      - record: a:b\n"
+                         "        expr: sum(up)\n")
+    empty = tmp_path / "empty.yml"
+    empty.write_text("")
+    main(["check", str(cfg), "--format", "json", "--rules", str(recording),
+          "--rules", str(empty)])
+    captured = capsys.readouterr()
+    assert not {f["code"] for f in json.loads(captured.out)} & RULE_CODES
+    assert "empty.yml: no rule groups found" in captured.err
+    assert "no alerting rules in the --rules files" in captured.err
+
+
+def test_cli_check_rules_hints_at_shell_expanded_glob(tmp_path, capsys):
+    rules = _rules_dir(tmp_path)
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(RULES_AM.format(suppress=""))
+    # what `--rules rules/*.y*ml am.yml` becomes unquoted: the second rule file is a config
+    main(["check", "--rules", str(rules / "k8s.yaml"), str(rules / "node.yml"), str(cfg)])
+    err = capsys.readouterr().err
+    assert "node.yml looks like a Prometheus rule file" in err
+    assert "Quote the --rules glob" in err
+
+
+def test_rules_codes_listed_and_explained(capsys):
+    from amlint.explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
+    assert RULE_CODES <= set(EXPLAINS) and not RULE_CODES & ALSO_CAUGHT_BY_AMTOOL
+    assert main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert all(code in out for code in RULE_CODES)
+    for code in sorted(RULE_CODES):
+        assert main(["explain", code]) == 0
+        assert "--rules" in capsys.readouterr().out

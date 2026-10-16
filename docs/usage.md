@@ -21,6 +21,7 @@ cat alertmanager.yml | amlint check -  # stdin
 | `--ignore CODE` | Skip findings with these codes; repeat or comma-separate |
 | `--only CODE` | Show only findings with these codes; repeat or comma-separate |
 | `--exit-zero` | Always exit 0 regardless of findings; useful for informational CI runs |
+| `--rules GLOB` | Also check routes and inhibit rules against these Prometheus rule files; quote the glob, repeat for more ([details](#checking-against-prometheus-rules)) |
 
 **Project config** — amlint loads config automatically. Two options (first found wins):
 
@@ -96,13 +97,48 @@ A finding's line is the one shown in the output. Unknown codes get the same "did
 warning as `--ignore`, and a `disable-file` comment further down the file is ignored with a
 warning. Suppressions also apply to `diff` and `tree`.
 
+### Checking against Prometheus rules
+
+On its own, amlint only sees the Alertmanager config. Give it your alerting rules and it
+also checks that the routes and inhibit rules match alerts that actually exist:
+
+```bash
+amlint check alertmanager.yml --rules 'rules/*.yml'
+amlint check alertmanager.yml --rules 'rules/**/*.yml' --rules 'manifests/*-prometheusrule.yaml'
+```
+
+```
+  ⚠  WARN   [route-unknown-alertname]  ·  alertmanager.yml:4:7  ·  route.routes[0]
+     Route matches alertname 'HighCpuUsage', which no alerting rule in the --rules files
+     produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source,
+     this branch is dead.
+```
+
+`--rules` takes Prometheus rule files (`groups:`) and prometheus-operator `PrometheusRule`
+manifests (`spec.groups:`); recording rules are skipped. Quote the glob: unquoted, the
+shell expands it and every file after the first is read as an Alertmanager config (amlint
+warns when a config looks like a rule file). `**` matches subdirectories. It adds three
+checks:
+
+| code | level | what it catches |
+|------|-------|-----------------|
+| [`route-unknown-alertname`](checks/rules.md#route-unknown-alertname) | warn | route matches an `alertname` no rule produces (typo, renamed or removed rule), with a "did you mean" |
+| [`inhibit-unknown-alertname`](checks/rules.md#inhibit-unknown-alertname) | warn | the same for inhibit rule source and target matchers |
+| [`alert-hits-default-receiver`](checks/rules.md#alert-hits-default-receiver) | info | based on its static labels, an alert matches no child route and goes to the root receiver |
+
+amlint knows only what the rule file says: `alertname` plus the rule's `labels:`. At
+runtime alerts also get the labels of their PromQL series and Prometheus'
+`external_labels`, so messages say "based on static rule labels", a templated label value
+counts as unknown, and a result that depends on an unknown label is skipped rather than
+guessed. [Prometheus rules checks](checks/rules.md) has the details.
+
 ### Exit codes
 
 | code | meaning |
 |------|---------|
 | `0` | No issues (or only WARN/INFO without `--strict`) |
 | `1` | One or more ERROR found (or WARN with `--strict`) |
-| `2` | File not found or YAML parse error |
+| `2` | File not found or YAML parse error, also in a `--rules` file, or a `--rules` glob that matches no files |
 
 ### JSON output
 

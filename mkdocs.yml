@@ -40,6 +40,7 @@ nav:
     - Receivers: checks/receivers.md
     - Inhibition: checks/inhibition.md
     - Timing: checks/timing.md
+    - Prometheus rules: checks/rules.md
   - Contributing: contributing.md
 
 markdown_extensions:
