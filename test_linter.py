@@ -101,6 +101,17 @@ def test_groupby_ellipsis_alone_ok():
     assert "groupby-ellipsis" not in codes(cfg)
 
 
+def test_groupby_ellipsis_is_an_error():
+    """Alertmanager refuses to load it: 'cannot have wildcard group_by (`...`) and other
+    labels at the same time'. Found by the differential tests (amtool check-config)."""
+    cfg = {
+        "route": {"receiver": "a", "routes": [{"group_by": ["alertname", "..."]}]},
+        "receivers": [{"name": "a"}],
+    }
+    [f] = [f for f in lint(cfg) if f.code == "groupby-ellipsis"]
+    assert f.level == ERROR and f.where == "route.routes[0]"
+
+
 def test_inhibit_same_match():
     cfg = {
         "route": {"receiver": "a"},
@@ -497,6 +508,21 @@ def test_slack_global_api_url_ok():
         "route": {"receiver": "a"},
         "receivers": [{"name": "a", "slack_configs": [{"channel": "#alerts"}]}],
     }
+    assert "slack-no-api-url" not in codes(cfg)
+
+
+def test_slack_empty_api_url_is_not_unset():
+    """`api_url: ""` (say, an empty Helm value) does not fall back to global.slack_api_url:
+    Alertmanager parses it as a URL and fails with 'unsupported scheme'. Found by the
+    differential tests."""
+    cfg = {
+        "global": {"slack_api_url": "https://hooks.slack.com/global"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "slack_configs": [{"api_url": ""}]}],
+    }
+    [f] = [f for f in lint(cfg) if f.code == "slack-no-api-url"]
+    assert f.level == ERROR and "empty 'api_url'" in f.msg
+    cfg["receivers"][0]["slack_configs"][0]["api_url"] = None  # `api_url:` with no value
     assert "slack-no-api-url" not in codes(cfg)
 
 
@@ -1156,6 +1182,116 @@ def test_route_label_values_are_strings():
     route = {"receiver": "default", "routes": [{"match": {"code": 500}, "receiver": "http"}]}
     assert _receivers(route, {"code": 500}) == ["http"]
     assert _receivers(route, {"code": "500"}) == ["http"]
+
+
+# The tests below each pin a difference from Alertmanager that the differential tests in
+# tests/differential found (amlint used to route these alerts differently from amtool).
+
+def test_route_yaml_scalars_keep_their_text(tmp_path):
+    """Alertmanager (Go yaml.v2) reads `NO` into a string as "NO"; YAML 1.1 says False."""
+    from amlint.cli import load
+    cfg_path = tmp_path / "am.yml"
+    cfg_path.write_text(
+        "route:\n"
+        "  receiver: default\n"
+        "  routes:\n"
+        "    - match: {country: NO, version: 1.10, code: 0x1F, on: yes, empty: ~}\n"
+        "      receiver: matched\n"
+        "      continue: true\n"
+        "receivers: [{name: default}, {name: matched}]\n"
+    )
+    cfg = load(str(cfg_path))
+    labels = {"country": "NO", "version": "1.10", "code": "0x1F", "on": "yes"}
+    assert _receivers(cfg["route"], labels) == ["matched"]
+    assert _receivers(cfg["route"], {**labels, "country": "false"}) == ["default"]
+    assert cfg["route"]["routes"][0]["continue"] is True  # other fields keep their types
+
+
+def test_route_unquoted_matcher_value_is_unescaped():
+    """`path=x\\\\y` (unquoted) is the value x\\y to Alertmanager's classic matcher parser."""
+    route = {"receiver": "default", "routes": [
+        {"matchers": [r"path=x\\y"], "receiver": "bs"},
+        {"matchers": [r"svc=~api\.v1"], "receiver": "api"},  # a spurious escape stays
+    ]}
+    assert _receivers(route, {"path": "x\\y"}) == ["bs"]
+    assert _receivers(route, {"path": "x\\\\y"}) == ["default"]
+    assert _receivers(route, {"svc": "api.v1"}) == ["api"]
+    assert _receivers(route, {"svc": "apixv1"}) == ["default"]
+
+
+def test_route_word_boundary_like_go():
+    """Go's \\b and \\B are ASCII-only, ignore (?i), and \\B matches in an empty string."""
+    route = {"receiver": "default", "routes": [
+        {"matchers": [r'a=~"x\\b.*"'], "receiver": "b"},
+        {"matchers": [r'i=~"(?i)x\\b.*"'], "receiver": "bi"},
+        {"matchers": [r'e=~"\\B"'], "receiver": "nb"},
+    ]}
+    assert _receivers(route, {"a": "xé"}) == ["b"]  # é is not a word character in Go
+    assert _receivers(route, {"a": "xy"}) == ["nb"]
+    assert _receivers(route, {"a": "xy", "e": "z"}) == ["default"]
+    assert _receivers(route, {"a": "xy", "i": "x\u212a"}) == ["bi"]  # Kelvin sign
+    assert _receivers(route, {"a": "xy", "i": "xk"}) == ["nb"]
+
+
+def test_route_dollar_is_the_end_of_the_text():
+    """Without (?m), Go's $ only matches at the very end, never before a final newline."""
+    route = {"receiver": "default", "routes": [
+        {"matchers": [r'a=~"x$\\n?"'], "receiver": "end"},
+        {"matchers": [r'm=~"(?m)x$\\ny"'], "receiver": "multiline"},
+    ]}
+    assert _receivers(route, {"a": "x"}) == ["end"]
+    assert _receivers(route, {"a": "x\n"}) == ["default"]
+    assert _receivers(route, {"a": "-", "m": "x\ny"}) == ["multiline"]
+
+
+def test_route_quantified_anchor_matches_like_go():
+    route = {"receiver": "default", "routes": [{"matchers": [r'a=~"^*x$+"'], "receiver": "x"}]}
+    assert _receivers(route, {"a": "x"}) == ["x"]
+    assert _receivers(route, {"a": "xx"}) == ["default"]
+
+
+def test_route_bare_regex_loses_its_closing_brace():
+    """Alertmanager's classic parser strips a trailing "}" from a matchers: entry, braces
+    or not: bare `code=~[0-9]{3}` is the regex [0-9]{3 (a literal "{3")."""
+    route = {"receiver": "default", "routes": [{"matchers": ["code=~[0-9]{3}"], "receiver": "x"}]}
+    assert _receivers(route, {"code": "123"}) == ["default"]
+    assert _receivers(route, {"code": "1{3"}) == ["x"]
+    for entry in ['code=~"[0-9]{3}"', "{code=~[0-9]{3}}"]:
+        route["routes"][0]["matchers"] = [entry]
+        assert _receivers(route, {"code": "123"}) == ["x"]
+
+
+def test_route_quoted_label_name_reads_the_entry_as_go_strings():
+    """A quoted label name is for Alertmanager's UTF-8 parser only, which unescapes the
+    whole entry like Go string literals: \\t is a tab there, and stays \\t elsewhere."""
+    route = {"receiver": "default", "routes": [
+        {"matchers": [r'"service.name"="api", tier="a\tb"'], "receiver": "utf8"},
+        {"matchers": [r'tier="a\tb"'], "receiver": "classic"},
+        {"matchers": [r'svc.name=api'], "receiver": "bare"},
+    ]}
+    assert _receivers(route, {"service.name": "api", "tier": "a\tb"}) == ["utf8"]
+    assert _receivers(route, {"service.name": "x", "tier": "a\\tb"}) == ["classic"]
+    assert _receivers(route, {"svc.name": "api"}) == ["bare"]
+
+
+def test_route_unicode_escape_falls_back_to_the_utf8_parser():
+    """\\u0041 is no RE2 escape, so the classic reading fails and the UTF-8 one (A) wins."""
+    route = {"receiver": "default", "routes": [{"matchers": [r'a=~"\u0041+"'], "receiver": "x"}]}
+    assert _receivers(route, {"a": "AA"}) == ["x"]
+    assert "bad-regex" not in codes({"route": route, "receivers": [{"name": "default"}]})
+
+
+@pytest.mark.parametrize("route, message", [
+    ({"matchers": [r'"x.y"="a\.b"']}, "cannot parse matcher"),  # \. is no Go escape
+    ({"matchers": ["a=b,,c=d"]}, "cannot parse matcher"),
+    ({"matchers": ['a=b"c']}, "cannot parse matcher"),
+    ({"match": {"k8s.ns": "x"}}, "label name 'k8s.ns' is invalid"),
+    ({"match_re": {"1a": "x"}}, "label name '1a' is invalid"),
+])
+def test_router_rejects_matchers_alertmanager_rejects(route, message):
+    from amlint.routing import Router, RoutingError
+    with pytest.raises(RoutingError, match=re.escape(message)):
+        Router({"receiver": "d", "routes": [route]})
 
 
 @pytest.mark.parametrize("route, message", [
@@ -2026,6 +2162,19 @@ def test_bad_regex_rejected_by_re2(pattern):
                                      "foo(?i)bar", "[[:alpha:]]+", r"\\x{1F600}"])
 def test_go_only_regex_syntax_ok(pattern):
     assert "bad-regex" not in codes(_route_regex(pattern))
+
+
+@pytest.mark.parametrize("pattern", [r"^*a", r"a$+", r"\\b+a", r"\\A?a\\z{2}"])
+def test_quantified_anchors_are_valid_go(pattern):
+    """Go accepts a quantifier after ^ $ \\A \\z \\b \\B, Python rejects it ("nothing to
+    repeat"). Found by the differential tests."""
+    assert "bad-regex" not in codes(_route_regex(pattern))
+
+
+@pytest.mark.parametrize("pattern", [r"[\\b]", r"[a\\B]", r"[\\A]", r"[\\z]"])
+def test_bad_regex_assertion_inside_class(pattern):
+    """Python reads [\\b] as a backspace, Go rejects it: 'invalid escape sequence'."""
+    assert "bad-regex" in codes(_route_regex(pattern))
 
 
 def test_bad_regex_in_inhibit_rule():

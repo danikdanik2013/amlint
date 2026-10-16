@@ -142,14 +142,14 @@ A catch-all route (no `match`, `match_re`, or `matchers`) with `continue: false`
 
 ## groupby-ellipsis
 
-**Level:** warn
+**Level:** error
 
-`group_by` contains `...` (group by all labels) alongside explicit labels. The explicit labels are redundant — `...` already includes everything.
+`group_by` contains `...` (group by all labels) alongside explicit labels. Alertmanager refuses to load the config: `amtool check-config` fails with "cannot have wildcard group_by (`...`) and other labels at the same time".
 
 === "Bad"
     ```yaml
     route:
-      group_by: ['...', alertname, cluster]  # alertname and cluster are redundant
+      group_by: ['...', alertname, cluster]  # rejected: '...' plus explicit labels
     ```
 
 === "Fixed"

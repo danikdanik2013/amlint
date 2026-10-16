@@ -36,6 +36,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from .config import load_project_config
+from .goyaml import AlertmanagerLoader
 from .linter import (
     ERROR,
     INFO,
@@ -116,20 +117,21 @@ def _read(path) -> str:
         return f.read()
 
 
-def _read_yaml(path, content=None):
+def _read_yaml(path, content=None, loader=yaml.SafeLoader):
     """Parse a YAML file, or stdin for "-"; exits 2 if it is missing or unparsable."""
     if content is None:
         content = _read(path)
     try:
-        return yaml.safe_load(content)
+        return yaml.load(content, Loader=loader)
     except yaml.YAMLError as e:
         err_console.print(f"[red]Failed to parse YAML[/red] ({path}): {e}")
         sys.exit(2)
 
 
 def load(path, content=None):
-    """Load an Alertmanager config; exits 2 unless its top level is a mapping."""
-    cfg = _read_yaml(path, content)
+    """Load an Alertmanager config; exits 2 unless its top level is a mapping. Strings
+    Alertmanager reads as written (`match: {country: NO}`) keep their text."""
+    cfg = _read_yaml(path, content, AlertmanagerLoader)
     if cfg is None:
         return {}
     if not isinstance(cfg, dict):
