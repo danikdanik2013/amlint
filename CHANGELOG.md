@@ -1,5 +1,42 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `invalid-root-route` (error) — root route has no `receiver`, or sets matchers, `continue`,
+  `mute_time_intervals` or `active_time_intervals`; Alertmanager refuses to load such a config
+  (also caught by `amtool check-config`, marked so in `amlint list`)
+- Warning on stderr for unknown check codes in `--ignore`, `--only` and `severity:`, with a
+  "did you mean" suggestion
+
+### Fixed
+- `amlint test` (simulate.py) now matches the way Alertmanager does: regexes are anchored
+  (`severity=~"crit"` no longer matches `critical`), quoted values with escapes and
+  multi-matcher strings (`{a="1", b="2"}`) go through the linter's matcher parser, an
+  unparseable matcher no longer turns a route into a catch-all, and a missing label
+  compares as the empty string
+- Inhibition checks (`inhibit-no-equal`, `inhibit-same-match`, `circular-inhibition`) now read
+  `source_matchers` / `target_matchers`; previously only `source_match` / `target_match` were seen
+- `bad-regex` follows Go RE2 instead of Python `re`: lookarounds, backreferences, possessive
+  quantifiers and atomic groups are now errors, while Go-only syntax (`\pL`, `\z`, `(?<name>)`,
+  `[[:alpha:]]`, `(?U)`) no longer is; regexes in inhibit rules are checked too
+- Quoted matcher values (`svc=~"a|b"`) are unquoted before checking, and multi-matcher strings
+  (`{a="1", b="2"}`) are split
+- `repeat-before-group` and `wait-exceeds-interval` account for values inherited from parent
+  routes and Alertmanager defaults (30s / 5m / 4h)
+- `empty-receiver` no longer fires for pushover, webex, jira, rocketchat, msteamsv2 and
+  incidentio receivers; an empty list (`webhook_configs: []`) now counts as empty
+- `undefined-time-interval` accepts intervals defined in legacy top-level `mute_time_intervals:`
+- `route-match-collision` treats `match:` and `matchers:` spellings as equal, and no longer
+  fires when the earlier sibling has `continue: true`
+- `slack-no-api-url` accepts `global.slack_api_url_file`; `victorops-no-api-key` accepts
+  `api_key_file`
+- Durations are parsed strictly (`30sec` is no longer read as `30s`) and support `y`
+- `diff` now runs the `template-file-missing` check
+- No more tracebacks on malformed input: a non-mapping top level exits 2 with a message,
+  non-mapping list entries are skipped
+- `--version` fallback no longer reports a stale `0.1.2` when run from a source checkout
+
 ## [0.3.0] - 2026-08-16
 
 ### Added
@@ -66,6 +103,7 @@
 - `telegram-no-bot-token` (error) — `telegram_configs` without `bot_token`/`bot_token_file`
 - `discord-no-webhook-url` (error) — `discord_configs` without `webhook_url`/`webhook_url_file`
 - 2 new receiver-integration checks bring the total to 25 → 27
+
 
 ## [0.1.10] - 2026-06-23
 

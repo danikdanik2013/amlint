@@ -6,6 +6,8 @@
 
 An inhibition rule has no `equal` field. Without `equal`, the rule silences **any** target alert whenever **any** source alert fires — regardless of whether they are related. This almost always silences more than intended.
 
+All inhibition checks understand both matcher syntaxes: `source_match` / `source_match_re` / `target_match` / `target_match_re` and the newer `source_matchers` / `target_matchers` lists.
+
 === "Bad"
     ```yaml
     inhibit_rules:

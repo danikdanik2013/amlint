@@ -28,7 +28,7 @@ schema violations — they're valid configs that behave wrong:
 - receiver defined but never routed to, or routed to but has no integration configured
 
 None of this fails `amtool check-config` or stops Alertmanager from starting. Run
-`amlint list` to see which of the 30 checks are these vs. which duplicate amtool's own
+`amlint list` to see which of the 31 checks are these vs. which duplicate amtool's own
 validation (included for convenience — one tool, one output format, no Go binary needed).
 
 ## Install
@@ -127,7 +127,8 @@ for PR annotations — see the [GitHub Action docs](https://danikdanik2013.githu
 | code | level | what it catches |
 |------|-------|-----------------|
 | `undefined-receiver` | error | route references a receiver that doesn't exist |
-| `bad-regex` | error | `match_re` pattern fails to compile |
+| `invalid-root-route` | error | root route has no `receiver`, or has matchers / `continue` / time intervals |
+| `bad-regex` | error | regex fails to compile or uses syntax Go RE2 rejects (lookarounds, backrefs) |
 | `no-root-route` | error | no root `route` defined |
 | `duplicate-receiver` | error | receiver name defined more than once |
 | `undefined-time-interval` | error | `mute_time_intervals` / `active_time_intervals` references unknown interval |

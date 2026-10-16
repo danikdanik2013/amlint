@@ -2,6 +2,7 @@
 """amlint CLI."""
 
 import argparse
+import difflib
 import json
 import os
 import sys
@@ -17,7 +18,7 @@ try:
     from importlib.metadata import version as _pkg_version
     _VERSION = _pkg_version("amlint")
 except Exception:
-    _VERSION = "0.1.2"
+    _VERSION = "unknown"  # running from a source checkout that isn't pip-installed
 
 try:
     import argcomplete
@@ -26,6 +27,7 @@ except ImportError:
     _ARGCOMPLETE = False
 
 from rich.console import Console
+from rich.markup import escape
 from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.table import Table
@@ -33,7 +35,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from .config import load_project_config
-from .linter import ERROR, INFO, WARN, lint
+from .linter import ERROR, INFO, WARN, _dict_items, lint
 from .simulate import simulate_route
 
 console = Console(highlight=False)
@@ -61,7 +63,36 @@ def _build_only(args_only) -> set:
     return codes
 
 
-def load(path):
+def _warn_unknown_codes(codes, source: str) -> None:
+    """A typo in --ignore/--only/severity: would otherwise be silently ignored."""
+    from .explains import EXPLAINS
+    for code in sorted(set(codes) - set(EXPLAINS)):
+        hint = difflib.get_close_matches(code, list(EXPLAINS), n=1)
+        suffix = f" — did you mean '{hint[0]}'?" if hint else ""
+        err_console.print(
+            f"[yellow]warning:[/yellow] unknown check code '{escape(code)}' in {source}{suffix}",
+            soft_wrap=True,  # one line, so the suggested code can be copied as-is
+        )
+
+
+def _project_settings(args):
+    """Merge .amlint.yml / pyproject.toml with CLI flags; warn about unknown codes."""
+    proj = load_project_config()
+    ignore = _build_ignore(args.ignore, proj.get("ignore"))
+    only = _build_only(getattr(args, "only", None))
+    severity = proj.get("severity") or {}
+    _warn_unknown_codes(ignore, "ignore list")
+    _warn_unknown_codes(only, "--only")
+    _warn_unknown_codes(severity, "severity config")
+    return proj, ignore, only, severity
+
+
+def _basedir(path):
+    return os.path.dirname(os.path.abspath(path)) if path != "-" else None
+
+
+def _read_yaml(path):
+    """Parse a YAML file, or stdin for "-"; exits 2 if it is missing or unparsable."""
     try:
         if path == "-":
             content = sys.stdin.read()
@@ -71,10 +102,24 @@ def load(path):
                 sys.exit(2)
             with open(path) as f:
                 content = f.read()
-        return yaml.safe_load(content) or {}
+        return yaml.safe_load(content)
     except yaml.YAMLError as e:
         err_console.print(f"[red]Failed to parse YAML[/red] ({path}): {e}")
         sys.exit(2)
+
+
+def load(path):
+    """Load an Alertmanager config; exits 2 unless its top level is a mapping."""
+    cfg = _read_yaml(path)
+    if cfg is None:
+        return {}
+    if not isinstance(cfg, dict):
+        err_console.print(
+            f"[red]Not an Alertmanager config[/red] ({path}): "
+            f"top level must be a mapping, got {type(cfg).__name__}"
+        )
+        sys.exit(2)
+    return cfg
 
 
 def _print_findings(findings, label=None):
@@ -178,19 +223,15 @@ def _to_sarif(all_findings, version: str) -> dict:
 
 
 def _cmd_check(args):
-    proj = load_project_config()
-    ignore = _build_ignore(args.ignore, proj.get("ignore"))
-    only = _build_only(args.only)
+    proj, ignore, only, severity = _project_settings(args)
     strict = args.strict or proj.get("strict", False)
-    severity = proj.get("severity") or {}
 
     multi = len(args.files) > 1
     all_findings = []
     for path in args.files:
         cfg = load(path)
-        basedir = os.path.dirname(os.path.abspath(path)) if path != "-" else None
         all_findings.append((path, lint(
-            cfg, ignore=ignore, severity=severity, only=only or None, basedir=basedir,
+            cfg, ignore=ignore, severity=severity, only=only or None, basedir=_basedir(path),
         )))
 
     if args.format == "json":
@@ -225,18 +266,15 @@ def _format_matchers(node: dict) -> list:
 
 
 def _cmd_tree(args) -> int:
-    proj = load_project_config()
-    ignore = _build_ignore(args.ignore, proj.get("ignore"))
-    severity = proj.get("severity") or {}
+    _, ignore, _, severity = _project_settings(args)
 
     cfg = load(args.file)
     route = cfg.get("route")
-    if not route:
+    if not isinstance(route, dict):
         err_console.print("[red]No root 'route' defined.[/red]")
         return 2
 
-    basedir = os.path.dirname(os.path.abspath(args.file)) if args.file != "-" else None
-    findings = lint(cfg, ignore=ignore, severity=severity, basedir=basedir)
+    findings = lint(cfg, ignore=ignore, severity=severity, basedir=_basedir(args.file))
     by_path: dict = {}
     for f in findings:
         by_path.setdefault(f.where, []).append(f)
@@ -268,7 +306,7 @@ def _cmd_tree(args) -> int:
     tree = Tree(label_for(route, "route"), guide_style="dim")
 
     def add_children(node: dict, path: str, branch: Tree) -> None:
-        for i, child in enumerate(node.get("routes", []) or []):
+        for i, child in _dict_items(node.get("routes")):
             cpath = f"{path}.routes[{i}]"
             cbranch = branch.add(label_for(child, cpath))
             add_children(child, cpath, cbranch)
@@ -301,7 +339,7 @@ def _cmd_test(args) -> int:
         err_console.print("[red]No root 'route' defined.[/red]")
         return 2
 
-    tests_doc = load(args.tests)
+    tests_doc = _read_yaml(args.tests)  # not an Alertmanager config: validated below
     cases = tests_doc.get("tests") if isinstance(tests_doc, dict) else None
     if not isinstance(cases, list):
         err_console.print(
@@ -397,12 +435,11 @@ def _cmd_init() -> int:
 
 
 def _cmd_diff(args):
-    proj = load_project_config()
-    ignore = _build_ignore(args.ignore, proj.get("ignore"))
-    only = _build_only(getattr(args, "only", None))
-    severity = proj.get("severity") or {}
-    old_findings = lint(load(args.old), ignore=ignore, severity=severity, only=only or None)
-    new_findings = lint(load(args.new), ignore=ignore, severity=severity, only=only or None)
+    _, ignore, only, severity = _project_settings(args)
+    old_findings = lint(load(args.old), ignore=ignore, severity=severity, only=only or None,
+                        basedir=_basedir(args.old))
+    new_findings = lint(load(args.new), ignore=ignore, severity=severity, only=only or None,
+                        basedir=_basedir(args.new))
 
     def key(f):
         return (f.code, f.where)

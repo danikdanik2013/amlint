@@ -15,6 +15,7 @@ ALSO_CAUGHT_BY_AMTOOL = {
     "bad-regex",
     "groupby-ellipsis",
     "no-root-route",
+    "invalid-root-route",
     "duplicate-receiver",
     "email-no-smarthost",
     "webhook-no-url",
@@ -84,14 +85,42 @@ receivers:
       - api_url: 'https://hooks.slack.com/...'""",
     },
 
+    "invalid-root-route": {
+        "level": "error",
+        "summary": "The root route breaks a rule Alertmanager enforces at load time.",
+        "why": (
+            "The root route is the fallback for every alert: it must name a receiver and "
+            "must not have matchers, continue, mute_time_intervals or active_time_intervals. "
+            "Alertmanager refuses to load a config that breaks any of these rules — amtool "
+            "catches it too; amlint reports it alongside everything else in one run."
+        ),
+        "bad": """\
+route:
+  matchers: [team="infra"]   # root route must match everything
+  routes:
+    - matchers: [severity="critical"]
+      receiver: pager""",
+        "good": """\
+route:
+  receiver: default          # required fallback receiver
+  routes:
+    - matchers: [team="infra"]
+      receiver: infra
+    - matchers: [severity="critical"]
+      receiver: pager""",
+    },
+
     "bad-regex": {
         "level": "error",
-        "summary": "A match_re or matchers entry contains a regex that fails to compile.",
+        "summary": "A regex matcher fails to compile or uses syntax Go RE2 does not support.",
         "why": (
-            "This is a whole-config failure, not a partial one — Alertmanager refuses to "
-            "load the file at all (`error parsing regexp: ...`), so no route in the file "
-            "works, not just this one. amtool catches it too; amlint gives you the exact "
-            "route path instead of a bare regexp error."
+            "Alertmanager compiles regexes with Go RE2, which also rejects lookarounds, "
+            "backreferences and possessive quantifiers that Python accepts. This is a "
+            "whole-config failure, not a partial one — Alertmanager refuses to load the file "
+            "at all (`error parsing regexp: ...`), so no route in the file works, not just "
+            "this one. Routes and inhibit rules (source_match_re / target_match_re / "
+            "*_matchers) are all checked. amtool catches it too; amlint gives you the exact "
+            "route or rule path instead of a bare regexp error."
         ),
         "bad": """\
 routes:

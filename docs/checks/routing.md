@@ -58,11 +58,44 @@ The config has no root `route` at all. Alertmanager will refuse to start.
 
 ---
 
+## invalid-root-route
+
+**Level:** error
+
+The root route breaks a rule Alertmanager enforces when loading the config: it must name a
+`receiver`, and must not have matchers, `continue`, `mute_time_intervals` or
+`active_time_intervals`. Alertmanager will refuse to start.
+
+=== "Bad"
+    ```yaml
+    route:
+      matchers: [team="infra"]   # root route must match everything
+      routes:
+        - matchers: [severity="critical"]
+          receiver: pager
+    ```
+
+=== "Fixed"
+    ```yaml
+    route:
+      receiver: default          # required fallback receiver
+      routes:
+        - matchers: [team="infra"]
+          receiver: infra
+        - matchers: [severity="critical"]
+          receiver: pager
+    ```
+
+---
+
 ## bad-regex
 
 **Level:** error
 
-A `match_re` or `matchers` entry contains a regex that fails to compile. The route will never match anything.
+A regex matcher fails to compile, or uses syntax that Go RE2 — the engine Alertmanager uses —
+does not support: lookahead/lookbehind, backreferences, possessive quantifiers, atomic groups.
+Regexes in routes (`match_re`, `matchers`) and in inhibit rules (`source_match_re`,
+`target_match_re`, `source_matchers`, `target_matchers`) are all checked.
 
 === "Bad"
     ```yaml

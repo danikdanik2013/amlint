@@ -14,11 +14,15 @@ Usage:
 import glob as _glob
 import os
 import re
-from typing import Generator, List, Set, Tuple
+import warnings
+from typing import Dict, Generator, List, Optional, Set, Tuple
 
 ERROR = "error"      # config is broken: alerts will be lost
 WARN = "warn"        # almost certainly not what you intended
 INFO = "info"        # suspicious, worth a look
+
+# (label, operator, value), operator is one of = != =~ !~
+Matcher = Tuple[str, str, str]
 
 
 class Finding:
@@ -31,22 +35,121 @@ class Finding:
         self.where = where
 
 
+def _dict_items(value) -> List[Tuple[int, dict]]:
+    """(index, item) for the mapping entries of a YAML list; anything else is skipped."""
+    if not isinstance(value, list):
+        return []
+    return [(i, v) for i, v in enumerate(value) if isinstance(v, dict)]
+
+
+def _root_route(cfg: dict) -> Optional[dict]:
+    route = cfg.get("route")
+    return route if isinstance(route, dict) else None
+
+
+def _receivers(cfg: dict) -> List[dict]:
+    return [r for _, r in _dict_items(cfg.get("receivers"))]
+
+
 def _defined_receivers(cfg: dict) -> Set[str]:
-    return {r.get("name") for r in cfg.get("receivers", []) if r.get("name")}
+    return {r.get("name") for r in _receivers(cfg) if r.get("name")}
 
 
 def _walk_routes(node: dict, path: str = "route") -> Generator[Tuple[dict, str], None, None]:
     """Yields (route_node, path) for the root and all nested routes."""
     yield node, path
-    for i, child in enumerate(node.get("routes", []) or []):
+    for i, child in _dict_items(node.get("routes")):
         yield from _walk_routes(child, f"{path}.routes[{i}]")
+
+
+# Matchers: match / match_re maps and matchers: lists all normalized to Matcher tuples,
+# so checks compare `match: {sev: crit}` and `matchers: [sev="crit"]` as the same thing.
+_MATCHER_RE = re.compile(r'^\s*("(?:[^"\\]|\\.)*"|[^=!~"\s]+)\s*(=~|!~|!=|=)\s*(.*?)\s*$', re.S)
+
+
+def _scalar(value) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return "" if value is None else str(value)
+
+
+def _unquote(raw: str) -> str:
+    """Strip quotes the way Alertmanager does: \\n, \\" and \\\\ are escapes, any other
+    backslash is kept literally (so regex escapes like \\. survive)."""
+    if not (len(raw) >= 2 and raw[0] == raw[-1] == '"'):
+        return raw
+    out, escaped = [], False
+    for ch in raw[1:-1]:
+        if escaped:
+            out.append({"n": "\n", '"': '"', "\\": "\\"}.get(ch, "\\" + ch))
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        else:
+            out.append(ch)
+    if escaped:
+        out.append("\\")
+    return "".join(out)
+
+
+def _split_matchers(line: str) -> List[str]:
+    """One matchers: entry may hold several comma-separated matchers, optionally in {}."""
+    line = line.strip()
+    if line.startswith("{") and line.endswith("}"):
+        line = line[1:-1]
+    parts, buf, in_quotes, escaped = [], [], False, False
+    for ch in line:
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif ch == '"':
+            in_quotes = not in_quotes
+        elif ch == "," and not in_quotes:
+            parts.append("".join(buf))
+            buf = []
+            continue
+        buf.append(ch)
+    parts.append("".join(buf))
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _parse_matchers(items) -> List[Matcher]:
+    out: List[Matcher] = []
+    if not isinstance(items, list):
+        return out
+    for item in items:
+        for part in _split_matchers(_scalar(item)):
+            hit = _MATCHER_RE.match(part)
+            if hit:
+                out.append((_unquote(hit.group(1)), hit.group(2), _unquote(hit.group(3))))
+            else:
+                # Unparseable, but still a matcher: keep it so the route isn't a catch-all.
+                out.append((part, "?", ""))
+    return out
+
+
+def _matchers(node: dict, prefix: str = "") -> List[Matcher]:
+    """All matchers of a route (prefix "") or of one side of an inhibit rule
+    (prefix "source_" / "target_"), from match, match_re and matchers alike."""
+    out: List[Matcher] = []
+    for key, op in (("match", "="), ("match_re", "=~")):
+        value = node.get(prefix + key)
+        if isinstance(value, dict):
+            out.extend((str(k), op, _scalar(v)) for k, v in value.items())
+    out.extend(_parse_matchers(node.get(prefix + "matchers")))
+    return out
+
+
+def _equality(matchers: List[Matcher]) -> Dict[str, str]:
+    return {label: value for label, op, value in matchers if op == "="}
 
 
 # CHECK 1: route references a receiver that doesn't exist
 def check_undefined_receivers(cfg):
     out = []
     defined = _defined_receivers(cfg)
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if not route:
         out.append(Finding(ERROR, "no-root-route", "No root 'route' defined.", "route"))
         return out
@@ -67,7 +170,7 @@ def check_unused_receivers(cfg):
     out = []
     defined = _defined_receivers(cfg)
     used = set()
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if route:
         for node, _ in _walk_routes(route):
             if node.get("receiver"):
@@ -89,10 +192,10 @@ def check_dead_inhibitions(cfg):
     will silence across unrelated alerts — almost never intentional.
     """
     out = []
-    for i, rule in enumerate(cfg.get("inhibit_rules", []) or []):
+    for i, rule in _dict_items(cfg.get("inhibit_rules")):
         where = f"inhibit_rules[{i}]"
-        src = {**(rule.get("source_match") or {}), **(rule.get("source_matchers_map") or {})}
-        tgt = {**(rule.get("target_match") or {}), **(rule.get("target_matchers_map") or {})}
+        src = _matchers(rule, "source_")
+        tgt = _matchers(rule, "target_")
         equal = rule.get("equal", []) or []
 
         if not equal and (src or tgt):
@@ -103,44 +206,184 @@ def check_dead_inhibitions(cfg):
                 where,
             ))
 
-        for key in set(src) & set(tgt):
-            if src[key] == tgt[key]:
+        src_eq, tgt_eq = _equality(src), _equality(tgt)
+        for key in sorted(set(src_eq) & set(tgt_eq)):
+            if src_eq[key] == tgt_eq[key]:
                 out.append(Finding(
                     INFO, "inhibit-same-match",
-                    f"source_match and target_match both have '{key}={src[key]}'. "
+                    f"Source and target matchers both have '{key}={src_eq[key]}'. "
                     f"Check that the rule is not silencing its own source alert.",
                     where,
                 ))
     return out
 
 
-# CHECK 4: match_re / matchers: patterns that fail to compile
-_MATCHER_RE = re.compile(r'^([^=!~]+)(=~|!~)(.+)$')
+# CHECK 4: regex matchers that Alertmanager (Go RE2) will reject
+_GO_FLAGS_RE = re.compile(r"\(\?([a-zA-Z-]*)([:)])")
+_REPEAT_RE = re.compile(r"\{(\d+)(?:,(\d*))?\}")
+_MAX_REPEAT = 1000  # RE2 rejects larger repeat counts
 
 
-def _regex_patterns(node):
-    """Yield (label, pattern) for all regex matchers in a route node."""
-    for label, pattern in (node.get("match_re") or {}).items():
-        yield label, pattern
-    for m in node.get("matchers") or []:
-        hit = _MATCHER_RE.match(str(m))
-        if hit:
-            yield hit.group(1).strip(), hit.group(3)
+def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
+    """
+    Translate a Go RE2 pattern into Python `re` syntax for a compile check.
+
+    Returns (python_pattern, unsupported). `unsupported` names the first construct
+    Python accepts but RE2 rejects (lookarounds, backreferences, ...), or "" if none.
+    Go-only syntax (\\pL, \\z, \\x{..}, \\Q..\\E, [:alpha:], (?<name>), (?U)) is swapped
+    for an equivalent Python stand-in: the result is only compiled, never matched.
+    """
+    out: List[str] = []
+    i, n = 0, len(pattern)
+    in_class = False
+    after_quantifier = False
+    while i < n:
+        ch = pattern[i]
+        nxt = pattern[i + 1:i + 2]
+        quantifier = False
+
+        if ch == "\\" and nxt:
+            if nxt in "pP":
+                end = pattern.find("}", i) + 1 if pattern[i + 2:i + 3] == "{" else i + 3
+                out.append("\\w")
+                i = end if end > 0 else n
+            elif nxt == "Q":
+                end = pattern.find("\\E", i + 2)
+                stop = end if end >= 0 else n
+                out.append(re.escape(pattern[i + 2:stop]))
+                i = stop + 2 if end >= 0 else n
+            elif nxt == "x" and pattern[i + 2:i + 3] == "{":
+                end = pattern.find("}", i)
+                digits = pattern[i + 3:end] if end > 0 else ""
+                if not re.fullmatch(r"[0-9a-fA-F]{1,6}", digits) or int(digits, 16) > 0x10FFFF:
+                    return "", "an invalid \\x{...} escape"
+                out.append("\\U%08x" % int(digits, 16))
+                i = end + 1
+            elif nxt in "123456789":
+                octal = re.match(r"[0-7]{1,3}", pattern[i + 1:])
+                if nxt in "89" or not octal or len(octal.group(0)) < 2:
+                    return "", "backreferences (\\%s)" % nxt
+                out.append("\\x%02x" % (int(octal.group(0), 8) & 0xFF))
+                i += 1 + len(octal.group(0))
+            elif nxt in "ZuUN":
+                return "", "the \\%s escape" % nxt
+            else:
+                out.append("\\Z" if nxt == "z" else "\\" + nxt)
+                i += 2
+            after_quantifier = False
+            continue
+
+        if in_class:
+            if ch == "[" and nxt == ":":
+                end = pattern.find(":]", i + 2)
+                if end >= 0:
+                    out.append("\\w")
+                    i = end + 2
+                    continue
+            if ch == "]":
+                in_class = False
+            out.append(ch)
+            i += 1
+            continue
+
+        if ch == "[":
+            j = i + 1
+            if pattern[j:j + 1] == "^":
+                j += 1
+            if pattern[j:j + 1] == "]":
+                j += 1
+            in_class = True
+            out.append(pattern[i:j])
+            i = j
+            after_quantifier = False
+            continue
+
+        if ch == "(" and nxt == "?":
+            ext = pattern[i + 2:i + 4]
+            if ext[:1] in ("=", "!") or ext in ("<=", "<!"):
+                return "", "lookahead/lookbehind assertions"
+            if ext[:1] == ">":
+                return "", "atomic groups (?>...)"
+            if ext[:1] == "(":
+                return "", "conditional groups (?(...)...)"
+            if ext[:1] == "#":
+                return "", "inline comments (?#...)"
+            if ext in ("P=", "P>"):
+                return "", "named backreferences (?P=name)"
+            if ext[:1] == "<" or ext == "P<":
+                # named group: Go accepts (?<name>) and (?P<name>), Python only the latter
+                out.append("(?P<")
+                i += 3 if ext[:1] == "<" else 4
+                continue
+            flags = _GO_FLAGS_RE.match(pattern, i)
+            if flags:
+                bad = sorted(set(flags.group(1)) - set("imsU-"))
+                if bad:
+                    return "", "the (?%s) flag" % "".join(bad)
+                # Flags never change whether a pattern compiles; drop them (Python lacks U
+                # and rejects global flags mid-pattern, Go allows both).
+                out.append("(?:" if flags.group(2) == ":" else "")
+                i = flags.end()
+                continue
+
+        if ch in "*+?":
+            if ch == "+" and after_quantifier:
+                return "", "possessive quantifiers (*+, ++, ?+)"
+            # `?` right after a quantifier makes it lazy, which ends the quantifier
+            quantifier = not (ch == "?" and after_quantifier)
+        elif ch == "{":
+            rep = _REPEAT_RE.match(pattern, i)
+            if rep:
+                if any(int(g) > _MAX_REPEAT for g in rep.groups() if g):
+                    return "", f"a repeat count above {_MAX_REPEAT}"
+                out.append(rep.group(0))
+                i = rep.end()
+                after_quantifier = True
+                continue
+
+        out.append(ch)
+        after_quantifier = quantifier
+        i += 1
+
+    return "".join(out), ""
+
+
+def _regex_problem(pattern: str) -> Optional[str]:
+    py_pattern, unsupported = _go_regex_to_python(pattern)
+    if unsupported:
+        return f"uses {unsupported}, which Go RE2 (Alertmanager's regex engine) does not support"
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            re.compile(py_pattern)
+    except re.error as e:
+        return f"does not compile: {e.msg}"
+    return None
+
+
+def _regex_patterns(node: dict, prefix: str = ""):
+    """Yield (label, pattern) for all regex matchers (=~ and !~) of a route or rule side."""
+    for label, op, value in _matchers(node, prefix):
+        if op in ("=~", "!~"):
+            yield label, value
 
 
 def check_bad_regex(cfg):
     out = []
-    route = cfg.get("route")
-    if not route:
-        return out
-    for node, path in _walk_routes(route):
-        for label, pattern in _regex_patterns(node):
-            try:
-                re.compile(pattern)
-            except re.error as e:
+    targets = []
+    route = _root_route(cfg)
+    if route:
+        targets += [(node, path, "") for node, path in _walk_routes(route)]
+    for i, rule in _dict_items(cfg.get("inhibit_rules")):
+        for prefix in ("source_", "target_"):
+            targets.append((rule, f"inhibit_rules[{i}]", prefix))
+    for node, path, prefix in targets:
+        for label, pattern in _regex_patterns(node, prefix):
+            problem = _regex_problem(pattern)
+            if problem:
                 out.append(Finding(
                     ERROR, "bad-regex",
-                    f"Regex for '{label}' does not compile: {e}",
+                    f"Regex for '{label}' {problem}. Alertmanager will reject this config.",
                     path,
                 ))
     return out
@@ -155,40 +398,39 @@ def check_unreachable_routes(cfg):
     siblings unreachable.
     """
     out = []
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if not route:
         return out
 
-    def scan_siblings(routes, parent_path):
-        for i, child in enumerate(routes or []):
+    def scan_siblings(node, parent_path):
+        siblings = _dict_items(node.get("routes"))
+        for pos, (i, child) in enumerate(siblings):
             path = f"{parent_path}.routes[{i}]"
-            has_matcher = bool(
-                child.get("match") or child.get("match_re") or child.get("matchers")
-            )
-            is_catch_all = not has_matcher
+            is_catch_all = not _matchers(child)
             cont = child.get("continue", False)
-            if is_catch_all and not cont and i < len(routes) - 1:
+            remaining = len(siblings) - pos - 1
+            if is_catch_all and not cont and remaining:
                 out.append(Finding(
                     WARN, "unreachable-route",
                     f"Catch-all route (no matchers) with continue:false will intercept all alerts "
-                    f"— {len(routes) - i - 1} subsequent sibling(s) are unreachable.",
+                    f"— {remaining} subsequent sibling(s) are unreachable.",
                     path,
                 ))
-            scan_siblings(child.get("routes"), path)
+            scan_siblings(child, path)
 
-    scan_siblings(route.get("routes"), "route")
+    scan_siblings(route, "route")
     return out
 
 
 # CHECK 6: group_by with '...' mixed with explicit labels
 def check_groupby(cfg):
     out = []
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if not route:
         return out
     for node, path in _walk_routes(route):
         gb = node.get("group_by") or []
-        if "..." in gb and len(gb) > 1:
+        if isinstance(gb, list) and "..." in gb and len(gb) > 1:
             out.append(Finding(
                 WARN, "groupby-ellipsis",
                 "group_by contains '...' alongside other labels — '...' already groups by all "
@@ -198,21 +440,64 @@ def check_groupby(cfg):
     return out
 
 
-_DURATION_UNITS = {'ms': 0.001, 's': 1, 'm': 60, 'h': 3600, 'd': 86400, 'w': 604800}
-_DURATION_RE = re.compile(r'(\d+)(ms|[smhdw])')
+# Prometheus duration syntax (model.ParseDuration): units in descending order, each once.
+_DURATION_RE = re.compile(
+    r'^(?:(\d+)y)?(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?(?:(\d+)ms)?$'
+)
+_DURATION_UNITS = (365 * 86400, 604800, 86400, 3600, 60, 1, 0.001)
+
 
 def _parse_duration(s):
-    if not s:
+    """Seconds for a Prometheus duration string, or None if unset or malformed."""
+    if s is None:
         return None
-    total = sum(int(n) * _DURATION_UNITS[u] for n, u in _DURATION_RE.findall(str(s)))
-    return total or None
+    s = str(s).strip()
+    if s == "0":
+        return 0
+    hit = _DURATION_RE.match(s)
+    if not s or not hit:
+        return None
+    return sum(int(n) * unit for n, unit in zip(hit.groups(), _DURATION_UNITS) if n)
+
+
+# Timing values a route inherits from its parent, and Alertmanager's defaults at the root.
+_TIMING_DEFAULTS = {"group_wait": "30s", "group_interval": "5m", "repeat_interval": "4h"}
+
+
+def _walk_timing(route: dict):
+    """
+    Yields (path, effective) for every route, where effective maps each timing key
+    to (raw value, seconds, origin): origin is the path of the route that set it,
+    or None for Alertmanager's default. Unset values are inherited from the parent.
+    """
+    def walk(node, path, inherited):
+        effective = dict(inherited)
+        for key in _TIMING_DEFAULTS:
+            seconds = _parse_duration(node.get(key))
+            if seconds is not None:
+                effective[key] = (node[key], seconds, path)
+        yield path, effective
+        for i, child in _dict_items(node.get("routes")):
+            yield from walk(child, f"{path}.routes[{i}]", effective)
+
+    defaults = {k: (v, _parse_duration(v), None) for k, v in _TIMING_DEFAULTS.items()}
+    yield from walk(route, "route", defaults)
+
+
+def _describe_timing(value, path: str) -> str:
+    raw, _, origin = value
+    if origin == path:
+        return f"{raw}"
+    if origin is None:
+        return f"{raw}, Alertmanager default"
+    return f"{raw}, inherited from {origin}"
 
 
 # CHECK 7: duplicate receiver names
 def check_duplicate_receivers(cfg):
     out = []
     seen = set()
-    for r in cfg.get("receivers", []) or []:
+    for r in _receivers(cfg):
         name = r.get("name")
         if not name:
             continue
@@ -231,18 +516,21 @@ def check_duplicate_receivers(cfg):
 _INTEGRATION_KEYS = {
     "email_configs", "pagerduty_configs", "slack_configs", "opsgenie_configs",
     "victorops_configs", "webhook_configs", "wechat_configs", "sns_configs",
-    "msteams_configs", "telegram_configs", "discord_configs",
+    "msteams_configs", "msteamsv2_configs", "telegram_configs", "discord_configs",
+    "pushover_configs", "webex_configs", "jira_configs", "rocketchat_configs",
+    "incidentio_configs",
 }
 
 def check_empty_receivers(cfg):
     out = []
-    route = cfg.get("route")
+    route = _root_route(cfg)
     default_rcv = route.get("receiver") if route else None
-    for r in cfg.get("receivers", []) or []:
+    for r in _receivers(cfg):
         name = r.get("name")
         if not name:
             continue
-        if not any(k in r for k in _INTEGRATION_KEYS):
+        # an empty list (`webhook_configs: []`) delivers nothing either
+        if not any(r.get(k) for k in _INTEGRATION_KEYS):
             level = INFO if name == default_rcv else WARN
             out.append(Finding(
                 level, "empty-receiver",
@@ -257,13 +545,20 @@ def check_empty_receivers(cfg):
 # CHECK 9: mute_time_intervals / active_time_intervals reference undefined interval
 def check_undefined_time_intervals(cfg):
     out = []
-    defined = {t.get("name") for t in cfg.get("time_intervals", []) or [] if t.get("name")}
-    route = cfg.get("route")
+    # top-level mute_time_intervals: is the pre-0.24 spelling of time_intervals: and still works
+    defined = {
+        t.get("name")
+        for key in ("time_intervals", "mute_time_intervals")
+        for _, t in _dict_items(cfg.get(key))
+        if t.get("name")
+    }
+    route = _root_route(cfg)
     if not route:
         return out
     for node, path in _walk_routes(route):
         for key in ("mute_time_intervals", "active_time_intervals"):
-            for name in node.get(key) or []:
+            names = node.get(key)
+            for name in names if isinstance(names, list) else []:
                 if name not in defined:
                     out.append(Finding(
                         ERROR, "undefined-time-interval",
@@ -277,17 +572,17 @@ def check_undefined_time_intervals(cfg):
 # CHECK 10: repeat_interval shorter than group_interval
 def check_timing(cfg):
     out = []
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if not route:
         return out
-    for node, path in _walk_routes(route):
-        gi = _parse_duration(node.get("group_interval"))
-        ri = _parse_duration(node.get("repeat_interval"))
-        if gi and ri and ri < gi:
+    for path, eff in _walk_timing(route):
+        gi, ri = eff["group_interval"], eff["repeat_interval"]
+        # report only where one of the two values is set, not on every inheriting child
+        if ri[1] < gi[1] and path in (gi[2], ri[2]):
             out.append(Finding(
                 WARN, "repeat-before-group",
-                f"repeat_interval ({node['repeat_interval']}) is shorter than "
-                f"group_interval ({node['group_interval']}). "
+                f"repeat_interval ({_describe_timing(ri, path)}) is shorter than "
+                f"group_interval ({_describe_timing(gi, path)}). "
                 f"Alertmanager will send repeats before the group has a chance to fire.",
                 path,
             ))
@@ -297,15 +592,12 @@ def check_timing(cfg):
 # CHECK 11: two inhibition rules that silence each other
 def check_circular_inhibition(cfg):
     out = []
-    rules = cfg.get("inhibit_rules", []) or []
-    for i, a in enumerate(rules):
-        for j, b in enumerate(rules):
-            if i >= j:
-                continue
-            src_a = {**(a.get("source_match") or {})}
-            tgt_a = {**(a.get("target_match") or {})}
-            src_b = {**(b.get("source_match") or {})}
-            tgt_b = {**(b.get("target_match") or {})}
+    rules = [
+        (i, _equality(_matchers(r, "source_")), _equality(_matchers(r, "target_")))
+        for i, r in _dict_items(cfg.get("inhibit_rules"))
+    ]
+    for pos, (i, src_a, tgt_a) in enumerate(rules):
+        for j, src_b, tgt_b in rules[pos + 1:]:
             a_can_silence_b = any(src_a.get(k) == tgt_b.get(k) for k in set(src_a) & set(tgt_b))
             b_can_silence_a = any(src_b.get(k) == tgt_a.get(k) for k in set(src_b) & set(tgt_a))
             if a_can_silence_b and b_can_silence_a:
@@ -321,42 +613,40 @@ def check_circular_inhibition(cfg):
 # CHECK 12: continue:true on the last sibling (no effect)
 def check_useless_continue(cfg):
     out = []
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if not route:
         return out
 
-    def scan(routes, parent_path):
-        if not routes:
-            return
-        for i, child in enumerate(routes or []):
+    def scan(node, parent_path):
+        siblings = _dict_items(node.get("routes"))
+        for pos, (i, child) in enumerate(siblings):
             path = f"{parent_path}.routes[{i}]"
-            if child.get("continue") is True and i == len(routes) - 1:
+            if child.get("continue") is True and pos == len(siblings) - 1:
                 out.append(Finding(
                     INFO, "useless-continue",
                     "continue:true on the last sibling route has no effect — "
                     "there are no subsequent routes to continue to.",
                     path,
                 ))
-            scan(child.get("routes"), path)
+            scan(child, path)
 
-    scan(route.get("routes"), "route")
+    scan(route, "route")
     return out
 
 
 # CHECK 13: group_wait longer than group_interval
 def check_group_wait(cfg):
     out = []
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if not route:
         return out
-    for node, path in _walk_routes(route):
-        gw = _parse_duration(node.get("group_wait"))
-        gi = _parse_duration(node.get("group_interval"))
-        if gw and gi and gw > gi:
+    for path, eff in _walk_timing(route):
+        gw, gi = eff["group_wait"], eff["group_interval"]
+        if gw[1] > gi[1] and path in (gw[2], gi[2]):
             out.append(Finding(
                 WARN, "wait-exceeds-interval",
-                f"group_wait ({node['group_wait']}) is longer than "
-                f"group_interval ({node['group_interval']}). "
+                f"group_wait ({_describe_timing(gw, path)}) is longer than "
+                f"group_interval ({_describe_timing(gi, path)}). "
                 f"Subsequent alerts will fire before the initial group has a chance to form.",
                 path,
             ))
@@ -368,7 +658,7 @@ _MAX_ROUTE_DEPTH = 5
 
 def check_deep_nesting(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if not route:
         return out
 
@@ -381,7 +671,7 @@ def check_deep_nesting(cfg: dict) -> List[Finding]:
                 path,
             ))
             return
-        for i, child in enumerate(node.get("routes", []) or []):
+        for i, child in _dict_items(node.get("routes")):
             scan(child, f"{path}.routes[{i}]", depth + 1)
 
     scan(route, "route", 0)
@@ -392,8 +682,8 @@ def check_deep_nesting(cfg: dict) -> List[Finding]:
 def check_email_smarthost(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
     global_smarthost = (cfg.get("global") or {}).get("smtp_smarthost")
-    for r in cfg.get("receivers", []) or []:
-        for i, ec in enumerate(r.get("email_configs", []) or []):
+    for r in _receivers(cfg):
+        for i, ec in _dict_items(r.get("email_configs")):
             if not ec.get("smarthost") and not global_smarthost:
                 out.append(Finding(
                     ERROR, "email-no-smarthost",
@@ -407,9 +697,9 @@ def check_email_smarthost(cfg: dict) -> List[Finding]:
 # CHECK 16: webhook_configs without url or url_file
 def check_webhook_no_url(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
-    for r in cfg.get("receivers", []) or []:
+    for r in _receivers(cfg):
         name = r.get("name")
-        for i, wh in enumerate(r.get("webhook_configs", []) or []):
+        for i, wh in _dict_items(r.get("webhook_configs")):
             if not wh.get("url") and not wh.get("url_file"):
                 out.append(Finding(
                     ERROR, "webhook-no-url",
@@ -423,8 +713,8 @@ def check_webhook_no_url(cfg: dict) -> List[Finding]:
 # CHECK 17: pagerduty_configs without routing_key / service_key (or file variants)
 def check_pagerduty_no_routing_key(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
-    for r in cfg.get("receivers", []) or []:
-        for i, pd in enumerate(r.get("pagerduty_configs", []) or []):
+    for r in _receivers(cfg):
+        for i, pd in _dict_items(r.get("pagerduty_configs")):
             has_key = any(pd.get(k) for k in (
                 "routing_key", "routing_key_file", "service_key", "service_key_file"
             ))
@@ -441,9 +731,10 @@ def check_pagerduty_no_routing_key(cfg: dict) -> List[Finding]:
 # CHECK 18: slack_configs without api_url (and no global.slack_api_url)
 def check_slack_no_api_url(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
-    global_url = (cfg.get("global") or {}).get("slack_api_url")
-    for r in cfg.get("receivers", []) or []:
-        for i, sl in enumerate(r.get("slack_configs", []) or []):
+    g = cfg.get("global") or {}
+    global_url = g.get("slack_api_url") or g.get("slack_api_url_file")
+    for r in _receivers(cfg):
+        for i, sl in _dict_items(r.get("slack_configs")):
             if not sl.get("api_url") and not sl.get("api_url_file") and not global_url:
                 out.append(Finding(
                     ERROR, "slack-no-api-url",
@@ -460,8 +751,8 @@ def check_opsgenie_no_api_key(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
     g = cfg.get("global") or {}
     global_key = g.get("opsgenie_api_key") or g.get("opsgenie_api_key_file")
-    for r in cfg.get("receivers", []) or []:
-        for i, og in enumerate(r.get("opsgenie_configs", []) or []):
+    for r in _receivers(cfg):
+        for i, og in _dict_items(r.get("opsgenie_configs")):
             if not og.get("api_key") and not og.get("api_key_file") and not global_key:
                 out.append(Finding(
                     ERROR, "opsgenie-no-api-key",
@@ -476,8 +767,8 @@ def check_opsgenie_no_api_key(cfg: dict) -> List[Finding]:
 # CHECK 20: msteams_configs without webhook_url or webhook_url_file
 def check_msteams_no_webhook_url(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
-    for r in cfg.get("receivers", []) or []:
-        for i, ms in enumerate(r.get("msteams_configs", []) or []):
+    for r in _receivers(cfg):
+        for i, ms in _dict_items(r.get("msteams_configs")):
             if not ms.get("webhook_url") and not ms.get("webhook_url_file"):
                 out.append(Finding(
                     ERROR, "msteams-no-webhook-url",
@@ -489,30 +780,19 @@ def check_msteams_no_webhook_url(cfg: dict) -> List[Finding]:
 
 
 # CHECK 21: two sibling routes with identical matchers
-def _matcher_key(node: dict):
-    match = tuple(sorted((node.get("match") or {}).items()))
-    match_re = tuple(sorted((node.get("match_re") or {}).items()))
-    matchers = frozenset(str(m) for m in (node.get("matchers") or []))
-    return (match, match_re, matchers)
-
-
 def check_route_match_collision(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
-    route = cfg.get("route")
+    route = _root_route(cfg)
     if not route:
         return out
 
-    def scan(routes, parent_path):
-        if not routes:
-            return
+    def scan(node, parent_path):
         seen: dict = {}
-        for i, child in enumerate(routes or []):
+        for i, child in _dict_items(node.get("routes")):
             path = f"{parent_path}.routes[{i}]"
-            has_matcher = bool(
-                child.get("match") or child.get("match_re") or child.get("matchers")
-            )
-            if has_matcher:
-                key = _matcher_key(child)
+            # match:, match_re: and matchers: spellings of the same matcher compare equal
+            key = frozenset(_matchers(child))
+            if key:
                 if key in seen:
                     prev = seen[key]
                     out.append(Finding(
@@ -521,18 +801,22 @@ def check_route_match_collision(cfg: dict) -> List[Finding]:
                         f"receive alerts because the earlier sibling always matches first.",
                         path,
                     ))
-                else:
+                elif not child.get("continue"):
+                    # with continue:true the alert still reaches later identical siblings
                     seen[key] = path
-            scan(child.get("routes"), path)
+            scan(child, path)
 
-    scan(route.get("routes"), "route")
+    scan(route, "route")
     return out
 
 
 # CHECK 22: templates: references files that do not exist on disk
 def check_template_files(cfg: dict, basedir: str) -> List[Finding]:
     out: List[Finding] = []
-    for tpl in cfg.get("templates", []) or []:
+    templates = cfg.get("templates")
+    for tpl in templates if isinstance(templates, list) else []:
+        if not isinstance(tpl, str):
+            continue
         full = tpl if os.path.isabs(tpl) else os.path.join(basedir, tpl)
         if _glob.glob(full):
             continue
@@ -570,8 +854,8 @@ def check_global_resolve_timeout(cfg: dict) -> List[Finding]:
 # CHECK 24: telegram_configs without bot_token / bot_token_file
 def check_telegram_no_bot_token(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
-    for r in cfg.get("receivers", []) or []:
-        for i, tg in enumerate(r.get("telegram_configs", []) or []):
+    for r in _receivers(cfg):
+        for i, tg in _dict_items(r.get("telegram_configs")):
             if not tg.get("bot_token") and not tg.get("bot_token_file"):
                 out.append(Finding(
                     ERROR, "telegram-no-bot-token",
@@ -585,8 +869,8 @@ def check_telegram_no_bot_token(cfg: dict) -> List[Finding]:
 # CHECK 25: discord_configs without webhook_url / webhook_url_file
 def check_discord_no_webhook_url(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
-    for r in cfg.get("receivers", []) or []:
-        for i, dc in enumerate(r.get("discord_configs", []) or []):
+    for r in _receivers(cfg):
+        for i, dc in _dict_items(r.get("discord_configs")):
             if not dc.get("webhook_url") and not dc.get("webhook_url_file"):
                 out.append(Finding(
                     ERROR, "discord-no-webhook-url",
@@ -602,13 +886,14 @@ def check_victorops_no_api_key(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
     g = cfg.get("global") or {}
     global_key = g.get("victorops_api_key") or g.get("victorops_api_key_file")
-    for r in cfg.get("receivers", []) or []:
-        for i, vo in enumerate(r.get("victorops_configs", []) or []):
-            if not vo.get("api_key") and not global_key:
+    for r in _receivers(cfg):
+        for i, vo in _dict_items(r.get("victorops_configs")):
+            if not vo.get("api_key") and not vo.get("api_key_file") and not global_key:
                 out.append(Finding(
                     ERROR, "victorops-no-api-key",
-                    f"victorops_configs[{i}] in receiver '{r.get('name')}' has no 'api_key', and "
-                    f"global.victorops_api_key is not set. VictorOps alerts cannot be sent.",
+                    f"victorops_configs[{i}] in receiver '{r.get('name')}' has no 'api_key' or "
+                    f"'api_key_file', and global.victorops_api_key is not set. "
+                    f"VictorOps alerts cannot be sent.",
                     f"receivers[{r.get('name')}].victorops_configs[{i}]",
                 ))
     return out
@@ -618,8 +903,8 @@ def check_victorops_no_api_key(cfg: dict) -> List[Finding]:
 def check_wechat_no_corp_id(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
     global_corp_id = (cfg.get("global") or {}).get("wechat_api_corp_id")
-    for r in cfg.get("receivers", []) or []:
-        for i, wc in enumerate(r.get("wechat_configs", []) or []):
+    for r in _receivers(cfg):
+        for i, wc in _dict_items(r.get("wechat_configs")):
             if not wc.get("corp_id") and not global_corp_id:
                 out.append(Finding(
                     ERROR, "wechat-no-corp-id",
@@ -637,8 +922,8 @@ def check_sns_no_target(cfg: dict) -> List[Finding]:
     or a mobile platform endpoint ARN. None set means AWS rejects the publish call.
     """
     out: List[Finding] = []
-    for r in cfg.get("receivers", []) or []:
-        for i, sns in enumerate(r.get("sns_configs", []) or []):
+    for r in _receivers(cfg):
+        for i, sns in _dict_items(r.get("sns_configs")):
             if not any(sns.get(k) for k in ("topic_arn", "phone_number", "target_arn")):
                 out.append(Finding(
                     ERROR, "sns-no-target",
@@ -647,6 +932,31 @@ def check_sns_no_target(cfg: dict) -> List[Finding]:
                     f"AWS will reject the publish call.",
                     f"receivers[{r.get('name')}].sns_configs[{i}]",
                 ))
+    return out
+
+
+# CHECK 29: root route breaks a rule Alertmanager enforces when loading the config
+def check_root_route(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    route = _root_route(cfg)
+    if not route:
+        return out
+    problems = []
+    if not route.get("receiver"):
+        problems.append("has no 'receiver' — the root route must name the default receiver")
+    if _matchers(route):
+        problems.append("has matchers — the root route must match every alert")
+    if route.get("continue"):
+        problems.append("sets 'continue' — the root route has no siblings to continue to")
+    for key in ("mute_time_intervals", "active_time_intervals"):
+        if route.get(key):
+            problems.append(f"sets '{key}' — only child routes may use time intervals")
+    for problem in problems:
+        out.append(Finding(
+            ERROR, "invalid-root-route",
+            f"Root route {problem}. Alertmanager will refuse to load this config.",
+            "route",
+        ))
     return out
 
 
@@ -678,6 +988,7 @@ ALL_CHECKS = [
     check_victorops_no_api_key,
     check_wechat_no_corp_id,
     check_sns_no_target,
+    check_root_route,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}
