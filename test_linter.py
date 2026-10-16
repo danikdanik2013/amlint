@@ -1434,6 +1434,531 @@ def test_cli_test_unsimulatable_config_exits_2(tmp_path, capsys):
     assert "route.routes[0]" in capsys.readouterr().err
 
 
+# ── route coverage (amlint test --coverage) ──────────────────────────
+
+def _coverage(route, *label_sets):
+    from amlint.routing import Router, route_coverage
+    router = Router(route)
+    return route_coverage(router, [router.match(labels) for labels in label_sets])
+
+
+_NESTED_ROUTE = {"receiver": "default", "routes": [
+    {"match": {"team": "infra"}, "receiver": "infra", "routes": [
+        {"match": {"severity": "critical"}, "receiver": "infra-pager", "routes": [
+            {"match": {"env": "prod"}, "receiver": "infra-prod-pager"},
+        ]},
+        {"match": {"severity": "warning"}, "receiver": "infra-slack"},
+    ]},
+    {"match": {"team": "db"}, "receiver": "db"},
+]}
+
+
+def test_route_coverage_lists_every_route_depth_first():
+    cov = _coverage(_NESTED_ROUTE)
+    assert cov.routes == [
+        "route", "route.routes[0]", "route.routes[0].routes[0]",
+        "route.routes[0].routes[0].routes[0]", "route.routes[0].routes[1]", "route.routes[1]",
+    ]
+    assert cov.uncovered == cov.routes and cov.percent == 0
+
+
+def test_route_coverage_counts_every_route_on_the_match_path():
+    cov = _coverage(_NESTED_ROUTE, {"team": "infra", "severity": "critical", "env": "prod"})
+    # the parents the alert went through are covered, not only the route it ended on
+    assert cov.covered == {
+        "route", "route.routes[0]", "route.routes[0].routes[0]",
+        "route.routes[0].routes[0].routes[0]",
+    }
+    assert cov.uncovered == ["route.routes[0].routes[1]", "route.routes[1]"]
+    assert cov.percent == pytest.approx(400 / 6)
+
+
+def test_route_coverage_parent_match_does_not_cover_its_children():
+    cov = _coverage(_NESTED_ROUTE, {"team": "infra", "severity": "info"}, {"team": "unknown"})
+    assert cov.covered == {"route", "route.routes[0]"}
+
+
+def test_route_coverage_follows_continue_fan_out():
+    route = {"receiver": "default", "routes": [
+        {"match": {"team": "infra"}, "receiver": "infra", "continue": True, "routes": [
+            {"match": {"severity": "critical"}, "receiver": "infra-pager", "continue": True},
+            {"match": {"env": "prod"}, "receiver": "infra-prod"},
+            {"match": {"env": "prod"}, "receiver": "never"},  # previous sibling has no continue
+        ]},
+        {"match": {"env": "prod"}, "receiver": "prod"},
+        {"match": {"env": "prod"}, "receiver": "also-never"},
+    ]}
+    cov = _coverage(route, {"team": "infra", "severity": "critical", "env": "prod"})
+    assert cov.uncovered == ["route.routes[0].routes[2]", "route.routes[2]"]
+
+
+def test_route_coverage_shadowed_route_is_never_covered():
+    route = {"receiver": "default", "routes": [
+        {"receiver": "catch-all"},
+        {"match": {"team": "db"}, "receiver": "db"},
+    ]}
+    cov = _coverage(route, {"team": "db"}, {})
+    assert cov.uncovered == ["route.routes[1]"]
+
+
+def test_coverage_percent_is_100_only_when_complete():
+    from amlint.cli import _coverage_percent
+    from amlint.routing import Coverage
+    routes = [str(i) for i in range(10000)]
+    assert _coverage_percent(Coverage(routes, set(routes[1:]))) == 99.9
+    assert _coverage_percent(Coverage(routes, set(routes))) == 100.0
+    assert _coverage_percent(Coverage(routes[:3], set(routes[:2]))) == 66.7
+
+
+COVERAGE_CONFIG = """\
+route:
+  receiver: default
+  routes:
+    - matchers: ['team="infra"']
+      receiver: infra
+      continue: true
+      routes:
+        - matchers: ['severity="critical"']
+          receiver: infra-pager
+    - matchers: ['severity="critical"']
+      receiver: pager
+    - matchers: ['team="db"']
+      receiver: db
+      routes:
+        - matchers: ['severity="warning"']
+          receiver: db-slack
+"""
+
+
+def _write_coverage_suite(tmp_path, cases=None):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(COVERAGE_CONFIG)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump(cases if cases is not None else [
+        {"name": "critical infra fans out", "labels": {"team": "infra", "severity": "critical"},
+         "expect": ["infra-pager", "pager"]},
+    ]))
+    return str(cfg_path), str(tests_path)
+
+
+def test_cli_test_coverage_lists_uncovered_routes_with_locations(tmp_path, capsys):
+    cfg_path, tests_path = _write_coverage_suite(tmp_path)
+    assert main(["test", cfg_path, tests_path, "--coverage"]) == 0
+    out = capsys.readouterr().out
+    assert "1 passed" in out
+    assert "4 of 6 routes" in out and "66.7%" in out
+    lines = [line.split() for line in out.splitlines() if "route.routes" in line]
+    assert [(words[0], words[1]) for words in lines] == [
+        ("route.routes[2]", f"{cfg_path}:12:7"),
+        ("route.routes[2].routes[0]", f"{cfg_path}:15:11"),
+    ]
+    assert 'team="db"' in out and "db-slack" in out
+
+
+def test_cli_test_without_coverage_flag_has_no_coverage(tmp_path, capsys):
+    cfg_path, tests_path = _write_coverage_suite(tmp_path)
+    assert main(["test", cfg_path, tests_path]) == 0
+    assert "coverage" not in capsys.readouterr().out.lower()
+    assert main(["test", cfg_path, tests_path, "--format", "json"]) == 0
+    assert isinstance(json.loads(capsys.readouterr().out), list)
+
+
+def test_cli_test_full_coverage(tmp_path, capsys):
+    cfg_path, tests_path = _write_coverage_suite(tmp_path, [
+        {"labels": {"team": "infra", "severity": "critical"}, "expect": ["infra-pager", "pager"]},
+        {"labels": {"team": "db", "severity": "warning"}, "expect": ["db-slack"]},
+    ])
+    assert main(["test", cfg_path, tests_path, "--fail-under", "100"]) == 0
+    out = capsys.readouterr().out
+    assert "6 of 6 routes" in out and "100.0%" in out
+    assert "Not matched" not in out
+
+
+@pytest.mark.parametrize("fail_under, code", [("60", 0), ("66.7", 0), ("66.8", 1), ("90", 1)])
+def test_cli_test_fail_under(tmp_path, capsys, fail_under, code):
+    cfg_path, tests_path = _write_coverage_suite(tmp_path)
+    # --fail-under implies --coverage; all cases pass, so only coverage decides
+    assert main(["test", cfg_path, tests_path, "--fail-under", fail_under]) == code
+    out = capsys.readouterr().out
+    assert "4 of 6 routes" in out
+    assert ("below --fail-under" in out) == bool(code)
+
+
+def test_cli_test_fail_under_and_failing_case_both_exit_1(tmp_path, capsys):
+    cfg_path, tests_path = _write_coverage_suite(tmp_path, [
+        {"labels": {"team": "db"}, "expect": ["wrong"]},
+    ])
+    assert main(["test", cfg_path, tests_path, "--fail-under", "0"]) == 1
+    # a failing case still covers the routes the alert went through
+    assert "2 of 6 routes" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("value", ["101", "-1", "abc", "nan"])
+def test_cli_test_fail_under_rejects_bad_values(tmp_path, capsys, value):
+    cfg_path, tests_path = _write_coverage_suite(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        main(["test", cfg_path, tests_path, "--fail-under", value])
+    assert exc.value.code == 2
+    assert "percentage from 0 to 100" in capsys.readouterr().err
+
+
+def test_cli_test_coverage_json(tmp_path, capsys):
+    cfg_path, tests_path = _write_coverage_suite(tmp_path, [
+        {"labels": {"team": "infra", "severity": "critical"}, "expect": ["infra-pager", "pager"]},
+        "not a mapping",  # malformed cases don't cover anything
+    ])
+    assert main(["test", cfg_path, tests_path, "--format", "json", "--fail-under", "80"]) == 1
+    data = json.loads(capsys.readouterr().out)
+    assert [t["passed"] for t in data["tests"]] == [True, False]
+    assert data["coverage"] == {
+        "routes": 6, "covered": 4, "percent": 66.7, "fail_under": 80.0,
+        "uncovered": [
+            {"path": "route.routes[2]", "line": 12, "column": 7},
+            {"path": "route.routes[2].routes[0]", "line": 15, "column": 11},
+        ],
+    }
+
+
+# ── inhibition (unit) ────────────────────────────────────────────────
+
+def _inhibited_by(rules, labels, *firing):
+    from amlint.routing import Inhibitor
+    inhibition = Inhibitor(rules).inhibited_by(labels, firing)
+    return inhibition and inhibition.rule
+
+
+_NODE_DOWN = {"source_matchers": ["alertname=NodeDown"],
+              "target_matchers": ['severity="warning"'], "equal": ["instance"]}
+
+
+def test_inhibition_source_target_and_equal():
+    from amlint.routing import Inhibition, Inhibitor
+    alert = {"alertname": "HighCPU", "severity": "warning", "instance": "a"}
+    node_down_a = {"alertname": "NodeDown", "instance": "a"}
+    assert Inhibitor([_NODE_DOWN]).inhibited_by(alert, [node_down_a]) == Inhibition(
+        "inhibit_rules[0]", node_down_a
+    )
+    # equal label differs
+    assert _inhibited_by([_NODE_DOWN], alert, {"alertname": "NodeDown", "instance": "b"}) is None
+    # firing alert doesn't match the source side
+    assert _inhibited_by([_NODE_DOWN], alert, {"alertname": "NodeUp", "instance": "a"}) is None
+    # the alert doesn't match the target side
+    assert _inhibited_by([_NODE_DOWN], {**alert, "severity": "critical"}, node_down_a) is None
+    # nothing firing, nothing inhibits
+    assert _inhibited_by([_NODE_DOWN], alert) is None
+
+
+def test_inhibition_equal_label_missing_on_both_sides_counts_as_equal():
+    alert = {"alertname": "HighCPU", "severity": "warning"}
+    assert _inhibited_by([_NODE_DOWN], alert, {"alertname": "NodeDown"}) == "inhibit_rules[0]"
+    # a label set to "" is the same as a missing one
+    assert _inhibited_by([_NODE_DOWN], {**alert, "instance": ""},
+                         {"alertname": "NodeDown"}) == "inhibit_rules[0]"
+    # missing on one side only is not equal
+    assert _inhibited_by([_NODE_DOWN], alert, {"alertname": "NodeDown", "instance": "a"}) is None
+    assert _inhibited_by([_NODE_DOWN], {**alert, "instance": "a"},
+                         {"alertname": "NodeDown"}) is None
+
+
+def test_inhibition_without_equal_matches_any_source():
+    rule = {k: v for k, v in _NODE_DOWN.items() if k != "equal"}
+    assert _inhibited_by([rule], {"severity": "warning", "instance": "a"},
+                         {"alertname": "NodeDown", "instance": "b"}) == "inhibit_rules[0]"
+
+
+# Modelled on TestInhibitRuleMatches in Alertmanager's inhibit/inhibit_test.go.
+_TWO_SIDED_RULES = [
+    {"source_match": {"s1": "1"}, "target_match": {"t1": "1"}, "equal": ["e"]},
+    {"source_match": {"s2": "1"}, "target_match": {"t2": "1"}, "equal": ["e"]},
+]
+_TWO_SIDED_FIRING = [
+    {"s1": "1", "t1": "2", "e": "1"},  # source side of rule 0 only
+    {"s2": "1", "t2": "1", "e": "1"},  # both sides of rule 1
+]
+
+
+@pytest.mark.parametrize("labels, rule", [
+    ({"t1": "1", "e": "1"}, "inhibit_rules[0]"),
+    ({"t2": "1", "e": "1"}, "inhibit_rules[1]"),
+    ({"t1": "1", "t3": "1", "e": "1"}, "inhibit_rules[0]"),
+    ({"t1": "1", "t2": "1", "e": "1"}, "inhibit_rules[0]"),
+    ({"t1": "0", "e": "1"}, None),
+    # on both sides of rule 0; the firing source alert is only on the source side
+    ({"s1": "1", "t1": "1", "e": "1"}, "inhibit_rules[0]"),
+    # on both sides of rule 1, and so is the only firing source: no inhibition
+    ({"s2": "1", "t2": "1", "e": "1"}, None),
+    ({"t1": "1", "e": "0"}, None),
+])
+def test_inhibition_two_sided_matches_like_alertmanager(labels, rule):
+    assert _inhibited_by(_TWO_SIDED_RULES, labels, *_TWO_SIDED_FIRING) == rule
+
+
+def test_inhibition_alert_does_not_inhibit_itself():
+    rule = {"source_matchers": ['severity="critical"'],
+            "target_matchers": ['severity=~"critical|warning"'], "equal": ["cluster"]}
+    alert = {"alertname": "ClusterDown", "severity": "critical", "cluster": "eu"}
+    # the same alert firing, or another alert on both sides of the rule, doesn't inhibit
+    assert _inhibited_by([rule], alert, alert) is None
+    assert _inhibited_by([rule], alert, {**alert, "alertname": "APIDown"}) is None
+    # a warning is on the target side only, so the critical one does inhibit it
+    assert _inhibited_by([rule], {**alert, "severity": "warning"}, alert) == "inhibit_rules[0]"
+
+
+def test_inhibition_regex_matchers_are_anchored():
+    rules = [
+        {"source_matchers": ['alertname=~"Node(Down|Unreachable)"'],
+         "target_matchers": ['alertname!~"Node.*"'], "equal": ["instance"]},
+    ]
+    alert = {"alertname": "DiskFull", "instance": "a"}
+    for source in ("NodeDown", "NodeUnreachable"):
+        assert _inhibited_by(rules, alert, {"alertname": source, "instance": "a"})
+    # anchored: NodeDownSoon is not NodeDown
+    assert _inhibited_by(rules, alert, {"alertname": "NodeDownSoon", "instance": "a"}) is None
+    # the target side excludes Node* alerts
+    assert _inhibited_by(rules, {"alertname": "NodeLoad", "instance": "a"},
+                         {"alertname": "NodeDown", "instance": "a"}) is None
+
+
+@pytest.mark.parametrize("rule", [
+    {"source_match": {"alertname": "NodeDown"}, "target_match": {"severity": "warning"}},
+    {"source_match_re": {"alertname": "Node.*"}, "target_match_re": {"severity": "warn(ing)?"}},
+    {"source_matchers": ['{alertname="NodeDown"}'], "target_matchers": ["severity=warning"]},
+])
+def test_inhibition_legacy_and_matchers_syntax(rule):
+    rule = {**rule, "equal": ["instance"]}
+    alert = {"severity": "warning", "instance": "a"}
+    assert _inhibited_by([rule], alert, {"alertname": "NodeDown", "instance": "a"})
+    assert _inhibited_by([rule], {**alert, "severity": "warn"},
+                         {"alertname": "NodeDown", "instance": "a"}) == (
+        "inhibit_rules[0]" if "target_match_re" in rule else None
+    )
+
+
+def test_inhibition_rules_are_checked_in_order():
+    rules = [
+        {"source_match": {"alertname": "ClusterDown"}, "target_match": {"severity": "warning"},
+         "equal": ["cluster"]},
+        _NODE_DOWN,
+    ]
+    alert = {"alertname": "HighCPU", "severity": "warning", "cluster": "eu", "instance": "a"}
+    cluster_down = {"alertname": "ClusterDown", "cluster": "eu"}
+    node_down = {"alertname": "NodeDown", "instance": "a"}
+    assert _inhibited_by(rules, alert, node_down) == "inhibit_rules[1]"
+    assert _inhibited_by(rules, alert, node_down, cluster_down) == "inhibit_rules[0]"
+    assert _inhibited_by(rules, {**alert, "cluster": "us"}, cluster_down) is None
+
+
+def test_inhibition_by_an_alert_that_is_itself_inhibited():
+    rules = [
+        {"source_match": {"alertname": "ClusterDown"}, "target_match": {"alertname": "NodeDown"}},
+        {"source_match": {"alertname": "NodeDown"}, "target_match": {"alertname": "HighCPU"}},
+    ]
+    assert _inhibited_by(rules, {"alertname": "HighCPU"},
+                         {"alertname": "ClusterDown"}, {"alertname": "NodeDown"}) == (
+        "inhibit_rules[1]"
+    )
+
+
+def test_inhibition_skips_malformed_rules_and_normalizes_values():
+    rules = ["not a rule", {"source_match": {"code": 500}, "target_match": {"up": False},
+                            "equal": ["port"]}]
+    assert _inhibited_by(rules, {"up": "false", "port": 80},
+                         {"code": "500", "port": "80"}) == "inhibit_rules[1]"
+
+
+@pytest.mark.parametrize("rule, message", [
+    ({"source_matchers": ["alertname"]}, "inhibit_rules[0]: cannot parse matcher"),
+    ({"target_matchers": ['a=~"(?=x)"']}, "inhibit_rules[0]: regex"),
+    ({"source_match_re": {"a": "(unclosed"}}, "inhibit_rules[0]: regex"),
+    ({"equal": "instance"}, "inhibit_rules[0]: equal must be a list"),
+])
+def test_inhibitor_rejects_rules_it_cannot_simulate(rule, message):
+    from amlint.routing import Inhibitor, RoutingError
+    with pytest.raises(RoutingError, match=re.escape(message)):
+        Inhibitor([rule])
+
+
+# ── inhibition in amlint route / amlint test (CLI) ───────────────────
+
+INHIBIT_CONFIG = """\
+route:
+  receiver: default
+  routes:
+    - matchers: ['team="db"']
+      receiver: db
+receivers:
+  - name: default
+  - name: db
+inhibit_rules:
+  - source_matchers: ['severity="critical"']
+    target_matchers: ['severity="warning"']
+    equal: [alertname]
+  - source_match: {alertname: NodeDown}
+    target_match_re: {alertname: '.+'}
+    equal: [instance]
+"""
+
+
+def _write_inhibit_config(tmp_path, text=INHIBIT_CONFIG):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(text)
+    return str(cfg_path)
+
+
+def test_cli_route_firing_shows_the_inhibiting_rule(tmp_path, capsys):
+    cfg_path = _write_inhibit_config(tmp_path)
+    assert main(["route", cfg_path, "alertname=DiskFull", "instance=a", "team=db",
+                 "--firing", "alertname=NodeDown,instance=a"]) == 0
+    out = capsys.readouterr().out
+    assert "Firing  alertname=NodeDown, instance=a" in out
+    assert f"Inhibited by inhibit_rules[1]  ·  {cfg_path}:13:5" in out
+    assert "while firing: alertname=NodeDown, instance=a" in out
+    assert "Routed to: db, but no notification is sent" in out
+    assert "Delivered to" not in out
+
+
+def test_cli_route_firing_not_inhibited(tmp_path, capsys):
+    cfg_path = _write_inhibit_config(tmp_path)
+    assert main(["route", cfg_path, "alertname=DiskFull", "instance=a",
+                 "--firing", "alertname=NodeDown,instance=b",
+                 "--firing", '{alertname="Other", instance="a"}']) == 0
+    out = capsys.readouterr().out
+    assert "Delivered to: default" in out
+    assert "Not inhibited by the 2 firing alerts" in out
+
+
+def test_cli_route_firing_json(tmp_path, capsys):
+    cfg_path = _write_inhibit_config(tmp_path)
+    args = ["route", cfg_path, "alertname=HighCPU", "severity=warning", "--format", "json"]
+    assert main(args + ["--firing", "alertname=HighCPU,severity=critical"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["receivers"] == ["default"]
+    assert data["firing"] == [{"alertname": "HighCPU", "severity": "critical"}]
+    assert data["inhibited"] is True
+    assert data["inhibited_by"] == {
+        "rule": "inhibit_rules[0]", "line": 10, "column": 5,
+        "source": {"alertname": "HighCPU", "severity": "critical"},
+    }
+    assert main(args) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert (data["firing"], data["inhibited"], data["inhibited_by"]) == ([], False, None)
+
+
+def test_cli_route_node_down_does_not_inhibit_itself(tmp_path, capsys):
+    cfg_path = _write_inhibit_config(tmp_path)
+    assert main(["route", cfg_path, "alertname=NodeDown", "instance=a", "--format", "json",
+                 "--firing", "alertname=NodeDown,instance=a"]) == 0
+    assert json.loads(capsys.readouterr().out)["inhibited"] is False
+
+
+@pytest.mark.parametrize("firing", ["alertname", "a!=b", "a=~b.*", "", "=x"])
+def test_cli_route_bad_firing_argument(tmp_path, capsys, firing):
+    cfg_path = _write_inhibit_config(tmp_path)
+    assert main(["route", cfg_path, "a=b", "--firing", firing]) == 2
+    assert "Invalid --firing" in capsys.readouterr().err
+
+
+def test_cli_route_unsimulatable_inhibit_rule(tmp_path, capsys):
+    cfg_path = _write_inhibit_config(tmp_path, INHIBIT_CONFIG + "  - source_matchers: [oops]\n")
+    # without --firing the inhibit rules aren't needed
+    assert main(["route", cfg_path, "a=b"]) == 0
+    capsys.readouterr()
+    assert main(["route", cfg_path, "a=b", "--firing", "alertname=NodeDown"]) == 2
+    err = capsys.readouterr().err
+    assert "Cannot simulate inhibition" in err and "inhibit_rules[2]" in err
+
+
+def _run_inhibit_tests(tmp_path, cases, *extra):
+    cfg_path = _write_inhibit_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump(cases))
+    return main(["test", cfg_path, str(tests_path), *extra]), cfg_path
+
+
+def test_cli_test_inhibited_assertions(tmp_path, capsys):
+    code, _ = _run_inhibit_tests(tmp_path, [
+        {"name": "disk alert muted while its node is down",
+         "labels": {"alertname": "DiskFull", "instance": "a", "team": "db"},
+         "firing": [{"alertname": "NodeDown", "instance": "a"}],
+         "expect": ["db"], "inhibited": True},
+        {"name": "another node's outage doesn't mute it",
+         "labels": {"alertname": "DiskFull", "instance": "a"},
+         "firing": [{"alertname": "NodeDown", "instance": "b"}],
+         "expect": ["default"]},  # firing: without inhibited: expects false
+        {"name": "inhibited: on its own",
+         "labels": {"alertname": "X", "severity": "warning"},
+         "firing": [{"alertname": "X", "severity": "critical"}], "inhibited": True},
+        {"name": "nothing firing", "labels": {"alertname": "X"}, "inhibited": False},
+    ])
+    assert code == 0
+    assert "4 passed" in capsys.readouterr().out
+
+
+def test_cli_test_unexpected_inhibition_fails_with_the_rule(tmp_path, capsys):
+    code, cfg_path = _run_inhibit_tests(tmp_path, [
+        {"name": "warning should still page",
+         "labels": {"alertname": "X", "severity": "warning"},
+         "firing": [{"alertname": "X", "severity": "critical"}],
+         "expect": ["default"]},
+    ])
+    assert code == 1
+    out = capsys.readouterr().out
+    assert "firing:    alertname=X, severity=critical" in out
+    assert "inhibited: expected no, actual yes" in out
+    assert f"by inhibit_rules[0]  ·  {cfg_path}:10:5" in out
+
+
+def test_cli_test_missing_inhibition_fails(tmp_path, capsys):
+    code, _ = _run_inhibit_tests(tmp_path, [
+        {"labels": {"alertname": "X", "severity": "warning"},
+         "firing": [{"alertname": "Y", "severity": "critical"}],
+         "inhibited": True},
+    ], "--format", "json")
+    assert code == 1
+    [r] = json.loads(capsys.readouterr().out)
+    assert r["passed"] is False
+    assert r["expected"] is None  # no receiver assertion
+    assert (r["expected_inhibited"], r["inhibited"], r["inhibited_by"]) == (True, False, None)
+
+
+def test_cli_test_inhibition_json(tmp_path, capsys):
+    code, _ = _run_inhibit_tests(tmp_path, [
+        {"labels": {"alertname": "X", "severity": "warning"},
+         "firing": [{"alertname": "X", "severity": "critical"}],
+         "receiver": "default", "inhibited": True},
+    ], "--format", "json")
+    assert code == 0
+    [r] = json.loads(capsys.readouterr().out)
+    assert r["firing"] == [{"alertname": "X", "severity": "critical"}]
+    assert r["inhibited_by"] == {"rule": "inhibit_rules[0]", "line": 10, "column": 5,
+                                 "source": {"alertname": "X", "severity": "critical"}}
+
+
+@pytest.mark.parametrize("case, message", [
+    ({"labels": {}, "firing": {"alertname": "X"}, "expect": []}, "firing: must be a list"),
+    ({"labels": {}, "firing": ["alertname=X"], "expect": []}, "firing: must be a list"),
+    ({"labels": {}, "inhibited": "yes"}, "inhibited: must be true or false"),
+    ({"labels": {}, "expect": [], "inhibited": None}, "inhibited: must be true or false"),
+    ({"labels": {}, "firing": []}, "exactly one of"),
+])
+def test_cli_test_invalid_inhibition_cases_fail(tmp_path, capsys, case, message):
+    code, _ = _run_inhibit_tests(tmp_path, [case])
+    assert code == 1
+    assert message in capsys.readouterr().out
+
+
+def test_cli_test_unsimulatable_inhibit_rule_exits_2(tmp_path, capsys):
+    lookbehind = "    source_matchers: ['a=~\"(?<=x)\"']\n"  # added to inhibit_rules[1]
+    cfg_path = _write_inhibit_config(tmp_path, INHIBIT_CONFIG + lookbehind)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump([{"labels": {}, "expect": ["default"]}]))
+    # only cases with firing: need the inhibit rules
+    assert main(["test", cfg_path, str(tests_path)]) == 0
+    tests_path.write_text(yaml.dump([{"labels": {}, "firing": [{"a": "b"}], "inhibited": False}]))
+    assert main(["test", cfg_path, str(tests_path)]) == 2
+    assert "inhibit_rules[1]" in capsys.readouterr().err
+
+
 # ── Matchers syntax: match / match_re / matchers normalized ──────────
 
 def test_parse_matchers_quoting_and_braces():
@@ -2297,6 +2822,136 @@ def test_cli_diff_routing_skipped_when_config_cannot_be_simulated(tmp_path, caps
     assert "Routing not compared" in capsys.readouterr().out
     main(["diff", str(old_path), str(new_path), "--format", "json"])
     assert "old config" in json.loads(capsys.readouterr().out)["routing"]["skipped"]
+
+
+# ── amlint diff --format markdown ────────────────────────────────────
+
+def _markdown_diff(*argv):
+    import io
+    from contextlib import redirect_stdout
+    out = io.StringIO()
+    with redirect_stdout(out):
+        rc = main(["diff", *argv, "--format", "markdown"])
+    return rc, out.getvalue()
+
+
+def test_cli_diff_markdown_changed_routes(tmp_path):
+    new = {**_DB_ROUTE, "routes": [
+        {**_DB_ROUTE["routes"][0], "routes": [
+            {"matchers": ['severity="critical"'], "receiver": "infra-slack"}]},
+        {"matchers": ['team="infra"'], "receiver": "infra-slack", "group_wait": "10s",
+         "group_by": ["alertname", "cluster"]},
+    ]}
+    old_path, new_path = _write_diff_pair(tmp_path, new)
+    rc, out = _markdown_diff(old_path, new_path, "--only", "undefined-receiver")
+    assert rc == 0  # routing changes alone don't fail diff
+    assert out.startswith("### amlint diff\n\n**2 routing changes** · no new findings · "
+                          "0 fixed · 0 unchanged · ")
+    assert "#### Receivers\n\n| labels | before | after |\n| --- | --- | --- |\n" \
+           "| `team=db, severity=critical` | `pagerduty-db` | `infra-slack` |\n" in out
+    assert "| labels | receiver | setting | before | after |" in out
+    assert "| `team=infra` (+1 similar) | `infra-slack` | `group_by` | `alertname` " \
+           "| `alertname, cluster` |" in out
+    assert "| `team=infra` (+1 similar) | `infra-slack` | `group_wait` | `30s` | `10s` |" in out
+    assert "findings" not in out.split("\n", 3)[3]  # no findings sections
+    assert out.endswith("|\n") and not out.endswith("\n\n")
+
+
+def test_cli_diff_markdown_no_changes_is_one_line(tmp_path):
+    old_path, _ = _write_diff_pair(tmp_path, _DB_ROUTE)
+    rc, out = _markdown_diff(old_path, old_path)
+    assert rc == 0
+    assert out == ("### amlint diff\n\n"
+                   "No routing changes · no new findings · 0 fixed · 5 unchanged · "
+                   "6 label sets checked\n")
+    assert _markdown_diff(old_path, old_path) == (rc, out)  # deterministic
+
+
+def test_cli_diff_markdown_caps_tables(tmp_path):
+    def config(suffix):
+        routes = [{"matchers": [f'team="t{i}"'], "receiver": f"r{i}{suffix}"}
+                  for i in range(60)]
+        receivers = [{"name": "default"}] + [{"name": r["receiver"]} for r in routes]
+        return yaml.dump({"route": {"receiver": "default", "routes": routes},
+                          "receivers": receivers})
+    old_path, new_path = tmp_path / "old.yml", tmp_path / "new.yml"
+    old_path.write_text(config(""))
+    new_path.write_text(config("-renamed"))
+    _, out = _markdown_diff(str(old_path), str(new_path), "--only", "undefined-receiver")
+    assert out.splitlines()[2].startswith("**60 routing changes**")
+    rows = [line for line in out.splitlines() if line.startswith("| `team=")]
+    assert len(rows) == 50
+    assert rows[0] == "| `team=t0` | `r0` | `r0-renamed` |"
+    assert out.endswith("-renamed` |\n\n…and 10 more label sets\n")
+
+
+def test_cli_diff_markdown_findings_with_locations(tmp_path):
+    old_path, new_path = tmp_path / "old.yml", tmp_path / "new.yml"
+    old_path.write_text("route:\n  receiver: default\n  routes:\n"
+                        "    - matchers: ['team=\"db\"']\n      receiver: ghost\n"
+                        "receivers:\n  - name: default\n")
+    new_path.write_text("route:\n  receiver: default\n  routes:\n"
+                        "    - matchers: ['team=\"db\"']\n      receiver: default\n"
+                        "    - matchers: ['team=\"infra\"']\n      receiver: phantom\n"
+                        "receivers:\n  - name: default\n")
+    rc, out = _markdown_diff(str(old_path), str(new_path), "--only", "undefined-receiver")
+    assert rc == 1
+    assert out.splitlines()[2] == ("**2 routing changes** · **1 new finding** · 1 fixed · "
+                                   "0 unchanged · 3 label sets checked")
+    new_section = out.split("#### New findings\n\n")[1].split("#### Fixed findings")[0]
+    assert new_section.splitlines()[0] == "| level | check | location | message |"
+    assert new_section.splitlines()[2] == (
+        f"| ✖ error | `undefined-receiver` | `{new_path}:6:7` (`route.routes[1]`) "
+        "| Route references receiver 'phantom' which is not defined in receivers. "
+        "Alerts matched here will be dropped. |")
+    fixed_section = out.split("#### Fixed findings\n\n")[1]
+    assert f"| ✖ error | `undefined-receiver` | `{old_path}:4:7` (`route.routes[0]`) " \
+           in fixed_section
+    assert out.index("#### Receivers") < out.index("#### New findings")
+
+
+def test_cli_diff_markdown_new_file_against_empty_config(tmp_path):
+    empty = tmp_path / "empty.yml"
+    empty.write_text("")
+    _, new_path = _write_diff_pair(tmp_path, _DB_ROUTE)
+    rc, out = _markdown_diff(str(empty), new_path)
+    assert "0 fixed" in out and "#### Fixed findings" not in out  # no-root-route isn't "fixed"
+    assert "| `team=db, severity=critical` | `(none)` | `pagerduty-db` |" in out
+    assert "| `(no labels)` (+1 similar) | `(none)` | `default` |" in out
+    assert rc == (1 if "#### New findings" in out else 0)
+
+
+def test_cli_diff_markdown_routing_skipped_or_disabled(tmp_path):
+    _, new_path = _write_diff_pair(tmp_path, _DB_ROUTE)
+    old_path = tmp_path / "unparseable.yml"
+    old_path.write_text(yaml.dump({"route": {"receiver": "x", "routes": [
+        {"matchers": ["oops"], "receiver": "x"}]}, "receivers": [{"name": "x"}]}))
+    _, out = _markdown_diff(str(old_path), new_path, "--only", "undefined-receiver")
+    assert out.splitlines()[2].startswith("Routing not compared · no new findings")
+    assert "Routing not compared: old config: route.routes\\[0\\]: cannot parse matcher" in out
+    _, out = _markdown_diff(str(old_path), new_path, "--no-routing", "--only", "undefined-receiver")
+    assert out == "### amlint diff\n\nNo new findings · 0 fixed · 0 unchanged\n"
+
+
+def test_markdown_escapes_config_text():
+    from amlint.markdown import code, text
+    assert code("a|b") == "`a\\|b`"
+    assert code("x`y") == "``x`y``"
+    assert code("`edge`") == "`` `edge` ``"
+    assert code("line\nbreak") == "`line break`"
+    assert code("<b>@team</b>") == "`<b>@team</b>`"  # literal inside a code span
+    assert text("<img src=x> *bold* [l](u) a|b") == \
+        "\\<img src=x\\> \\*bold\\* \\[l\\](u) a\\|b"
+    assert text("ping @org/team & co") == "ping @&#8203;org/team \\& co"
+
+
+def test_cli_diff_markdown_escapes_receiver_names(tmp_path):
+    new = {**_DB_ROUTE, "routes": [_DB_ROUTE["routes"][0],
+                                   {"matchers": ['team="infra"'], "receiver": "@ops|`x`"}]}
+    old_path, new_path = _write_diff_pair(tmp_path, new)
+    _, out = _markdown_diff(old_path, new_path, "--only", "undefined-receiver")
+    assert "| `team=infra` (+1 similar) | `infra-slack` | `` @ops\\|`x` `` |" in out
+    assert "receiver '@&#8203;ops\\|\\`x\\`' which is not defined" in out
 
 
 # ── Configs modeled on widely used public setups must lint clean ─────

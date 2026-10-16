@@ -25,10 +25,26 @@ inputs:
     description: 'amlint version to install, e.g. 0.4.0 (defaults to latest from PyPI)'
     required: false
     default: ''
+  format:
+    description: "Output of the check step: 'github' (findings annotate the PR diff) or 'text'"
+    required: false
+    default: 'github'
   sarif:
     description: "Also upload findings to GitHub Code Scanning as SARIF ('true'/'false'). Requires Code Scanning to be enabled on the repo."
     required: false
     default: 'false'
+  diff-base:
+    description: >-
+      Git ref to compare config-path against, usually the pull request's base SHA. On
+      pull_request events the routing diff is posted as one PR comment, updated on every push.
+      Needs permissions pull-requests: write, and the base commit in the checkout
+      (fetch-depth: 0). Ignored on other events.
+    required: false
+    default: ''
+  github-token:
+    description: 'Token for posting the routing diff comment'
+    required: false
+    default: ${{ github.token }}
 
 runs:
   using: 'composite'
@@ -51,11 +67,22 @@ runs:
       id: check
       shell: bash
       continue-on-error: true
+      env:
+        AMLINT_CONFIG: ${{ inputs.config-path }}
+        AMLINT_FORMAT: ${{ inputs.format }}
+        AMLINT_STRICT: ${{ inputs.strict }}
+        AMLINT_IGNORE: ${{ inputs.ignore }}
+        AMLINT_ONLY: ${{ inputs.only }}
       run: |
-        set -- check "${{ inputs.config-path }}"
-        [ "${{ inputs.strict }}" = "true" ] && set -- "$@" --strict
-        [ -n "${{ inputs.ignore }}" ] && set -- "$@" --ignore "${{ inputs.ignore }}"
-        [ -n "${{ inputs.only }}" ] && set -- "$@" --only "${{ inputs.only }}"
+        case "$AMLINT_FORMAT" in
+          github|text) ;;
+          *) echo "::error title=amlint::format must be 'github' or 'text', got '$AMLINT_FORMAT'"
+             exit 2 ;;
+        esac
+        set -- check "$AMLINT_CONFIG" --format "$AMLINT_FORMAT"
+        if [ "$AMLINT_STRICT" = "true" ]; then set -- "$@" --strict; fi
+        if [ -n "$AMLINT_IGNORE" ]; then set -- "$@" --ignore "$AMLINT_IGNORE"; fi
+        if [ -n "$AMLINT_ONLY" ]; then set -- "$@" --only "$AMLINT_ONLY"; fi
         amlint "$@"
 
     - name: Run amlint check (SARIF)
@@ -69,6 +96,132 @@ runs:
       uses: github/codeql-action/upload-sarif@v4
       with:
         sarif_file: amlint-results.sarif
+
+    - name: Routing diff
+      id: routing-diff
+      if: >-
+        inputs.diff-base != '' &&
+        (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
+      shell: bash
+      env:
+        AMLINT_CONFIG: ${{ inputs.config-path }}
+        AMLINT_BASE: ${{ inputs.diff-base }}
+        AMLINT_IGNORE: ${{ inputs.ignore }}
+        AMLINT_ONLY: ${{ inputs.only }}
+      run: |
+        set -euo pipefail
+        if ! git rev-parse --verify --quiet "$AMLINT_BASE^{commit}" > /dev/null; then
+          echo "::error title=amlint diff-base::'$AMLINT_BASE' is not in this checkout. Check out with fetch-depth: 0, or fetch the base commit before this step."
+          exit 1
+        fi
+        if [ ! -f "$AMLINT_CONFIG" ]; then
+          echo "::warning title=amlint diff-base::$AMLINT_CONFIG does not exist, so there is no routing diff."
+          exit 0
+        fi
+        # Path inside the repository, for `git show <ref>:<path>`.
+        top=$(git rev-parse --show-toplevel)
+        rel=$(python -c 'import os, sys; print(os.path.relpath(os.path.realpath(sys.argv[1]), os.path.realpath(sys.argv[2])).replace(os.sep, "/"))' "$AMLINT_CONFIG" "$top")
+        base=$(git rev-parse --short=12 "$AMLINT_BASE^{commit}")
+
+        # The base version goes next to the config, so relative template paths resolve the same.
+        old="$AMLINT_CONFIG@base"
+        trap 'rm -f "$old"' EXIT
+        if git cat-file -e "$AMLINT_BASE:$rel" 2> /dev/null; then
+          git show "$AMLINT_BASE:$rel" > "$old"
+          footer="Compared with \`$rel\` at $base."
+        else
+          : > "$old"  # new in this pull request: diff against an empty config
+          footer="\`$rel\` is new in this pull request (not in $base)."
+        fi
+        unchanged=false
+        if cmp -s "$old" "$AMLINT_CONFIG"; then unchanged=true; fi
+
+        report="${RUNNER_TEMP:-/tmp}/amlint-routing-diff.md"
+        set -- diff "$old" "$AMLINT_CONFIG" --format markdown
+        if [ -n "$AMLINT_IGNORE" ]; then set -- "$@" --ignore "$AMLINT_IGNORE"; fi
+        if [ -n "$AMLINT_ONLY" ]; then set -- "$@" --only "$AMLINT_ONLY"; fi
+        rc=0
+        amlint "$@" > "$report.body" || rc=$?
+        if [ "$rc" -gt 1 ]; then  # 1 only means new findings
+          echo "::warning title=amlint diff-base::amlint diff failed (exit $rc), so there is no routing diff."
+          exit 0
+        fi
+        {
+          echo "<!-- amlint-routing-diff -->"
+          cat "$report.body"
+          echo
+          echo "<sub>$footer Updated on every push.</sub>"
+        } > "$report"
+        cat "$report" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        echo "unchanged=$unchanged" >> "$GITHUB_OUTPUT"
+
+    - name: Post routing diff comment
+      if: steps.routing-diff.outputs.report != ''
+      shell: bash
+      env:
+        AMLINT_REPORT: ${{ steps.routing-diff.outputs.report }}
+        AMLINT_UNCHANGED: ${{ steps.routing-diff.outputs.unchanged }}
+        AMLINT_PR: ${{ github.event.pull_request.number }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        api="${GITHUB_API_URL:-https://api.github.com}/repos/$GITHUB_REPOSITORY/issues"
+        tmp=$(mktemp -d)
+        trap 'rm -rf "$tmp"' EXIT
+
+        # gh_api METHOD URL [PAYLOAD]: response in $tmp/response.json, fails unless 2xx
+        gh_api() {
+          local args=(-sS -o "$tmp/response.json" -w '%{http_code}' -X "$1"
+            -H "Authorization: Bearer $GITHUB_TOKEN"
+            -H "Accept: application/vnd.github+json"
+            -H "X-GitHub-Api-Version: 2022-11-28")
+          if [ -n "${3:-}" ]; then args+=(--data-binary "@$3"); fi
+          local status
+          status=$(curl "${args[@]}" "$2") || return 1
+          case "$status" in
+            2??) return 0 ;;
+            *) echo "$1 $2: HTTP $status $(head -c 300 "$tmp/response.json")" >&2; return 1 ;;
+          esac
+        }
+
+        # Find the comment from an earlier run by the marker it starts with.
+        comment=""
+        for page in $(seq 1 30); do
+          gh_api GET "$api/$AMLINT_PR/comments?per_page=100&page=$page" || break
+          result=$(python -c '
+        import json, sys
+        comments = json.load(open(sys.argv[1], encoding="utf-8"))
+        ids = [c["id"] for c in comments
+               if (c.get("body") or "").startswith("<!-- amlint-routing-diff -->")]
+        print(len(comments), ids[-1] if ids else "")
+        ' "$tmp/response.json")
+          read -r count found <<< "$result"
+          if [ -n "$found" ]; then comment=$found; fi
+          if [ "$count" -lt 100 ]; then break; fi
+        done
+
+        if [ -z "$comment" ] && [ "$AMLINT_UNCHANGED" = "true" ]; then
+          echo "The config is the same as at the base and there is no earlier comment: nothing to post."
+          exit 0
+        fi
+        python -c '
+        import json, sys
+        body = open(sys.argv[1], encoding="utf-8").read()
+        if len(body) > 65000:  # GitHub rejects comments over 65536 characters
+            body = body[:65000] + "\n\n…truncated, run amlint diff locally for the rest\n"
+        json.dump({"body": body}, open(sys.argv[2], "w", encoding="utf-8"))
+        ' "$AMLINT_REPORT" "$tmp/payload.json"
+
+        url() { python -c 'import json, sys; print(json.load(open(sys.argv[1])).get("html_url", ""))' "$tmp/response.json"; }
+        # PATCH fails on a marker comment someone else wrote; post a new one then.
+        if [ -n "$comment" ] && gh_api PATCH "$api/comments/$comment" "$tmp/payload.json"; then
+          echo "Updated the routing diff comment: $(url)"
+        elif gh_api POST "$api/$AMLINT_PR/comments" "$tmp/payload.json"; then
+          echo "Posted the routing diff comment: $(url)"
+        else
+          echo "::warning title=amlint diff-base::Could not post the routing diff comment. It needs permissions pull-requests: write; pull requests from forks get a read-only token. The diff is in the job summary."
+        fi
 
     - name: Fail if amlint found issues
       if: steps.check.outcome == 'failure'

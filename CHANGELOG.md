@@ -2,6 +2,55 @@
 
 ## [Unreleased]
 
+### Added
+- `amlint diff --format markdown` — a compact, deterministic report for a pull-request
+  comment: a one-line summary, a table of label sets whose receivers changed (labels |
+  before | after), changed `group_by` and timings, and new and fixed findings with
+  `file:line:col`. Each table stops after 50 rows with "…and N more". Names from the config
+  are escaped, so they can't add Markdown, HTML or @mentions to the comment.
+- GitHub Action: `diff-base` input (e.g. `${{ github.event.pull_request.base.sha }}`). On
+  `pull_request` events the action extracts the config at that ref, runs
+  `amlint diff --format markdown` and creates or updates one PR comment, found by the
+  `<!-- amlint-routing-diff -->` marker, through the REST API with `curl` (no third-party
+  actions). It also writes the report to the job summary. A config that doesn't exist at the
+  base is diffed as new. Needs `permissions: pull-requests: write` and the base commit in the
+  checkout (`fetch-depth: 0`). On other events it does nothing. New `github-token` input.
+- GitHub Action: `format` input for the check step, `github` (default) or `text`.
+- `amlint test --coverage` lists the routes that no test case reaches, with their path
+  (`route.routes[2].routes[0]`), `file:line:col` and matchers, plus the share of routes that
+  are covered. A route counts as covered when an alert went through it, so the parents of the
+  route it lands on count, and so does every branch of a `continue: true` fan-out.
+  Unreachable routes, such as one behind a catch-all, show up here. `--fail-under N` exits 1
+  when coverage is below N% and turns on `--coverage` by itself. With `--format json` the
+  output becomes `{"tests": [...], "coverage": {...}}`, and `coverage` lists the uncovered
+  routes with `line` / `column`. Without these flags the JSON is the same list as before.
+- Inhibition simulation, mirroring Alertmanager's `inhibit/inhibit.go`. A test case can list
+  `firing:` (other alerts firing at the same time) and assert `inhibited: true|false`,
+  alongside a receiver assertion or on its own. With `firing:` and no `inhibited:`, the case
+  expects the alert not to be inhibited. The alert is inhibited when a firing alert matches a
+  rule's source matchers, the alert matches its target matchers, and every `equal` label has
+  the same value on both (a label missing on both sides counts as equal). As in
+  Alertmanager, an alert that matches both sides of a rule isn't inhibited by firing alerts
+  that also match both sides, so it never inhibits itself. `source_matchers` /
+  `target_matchers` and the older `source_match(_re)` / `target_match(_re)` both work, with
+  the same anchored RE2 regexes as routing. A failing case names the rule that inhibited the
+  alert, with its `file:line:col`. JSON results add `firing`, `expected_inhibited`,
+  `inhibited` and `inhibited_by`.
+- `amlint route --firing 'alertname=NodeDown,instance=a'` (repeatable) shows whether those
+  alerts inhibit the one being routed, and which rule does it (`inhibit_rules[1]` and
+  `file:line:col`). JSON output adds `firing`, `inhibited` and `inhibited_by`. An inhibit rule
+  amlint can't evaluate exits 2, but only when `--firing` or `firing:` needs the rules.
+- `testdata/real-world/`: configs modeled on kube-prometheus and Alertmanager's docs example;
+  the test suite fails if any of them gets a WARN or ERROR
+
+### Changed
+- The GitHub Action reports findings as PR annotations (`--format github`) by default,
+  instead of the text report. `format: text` restores the old output; `sarif: true` still
+  uploads SARIF.
+- `amlint diff` treats an empty old file as no config: every finding in the new file is
+  new, none is fixed (the empty file's `no-root-route` used to show up as fixed), and the
+  routing section lists every label set's receivers as changed from `(none)`.
+
 ### Fixed
 - The kube-prometheus-stack default config no longer fails `--strict` out of the box:
   - `inhibit-no-equal` skips rules with target matchers but no source matchers, the
@@ -12,10 +61,6 @@
     nothing
 - `empty-receiver` reports receivers named `null`, `blackhole`, `devnull`, `dev-null`,
   `discard` or `drop` as info, like the default receiver: they are deliberate drops
-
-### Added
-- `testdata/real-world/`: configs modeled on kube-prometheus and Alertmanager's docs example;
-  the test suite fails if any of them gets a WARN or ERROR
 
 ## [0.4.0] - 2026-10-16
 
