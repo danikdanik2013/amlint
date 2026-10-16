@@ -224,43 +224,54 @@ Two sibling routes have identical matchers. Alertmanager evaluates siblings in o
 
 **Level:** warn
 
-An earlier sibling route without `continue: true` has a strict subset of this route's matchers. Every alert this route matches also matches the earlier sibling, which comes first — so this route never receives alerts.
+Every alert this route matches also matches an earlier sibling without `continue: true`. Alertmanager tries siblings in order and stops at the first match, so this route never receives alerts.
 
-Only exact subsets are reported: the same label, operator and value, with `match:`, `match_re:` and `matchers:` spellings comparing equal. amlint does not reason about regexes, so `severity=~"crit.*"` before `severity="critical", team="infra"` is not reported — every finding is a route that really is dead.
+amlint compares the label values each matcher allows, not just how it is written. The later route is never reached in each of these pairs:
+
+- `severity=~"warning|critical"` before `severity="critical"`: `critical` matches the regex
+- `team!="db"` before `team="infra"`: `infra` is not `db`
+- `alertname=~"Kube.*"` before `alertname=~"KubePod.*"`: every `KubePod…` name starts with `Kube`
+- `service!~"db-.*"` before `service=~"api-[0-9]+"`: no `api-…` name starts with `db-`
+- `team=~"|infra"` before `team=""`: a missing label is the empty string, as in Alertmanager
+- `severity="critical"` before `severity="critical", team="infra"`: the earlier route asks for less
+
+Labels the earlier sibling doesn't mention never stop it from matching. Every alert that reaches the siblings has also matched their parent routes, so the parents' matchers count too: under a parent with `env="prod"`, a child with `env=~"prod|staging", severity="critical"` catches every alert of a later sibling that requires `severity="critical"`.
+
+Regexes are compared exactly, with the same RE2 semantics as [`amlint route`](../usage.md#route) and [`amlint test`](../usage.md#test). Only routes amlint can prove dead are reported: a regex with case folding (`(?i)`), word boundaries or anchors in the middle of the pattern, or one too large to compare, keeps the check silent, even when the route is in fact dead. Label values are taken to contain no newline where a matcher is just `label=~".*"`, as in [`unreachable-route`](#unreachable-route).
 
 === "Bad"
     ```yaml
     routes:
-      - matchers: [severity="critical"]
+      - matchers: [severity=~"warning|critical"]
+        receiver: ops
+      - matchers: [severity="critical"]   # never reached
         receiver: pager
-      - matchers: [severity="critical", team="infra"]   # never reached
-        receiver: infra-pager
     ```
 
 === "Fixed — specific first"
     ```yaml
     routes:
-      - matchers: [severity="critical", team="infra"]   # more specific first
-        receiver: infra-pager
-      - matchers: [severity="critical"]
+      - matchers: [severity="critical"]   # more specific first
         receiver: pager
+      - matchers: [severity=~"warning|critical"]
+        receiver: ops
     ```
 
 === "Fixed — use continue"
     ```yaml
     routes:
+      - matchers: [severity=~"warning|critical"]
+        receiver: ops
+        continue: true          # pass to next sibling too
       - matchers: [severity="critical"]
         receiver: pager
-        continue: true          # pass to next sibling too
-      - matchers: [severity="critical", team="infra"]
-        receiver: infra-pager
     ```
 
 !!! note
     Each dead route is reported by one check. Identical matchers are
     [`route-match-collision`](#route-match-collision), and a catch-all sibling (no matchers, or
     only `label=~".*"`) is [`unreachable-route`](#unreachable-route); `shadowed-route` reports
-    the remaining provable case, a strict subset.
+    every other earlier sibling that provably catches all of a route's alerts.
 
 ---
 

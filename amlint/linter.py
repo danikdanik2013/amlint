@@ -1146,37 +1146,43 @@ def check_root_route(cfg: dict) -> List[Finding]:
 # CHECK 30: sibling route that an earlier, broader sibling always matches first
 def check_shadowed_routes(cfg: dict) -> List[Finding]:
     """
-    If an earlier sibling without continue:true has a strict subset of this route's
-    matchers, every alert this route matches stops there first. Only exact
-    (label, op, value) subsets count, nothing is inferred from regexes. Identical
-    matchers are left to route-match-collision and catch-alls to unreachable-route,
-    so each dead route is reported by one check.
+    If every alert this route matches also matches an earlier sibling without
+    continue:true, the alert stops there first. Regex and negative matchers count
+    (severity="critical" implies severity=~"warning|critical"), and so do the parents'
+    matchers, which every alert reaching these siblings matched; only implications
+    amlint can prove are reported (see implication.py). Identical matchers are left to
+    route-match-collision and catch-alls to unreachable-route, so each dead route is
+    reported by one check.
     """
+    from .implication import implies  # imported here: implication.py builds on this module
+
     out: List[Finding] = []
     route = _root_route(cfg)
     if not route:
         return out
 
-    def scan(node, parent_path):
+    def scan(node, parent_path, above: List[Matcher]):
         # earlier siblings that stop evaluation when they match
         earlier: List[Tuple[str, FrozenSet[Matcher]]] = []
         for i, child in _dict_items(node.get("routes")):
             path = f"{parent_path}.routes[{i}]"
             key = frozenset(_matchers(child))
-            covering = [(prev_path, prev) for prev_path, prev in earlier if prev <= key]
+            reaching = above + list(key)
+            covering = [(prev_path, prev) for prev_path, prev in earlier
+                        if implies(reaching, prev)]
             if covering and all(prev != key for _, prev in covering):
                 out.append(Finding(
                     WARN, "shadowed-route",
-                    f"Earlier sibling {covering[0][0]} uses a subset of these matchers and has "
-                    f"no continue:true — this route will never receive alerts because the "
-                    f"earlier sibling always matches first.",
+                    f"Earlier sibling {covering[0][0]} matches every alert this route "
+                    f"matches and has no continue:true — this route will never receive "
+                    f"alerts because the earlier sibling always matches first.",
                     path,
                 ))
             if not child.get("continue") and not _is_catch_all(key):
                 earlier.append((path, key))
-            scan(child, path)
+            scan(child, path, reaching)
 
-    scan(route, "route")
+    scan(route, "route", _matchers(route))
     return out
 
 
