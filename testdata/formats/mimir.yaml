@@ -1,0 +1,27 @@
+# A Mimir (or Cortex) tenant config, as `mimirtool alertmanager get` prints it and
+# POST /api/v1/alerts takes it: the Alertmanager config as a string, and the template files.
+template_files:
+  default_template: |
+    {{ define "email.subject" }}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ end }}
+alertmanager_config: |
+  global:
+    resolve_timeout: 5m
+    smtp_smarthost: smtp.example.org:587
+    smtp_from: alertmanager@example.org
+  templates:
+    - default_template
+  route:
+    receiver: team-email
+    group_by: [alertname, cluster]
+    routes:
+      - matchers: [severity="critical"]
+        receiver: team-pager
+  receivers:
+    - name: team-email
+      email_configs:
+        - to: team@example.org
+          headers:
+            Subject: '{{ template "email.subject" . }}'
+    - name: team-pager
+      pagerduty_configs:
+        - routing_key: 0123456789abcdef0123456789abcdef

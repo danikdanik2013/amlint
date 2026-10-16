@@ -63,6 +63,8 @@ amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
 amlint check alertmanager.yml --rules 'rules/*.yml'  # also check against Prometheus alerting rules
+amlint check alertmanager-secret.yaml       # a Kubernetes Secret, Helm values, a Mimir config...
+kubectl kustomize deploy/ | amlint check -  # ...or AlertmanagerConfig resources, merged like the operator
 amlint diff old.yml new.yml                 # what changed: findings, and alerts routed differently
 amlint diff old.yml new.yml --format markdown  # the same as a compact PR comment
 amlint tree alertmanager.yml                # visualize the route tree, issues inline
@@ -183,6 +185,33 @@ runtime alerts also carry labels from their PromQL series and `external_labels`,
 goes by the rule's static labels only and skips anything that depends on a label it can't
 know. Details in [docs/checks/rules.md](docs/checks/rules.md).
 
+## Kubernetes, Helm and Mimir
+
+amlint reads the config in the shape you deploy it, detected from the content
+(`--input-format` overrides it):
+
+- a Kubernetes **Secret** or ConfigMap holding `alertmanager.yaml`, in `stringData` or
+  base64 `data`, with its other keys as template files;
+- **kube-prometheus-stack** values: `alertmanager.config`, merged over the chart's default
+  config the way Helm merges it, and `alertmanager.templateFiles`;
+- a **Mimir** or **Cortex** tenant config: the `alertmanager_config` string and
+  `template_files`;
+- prometheus-operator **AlertmanagerConfig** resources (v1alpha1 and v1beta1), merged into
+  the base config as the operator does it: receivers named `<namespace>/<name>/<receiver>`,
+  a `namespace` matcher on each resource's route and inhibit rules (per
+  `alertmanagerConfigMatcherStrategy`), and Secret references counted as set.
+
+`check`, `tree`, `route`, `test` and `diff` work on all of them, and findings point at the
+line in your file, inside a `stringData` block too:
+
+```
+  ✖  ERROR  [undefined-receiver]  ·  team-a.yaml:10:9  ·  route.routes[0].routes[0]
+     Route references receiver 'team-a/payments/pager' which is not defined in receivers.
+     Alerts matched here will be dropped.
+```
+
+Details, including what isn't modeled, in [docs/kubernetes.md](docs/kubernetes.md).
+
 ## CI example
 
 ```yaml
@@ -254,7 +283,7 @@ Run `amlint explain <code>` for detailed description and examples of any check.
 ## Tests
 
 ```bash
-python3 -m pytest test_linter.py -v
+python3 -m pytest test_linter.py test_formats.py -v
 ```
 
 ## License

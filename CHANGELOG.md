@@ -29,6 +29,48 @@
   playground (`playground/build.py`), runs `mkdocs build --strict` and a headless
   Playwright smoke test that lints a fixture, routes an alert, diffs two configs, opens a
   share link and checks that no request carries the config. It deploys only from `main`.
+- amlint reads the config formats Alertmanager is deployed with, not only a plain
+  `alertmanager.yml`. The format is detected from the content; `--input-format`
+  (`auto`, `alertmanager`, `secret`, `helm`, `mimir`, `alertmanagerconfig`) on `check`,
+  `diff`, `tree`, `route` and `test` overrides it. Files can be multi-document streams and
+  `kind: List` objects, so `kubectl kustomize ... | amlint check -` works; other Kubernetes
+  objects in them are skipped. See the new "Kubernetes & Mimir" docs page.
+  - Kubernetes `Secret` (and `ConfigMap`) holding `alertmanager.yaml`, in `stringData` or
+    base64 `data`, including the operator's gzipped `alertmanager.yaml.gz`. The Secret's
+    other keys are the template files mounted in `/etc/alertmanager/config/`; `templates:`
+    entries there are checked against them instead of files on disk.
+  - kube-prometheus-stack values: `alertmanager.config` is merged over the default config of
+    chart 92.10.1 the way Helm merges values, which catches routes to the chart's `null`
+    receiver after `receivers:` was replaced. `alertmanager.templateFiles` are the template
+    files; `stringConfig` is used only with `tplConfig: true`, as in the chart.
+  - Mimir and Cortex tenant configs: the `alertmanager_config` string and `template_files`.
+  - prometheus-operator `AlertmanagerConfig` resources (`monitoring.coreos.com/v1alpha1` and
+    `v1beta1`), converted and merged into the base config of the same input as
+    prometheus-operator v0.94.1 does it: receiver and time interval names become
+    `<namespace>/<name>/<name>`; each resource's route gets a `namespace` matcher and
+    `continue: true` and goes before the base routes, in `namespace/name` order; inhibit
+    rules get the `namespace` matcher on both sides; `alertmanagerConfigMatcherStrategy`
+    (`OnNamespace`, `OnNamespaceExceptForAlertmanagerNamespace`, `None`) is read from an
+    `Alertmanager` resource or Helm values in the input, or set with `--matcher-strategy`.
+    Secret references (`apiURL`, `routingKey`, `urlSecret`, ...) count as set. Without a
+    base config the operator's default (`null` receiver) is used, and findings about it are
+    dropped. An `Alertmanager` with `spec.alertmanagerConfiguration` uses the named resource
+    as the whole config. Findings that only the operator's namespace matcher or forced
+    `continue: true` cause are dropped.
+  - Findings keep pointing at `file:line:col` in the file that was read: inside a literal
+    block (`alertmanager.yaml: |`) at the exact line and column, and `# amlint:` comments
+    there work; for base64 or quoted strings at the key holding the config; for resources at
+    the resource's own route, receiver or rule.
+- `note:` lines on stderr say how a file was read when it matters: which parts of a Helm
+  config come from the chart, a resource without a namespace or without a route, a field the
+  API server drops for that API version.
+- `lint()` takes `template_files=` (an `amlint.formats.BundledTemplates`) to check
+  `templates:` against template files that ship with the config.
+
+### Changed
+- A file with several YAML documents that are all plain Alertmanager configs now fails with
+  "found 2 Alertmanager configs (lines 1, 3)" instead of a YAML error; it still exits 2.
+  `--input-format alertmanager` keeps the old behaviour.
 
 ## [0.4.1] - 2026-10-16
 
