@@ -665,6 +665,14 @@ def check_timing(cfg):
 
 
 # CHECK 11: two inhibition rules that silence each other
+def _same_alert(a: Dict[str, str], b: Dict[str, str]) -> bool:
+    """Whether two sides of inhibit rules can match the same alert: they share a label
+    and agree on every shared one. A shared namespace=x doesn't make alertname=NodeDown
+    and alertname=PodDown the same alert."""
+    shared = set(a) & set(b)
+    return bool(shared) and all(a[k] == b[k] for k in shared)
+
+
 def check_circular_inhibition(cfg):
     out = []
     rules = [
@@ -673,9 +681,8 @@ def check_circular_inhibition(cfg):
     ]
     for pos, (i, src_a, tgt_a) in enumerate(rules):
         for j, src_b, tgt_b in rules[pos + 1:]:
-            a_can_silence_b = any(src_a.get(k) == tgt_b.get(k) for k in set(src_a) & set(tgt_b))
-            b_can_silence_a = any(src_b.get(k) == tgt_a.get(k) for k in set(src_b) & set(tgt_a))
-            if a_can_silence_b and b_can_silence_a:
+            # each rule's source alert is the other rule's target
+            if _same_alert(src_a, tgt_b) and _same_alert(src_b, tgt_a):
                 out.append(Finding(
                     WARN, "circular-inhibition",
                     f"inhibit_rules[{i}] and inhibit_rules[{j}] may silence each other — "

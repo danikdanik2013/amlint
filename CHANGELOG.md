@@ -30,6 +30,13 @@
   Playwright smoke test that lints a fixture, routes an alert, diffs two configs, opens a
   share link and checks that no request carries the config. It deploys only from `main`.
 
+### Fixed
+- `circular-inhibition` no longer reports two unrelated rules because one label value
+  matches. It took one shared label with the same value (say `namespace=x` on both sides
+  of both rules) as enough for each rule's source to be the other's target, even when
+  another shared label, such as `alertname`, contradicts it. Now every shared `=` label
+  must agree.
+
 ## [0.4.1] - 2026-10-16
 
 ### Added
