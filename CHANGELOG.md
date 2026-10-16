@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Python 3.14 and 3.15 support: CI runs the test suite on both, and the package lists them
+  in its classifiers. No code changes were needed.
+
 ## [0.4.1] - 2026-10-16
 
 ### Added
