@@ -57,6 +57,34 @@ seed. A mismatch is either a bug in amlint, which you fix with a regression test
 ruff check amlint/
 ```
 
+## The playground
+
+[The playground](playground/index.md) runs amlint in the browser with
+[Pyodide](https://pyodide.org). The page's files are in `docs/playground/`: `app.js` (the UI),
+`worker.js` (loads Pyodide and amlint off the main thread) and `amlint_playground.py`, which
+calls `amlint.cli.main([... "--format", "json"])` for check, route and diff. New checks show
+up there without any change; a change to the JSON output of those commands may need one.
+The template is `overrides/playground.html`.
+
+The amlint wheel, the CodeMirror bundle and the examples are generated into
+`docs/playground/dist/` (not committed). To work on the page locally (needs npm):
+
+```bash
+pip install mkdocs-material
+python playground/build.py   # again after changing amlint/ or playground/
+mkdocs serve                 # http://127.0.0.1:8000/amlint/playground/
+```
+
+The docs workflow runs a headless smoke test of the built site. To run it yourself:
+
+```bash
+mkdocs build
+python -m http.server 8000 --directory site &
+cd playground && npx playwright install chromium && node smoke-test.mjs http://127.0.0.1:8000/playground/
+```
+
+Examples are listed in `playground/build.py`; most come from `testdata/real-world/`.
+
 ## How to add a new check
 
 Every check is a standalone function in [`amlint/linter.py`](https://github.com/danikdanik2013/amlint/blob/main/amlint/linter.py).

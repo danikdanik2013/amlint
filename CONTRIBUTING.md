@@ -50,6 +50,11 @@ seed. A mismatch is either a bug in amlint, which you fix with a regression test
 `test_linter.py`, or a deliberate difference or an Alertmanager bug, which you document in
 [docs/fidelity.md](docs/fidelity.md) and teach the test to recognize, narrowly.
 
+## Working on the playground
+
+The browser playground (`docs/playground/`, built by `playground/build.py`) has its own
+notes in [docs/contributing.md](docs/contributing.md#the-playground).
+
 ## How to add a new check
 
 Every check is a standalone function in [amlint/linter.py](amlint/linter.py).

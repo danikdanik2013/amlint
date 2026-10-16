@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from amlint.cli import main
-from amlint.linter import ERROR, WARN, lint
+from amlint.linter import ERROR, WARN, lint, route_cycle
 
 
 def codes(cfg):
@@ -2142,6 +2142,87 @@ def test_circular_inhibition_matchers_syntax():
     assert "circular-inhibition" in codes(cfg)
 
 
+def test_circular_inhibition_one_shared_label_is_not_enough():
+    # B's source (ZoneDown) is never A's target (PodDown); the shared namespace=x doesn't
+    # change that
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["alertname=NodeDown", "namespace=x"],
+             "target_matchers": ["alertname=PodDown", "namespace=x"], "equal": ["node"]},
+            {"source_matchers": ["alertname=ZoneDown", "namespace=x"],
+             "target_matchers": ["alertname=NodeDown", "namespace=x"], "equal": ["zone"]},
+        ],
+    }
+    assert "circular-inhibition" not in codes(cfg)
+
+
+def test_circular_inhibition_with_a_shared_extra_label():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical", "namespace=x"],
+             "target_matchers": ["severity=warning", "namespace=x"], "equal": ["alertname"]},
+            {"source_matchers": ["severity=warning", "namespace=x"],
+             "target_matchers": ["severity=critical", "namespace=x"], "equal": ["alertname"]},
+        ],
+    }
+    found = [f for f in lint(cfg) if f.code == "circular-inhibition"]
+    assert [f.where for f in found] == ["inhibit_rules[0]"]
+
+
+def test_circular_inhibition_source_equal_cannot_agree():
+    # the critical alert that mutes ZoneDown is a NodeDown, so A (equal: [alertname]) never
+    # mutes ZoneDown while it fires
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical", "namespace=x"],
+             "target_matchers": ["severity=warning", "namespace=x"], "equal": ["alertname"]},
+            {"source_matchers": ["alertname=ZoneDown", "namespace=x"],
+             "target_matchers": ["alertname=NodeDown", "namespace=x"], "equal": ["zone"]},
+        ],
+    }
+    assert "circular-inhibition" not in codes(cfg)
+
+
+def test_circular_inhibition_target_equal_cannot_agree():
+    # the warning alert A mutes is in cluster b, its critical source in cluster a, so B
+    # (equal: [cluster]) never mutes that source while the warning fires
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical", "cluster=a"],
+             "target_matchers": ["severity=warning", "cluster=b"], "equal": ["alertname"]},
+            {"source_matchers": ["severity=warning"],
+             "target_matchers": ["severity=critical"], "equal": ["cluster"]},
+        ],
+    }
+    assert "circular-inhibition" not in codes(cfg)
+
+
+@pytest.mark.parametrize("warning_matchers", [
+    ["severity=warning"],  # alertname free on one side
+    ["severity=warning", "alertname=NodeDown"],  # same value on both sides
+])
+def test_circular_inhibition_equal_can_agree(warning_matchers):
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical", "alertname=NodeDown"],
+             "target_matchers": warning_matchers, "equal": ["alertname"]},
+            {"source_matchers": warning_matchers,
+             "target_matchers": ["severity=critical"], "equal": ["alertname"]},
+        ],
+    }
+    assert "circular-inhibition" in codes(cfg)
+
+
 # ── bad-regex: Go RE2 semantics, inhibit rules ───────────────────────
 
 def _route_regex(pattern):
@@ -2348,6 +2429,146 @@ def test_invalid_root_route_has_explain():
     assert "invalid-root-route" in EXPLAINS
 
 
+# ── shadowed-route ───────────────────────────────────────────────────
+
+def _sibling_routes(*routes):
+    return {
+        "route": {"receiver": "a", "routes": [dict(r, receiver="a") for r in routes]},
+        "receivers": [{"name": "a"}],
+    }
+
+
+def _where(cfg, code):
+    return [f.where for f in lint(cfg) if f.code == code]
+
+
+def test_shadowed_route_strict_subset():
+    cfg = _sibling_routes(
+        {"matchers": ['severity="critical"']},
+        {"matchers": ['severity="critical"', 'team="infra"']},
+    )
+    found = [f for f in lint(cfg) if f.code == "shadowed-route"]
+    assert [f.where for f in found] == ["route.routes[1]"]
+    assert found[0].level == WARN
+    assert "route.routes[0]" in found[0].msg
+
+
+def test_shadowed_route_match_vs_matchers_spelling():
+    cfg = _sibling_routes(
+        {"match": {"severity": "critical"}},
+        {"matchers": ['{severity="critical", team="infra"}']},
+    )
+    assert _where(cfg, "shadowed-route") == ["route.routes[1]"]
+
+
+def test_shadowed_route_nested_siblings():
+    cfg = _sibling_routes({"matchers": ["env=prod"], "routes": [
+        {"matchers": ["team=infra"], "receiver": "a"},
+        {"matchers": ["team=infra", "severity=critical"], "receiver": "a"},
+    ]})
+    assert _where(cfg, "shadowed-route") == ["route.routes[0].routes[1]"]
+
+
+@pytest.mark.parametrize("first, second", [
+    ({"matchers": ['severity="critical"'], "continue": True},
+     {"matchers": ['severity="critical"', 'team="infra"']}),
+    ({"matchers": ['severity="critical"', 'team="infra"']},
+     {"matchers": ['severity="critical"']}),
+    ({"matchers": ['severity="critical"']},
+     {"matchers": ['severity="warning"', 'team="infra"']}),
+    ({"matchers": ['severity=~"critical"']},
+     {"matchers": ['severity="critical"', 'team="infra"']}),
+    ({"matchers": ['severity="critical"']},
+     {"matchers": ['severity=~"critical"', 'team="infra"']}),
+], ids=["continue-true", "earlier-more-specific", "different-value",
+        "regex-before-equality", "equality-before-regex"])
+def test_shadowed_route_not_reported(first, second):
+    assert "shadowed-route" not in codes(_sibling_routes(first, second))
+
+
+def test_shadowed_route_leaves_identical_to_route_match_collision():
+    cfg = _sibling_routes(
+        {"matchers": ['severity="critical"']},
+        {"match": {"severity": "critical"}},
+    )
+    found = codes(cfg)
+    assert "route-match-collision" in found
+    assert "shadowed-route" not in found
+
+
+def test_shadowed_route_leaves_catch_all_to_unreachable_route():
+    cfg = _sibling_routes(
+        {"matchers": ['team=~".*"']},
+        {"matchers": ['team=~".*"', 'severity="critical"']},
+    )
+    found = codes(cfg)
+    assert "unreachable-route" in found
+    assert "shadowed-route" not in found
+
+
+def test_dead_routes_reported_once():
+    cfg = _sibling_routes(
+        {"matchers": ['severity="critical"']},
+        {"matchers": ['severity="critical"', 'team="infra"']},   # shadowed by [0]
+        {"matchers": ['team="infra"', 'severity="critical"']},   # identical to [1]
+    )
+    found = sorted((f.code, f.where) for f in lint(cfg)
+                   if f.code in ("shadowed-route", "route-match-collision"))
+    assert found == [
+        ("route-match-collision", "route.routes[2]"),
+        ("shadowed-route", "route.routes[1]"),
+    ]
+
+
+@pytest.mark.parametrize("first, second", [
+    ({"matchers": ['severity="critical"']},
+     {"matchers": ['severity="critical"', 'team="infra"']}),
+    ({"match": {"severity": "critical"}},
+     {"matchers": ['{severity="critical", team="infra"}']}),
+])
+def test_shadowed_route_agrees_with_routing(first, second):
+    from amlint.routing import Router
+    cfg = _sibling_routes(first, second)
+    assert _where(cfg, "shadowed-route") == ["route.routes[1]"]
+    alert = {"severity": "critical", "team": "infra"}
+    assert [m.path[-1] for m in Router(cfg["route"]).match(alert)] == ["route.routes[0]"]
+
+
+def test_shadowed_route_has_explain():
+    from amlint.explains import EXPLAINS
+    assert EXPLAINS["shadowed-route"]["level"] == "warn"
+
+
+# ── unreachable-route: =~".*" counts as catch-all ────────────────────
+
+def test_unreachable_route_match_all_regex():
+    cfg = _sibling_routes(
+        {"match_re": {"team": ".*"}},
+        {"matchers": ['severity="critical"']},
+    )
+    found = [f for f in lint(cfg) if f.code == "unreachable-route"]
+    assert [f.where for f in found] == ["route.routes[0]"]
+    assert '=~".*"' in found[0].msg
+
+
+def test_unreachable_route_non_empty_regex_is_not_catch_all():
+    cfg = _sibling_routes(
+        {"matchers": ['team=~".+"']},
+        {"matchers": ['severity="critical"']},
+    )
+    assert "unreachable-route" not in codes(cfg)
+
+
+def test_route_match_collision_leaves_match_all_regex_to_unreachable_route():
+    cfg = _sibling_routes(
+        {"match_re": {"team": ".*"}},
+        {"matchers": ['team=~".*"']},
+    )
+    found = codes(cfg)
+    assert "unreachable-route" in found
+    assert "route-match-collision" not in found
+
+
 # ── Robustness and CLI ───────────────────────────────────────────────
 
 def test_lint_tolerates_malformed_entries():
@@ -2366,6 +2587,91 @@ def test_cli_non_mapping_yaml(tmp_path):
     with pytest.raises(SystemExit) as exc:
         main(["check", str(cfg)])
     assert exc.value.code == 2
+
+
+RECURSIVE_ROUTE = "route: &r\n  receiver: a\n  routes: [*r]\nreceivers: [{name: a}]\n"
+
+
+@pytest.mark.parametrize("argv", [["check"], ["tree"], ["route", "{cfg}", "a=b"],
+                                  ["test", "{cfg}", "{tests}"], ["diff", "{cfg}", "{cfg}"]])
+def test_cli_recursive_route_exits_2(tmp_path, capsys, argv):
+    """A route aliased inside itself makes yaml.safe_load build a recursive dict, which
+    every route walk would follow until RecursionError."""
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(RECURSIVE_ROUTE)
+    tests = tmp_path / "tests.yml"
+    tests.write_text("- labels: {a: b}\n  receiver: a\n")
+    argv = [a.format(cfg=cfg, tests=tests) for a in argv]
+    if len(argv) == 1:
+        argv.append(str(cfg))
+    with pytest.raises(SystemExit) as exc:
+        main(argv)
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "Route contains itself" in err
+    assert "route.routes[0] is a YAML alias of route, which contains it" in err
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize("text, cycle", [
+    (RECURSIVE_ROUTE, ("route.routes[0]", "route")),
+    # an anchor deeper in the tree, aliased two levels further down
+    ("route:\n  receiver: a\n  routes:\n    - matchers: [t=x]\n      routes:\n"
+     "        - &x\n          matchers: [s=y]\n          routes:\n"
+     "            - receiver: a\n              routes: [*x]\n",
+     ("route.routes[0].routes[0].routes[0].routes[0]", "route.routes[0].routes[0]")),
+    # the routes list aliased inside one of its own entries
+    ("route:\n  receiver: a\n  routes: &l\n    - matchers: [x=1]\n      routes: *l\n",
+     ("route.routes[0].routes[0]", "route.routes[0]")),
+])
+def test_route_cycle_names_the_alias_and_its_ancestor(text, cycle):
+    assert route_cycle(yaml.safe_load(text)["route"]) == cycle
+
+
+SHARED_ROUTES = """\
+route:
+  receiver: a
+  routes:
+    - matchers: [team="db"]
+      routes: &common
+        - matchers: [severity="critical"]
+          receiver: pager
+        - receiver: a
+    - matchers: [team="web"]
+      routes: *common
+receivers:
+  - name: a
+    webhook_configs: [{url: 'http://a'}]
+  - name: pager
+    webhook_configs: [{url: 'http://p'}]
+"""
+
+
+def test_cli_shared_route_alias_still_works(tmp_path, capsys):
+    """The same routes reused under two parents is a tree, not a cycle."""
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(SHARED_ROUTES)
+    assert route_cycle(yaml.safe_load(SHARED_ROUTES)["route"]) is None
+    assert main(["check", str(cfg), "--format", "json"]) == 0
+    found = json.loads(capsys.readouterr().out)
+    assert [f["code"] for f in found] == ["global-resolve-timeout-missing"]
+    assert main(["tree", str(cfg)]) == 0
+    assert capsys.readouterr().out.count("pager") == 2
+    assert main(["route", str(cfg), "team=web", "severity=critical", "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["receivers"] == ["pager"]
+    tests = tmp_path / "tests.yml"
+    tests.write_text("- labels: {team: db, severity: critical}\n  receiver: pager\n"
+                     "- labels: {team: web}\n  receiver: a\n")
+    assert main(["test", str(cfg), str(tests)]) == 0
+    assert "2 passed" in capsys.readouterr().out
+
+
+def test_route_cycle_walks_shared_routes_once():
+    """Routes shared at every level double the paths per level; each is checked once."""
+    node = {"receiver": "a"}
+    for _ in range(64):
+        node = {"routes": [node, node]}
+    assert route_cycle(node) is None
 
 
 def test_cli_unknown_ignore_code_warns(tmp_path, capsys):
