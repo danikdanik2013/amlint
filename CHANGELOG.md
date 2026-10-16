@@ -5,6 +5,30 @@
 ### Added
 - Python 3.14 and 3.15 support: CI runs the test suite on both, and the package lists them
   in its classifiers. No code changes were needed.
+- A browser playground at https://danikdanik2013.github.io/amlint/playground/, published
+  with the docs. Paste or edit an `alertmanager.yml` and the page shows, as you type:
+  - findings, with the offending lines marked in the editor; click one to jump to its line,
+    or open "why it matters and how to fix it" (the `amlint explain` text)
+  - the route tree, with each route's matchers, receiver, settings and findings inline
+  - "Route an alert": labels in, receivers out, with the path through the tree and the
+    grouping and timings each route sets or inherits; alerts firing at the same time show
+    whether an inhibit rule mutes it
+  - a Diff tab with a second editor for the old config: new and fixed findings, and the
+    alerts that are routed differently
+  - a Rules tab for Prometheus alerting rules, which turns on the `--rules` checks
+
+  amlint runs in the page through Pyodide (WebAssembly) in a Web Worker and calls the
+  CLI's own `--format json` output, so the results match `amlint check`, `route` and
+  `diff`. The config is never uploaded. "Share link" compresses the config into the URL
+  fragment (after `#`, which browsers don't send to servers), after a warning that lists
+  the lines that may hold secrets. Examples, mostly from `testdata/real-world/`, load from
+  a menu. Works at phone width and follows the docs' light/dark toggle.
+  `template-file-missing` isn't checked there, since the template files aren't in the
+  browser.
+- The docs workflow now also runs on pull requests. It builds the amlint wheel and the
+  playground (`playground/build.py`), runs `mkdocs build --strict` and a headless
+  Playwright smoke test that lints a fixture, routes an alert, diffs two configs, opens a
+  share link and checks that no request carries the config. It deploys only from `main`.
 
 ## [0.4.1] - 2026-10-16
 

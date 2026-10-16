@@ -7,6 +7,7 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  custom_dir: overrides  # playground.html, the playground page's template
   palette:
     - scheme: default
       primary: indigo
@@ -33,6 +34,7 @@ nav:
   - Home: index.md
   - Install: install.md
   - Usage: usage.md
+  - Playground: playground/index.md
   - GitHub Action: github-action.md
   - Checks:
     - Overview: checks/index.md

@@ -14,6 +14,11 @@ pip install -e ".[dev]"
 pytest test_linter.py -v
 ```
 
+## Working on the playground
+
+The browser playground (`docs/playground/`, built by `playground/build.py`) has its own
+notes in [docs/contributing.md](docs/contributing.md#the-playground).
+
 ## How to add a new check
 
 Every check is a standalone function in [amlint/linter.py](amlint/linter.py).
