@@ -6,6 +6,10 @@ dist/
 build/
 .eggs/
 
+# Playground: made by playground/build.py, and its npm packages
+docs/playground/dist/
+playground/node_modules/
+
 # Tests
 .pytest_cache/
 .coverage

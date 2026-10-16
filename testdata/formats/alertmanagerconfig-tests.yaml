@@ -1,0 +1,28 @@
+# Routing tests for alertmanagerconfig.yaml. An AlertmanagerConfig's route only sees alerts
+# whose namespace label is the resource's namespace, so the labels name one.
+tests:
+  - name: payments warnings go to Slack
+    labels: {namespace: team-a, alertname: PaymentsLatency, severity: warning}
+    expect: team-a/payments/slack
+  - name: payments critical alerts page
+    labels: {namespace: team-a, alertname: PaymentsDown, severity: critical}
+    expect: team-a/payments/pager
+  - name: another namespace never reaches team-a
+    labels: {namespace: team-c, alertname: PaymentsDown, severity: critical}
+    expect: default
+  - name: search alerts go to the webhook
+    labels: {namespace: team-b, alertname: SlowQueries, service: search-api}
+    expect: team-b/search/webhook
+  - name: a team's route has continue, so the base routes still see its alerts
+    labels: {namespace: team-a, alertname: Watchdog}
+    expect: [team-a/payments/slack, "null"]
+  - name: a payments warning is muted while a critical alert fires
+    labels: {namespace: team-a, alertname: PaymentsLatency, severity: warning}
+    firing:
+      - {namespace: team-a, alertname: PaymentsLatency, severity: critical}
+    inhibited: true
+  - name: but not by one from another namespace
+    labels: {namespace: team-a, alertname: PaymentsLatency, severity: warning}
+    firing:
+      - {namespace: team-c, alertname: PaymentsLatency, severity: critical}
+    inhibited: false

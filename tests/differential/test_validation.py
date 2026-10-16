@@ -4,12 +4,11 @@ ALSO_CAUGHT_BY_AMTOOL says amtool catches too."""
 import re
 
 from conftest import EXAMPLES, PHASES, SEED
-from harness import dump, write_config
+from harness import amlint_config, dump, write_config
 from hypothesis import event, given, seed, settings
 from reduce import reduce
 from strategies import validation_configs
 
-from amlint.cli import load
 from amlint.explains import ALSO_CAUGHT_BY_AMTOOL
 from amlint.linter import ERROR, lint
 
@@ -25,7 +24,8 @@ def outcome(amtool, workdir: str, cfg: dict, name: str = "validation.yml"):
     accepted, output = amtool.check_config(path)
     # "Checking '<path>'  FAILED: <why>" -> "<why>"
     why = re.sub(r"(?s)^Checking '[^']*'\s*", "", output).split("\n")[0]
-    errors = [f for f in lint(load(path)) if f.level == ERROR and f.code in ALSO_CAUGHT_BY_AMTOOL]
+    errors = [f for f in lint(amlint_config(path))
+              if f.level == ERROR and f.code in ALSO_CAUGHT_BY_AMTOOL]
     return accepted, why, errors
 
 

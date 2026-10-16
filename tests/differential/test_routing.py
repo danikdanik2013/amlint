@@ -4,13 +4,12 @@ import re
 from typing import Tuple
 
 from conftest import EXAMPLES, PHASES, SEED
-from harness import AmtoolError, dump, format_labels, write_config
+from harness import AmtoolError, amlint_config, dump, format_labels, write_config
 from hypothesis import event, given, seed, settings
 from hypothesis import strategies as st
 from reduce import reduce
 from strategies import config_values, label_sets, route_configs
 
-from amlint.cli import load
 from amlint.routing import Router, RoutingError, probe_label_sets
 
 # amlint refuses these regexes instead of guessing; Alertmanager evaluates them.
@@ -22,7 +21,7 @@ Outcome = Tuple[str, str]  # ("routes", "a, b") | ("rejects", why) | ("declines"
 
 def amlint_outcome(path: str, labels) -> Outcome:
     try:
-        router = Router(load(path).get("route"))
+        router = Router(amlint_config(path).get("route"))
     except RoutingError as e:
         return ("declines" if any(d in str(e) for d in DECLINED) else "rejects"), str(e)
     return "routes", ", ".join(map(str, (m.receiver for m in router.match(labels))))
@@ -103,7 +102,7 @@ def test_routing_matches_amtool(amtool, workdir, data):
         check(amtool, workdir, cfg, {}, mine, amtool_outcome(amtool, path, {}))
         return
 
-    router = Router(load(path)["route"])
+    router = Router(amlint_config(path)["route"])
     sets = data.draw(st.lists(label_sets(config_values(cfg)), min_size=1, max_size=6),
                      label="labels")
     sets += probe_label_sets([router], limit=PROBES)[0]

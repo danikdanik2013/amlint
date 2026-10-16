@@ -50,9 +50,15 @@ def _retag(node: yaml.Node, seen: set) -> None:
             _retag(item, seen)
 
 
+def keep_strings(node: yaml.Node) -> yaml.Node:
+    """Retag a composed document so that constructing it keeps the text of the scalars
+    Alertmanager reads as strings. Returns the node."""
+    _retag(node, set())
+    return node
+
+
 class AlertmanagerLoader(yaml.SafeLoader):
     """yaml.SafeLoader that keeps the text of the scalars Alertmanager reads as strings."""
 
     def construct_document(self, node):
-        _retag(node, set())
-        return super().construct_document(node)
+        return super().construct_document(keep_strings(node))

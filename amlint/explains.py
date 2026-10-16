@@ -361,7 +361,7 @@ inhibit_rules:
     "unreachable-route": {
         "level": "warn",
         "summary": (
-            "A catch-all route (no matchers) with continue:false"
+            "A catch-all route (no matchers, or only =~\".*\") with continue:false"
             " appears before sibling routes."
         ),
         "why": (
@@ -635,6 +635,37 @@ routes:
   - match: {team: infra, severity: critical}
     receiver: slack-infra
 # or: use distinct matchers for each route""",
+    },
+
+    "shadowed-route": {
+        "level": "warn",
+        "summary": (
+            "An earlier sibling route matches every alert this route matches"
+            " — this route never receives alerts."
+        ),
+        "why": (
+            "Alertmanager evaluates siblings in order and stops at the first match"
+            " unless that route has continue: true. If every label value this route allows"
+            " is one an earlier sibling allows too (severity=\"critical\" against"
+            " severity=~\"warning|critical\", team=\"infra\" against team!=\"db\", or"
+            " a subset of its matchers), that sibling takes all of this route's alerts and"
+            " this route is dead code. Only what amlint can prove is reported."
+            " Identical matchers are reported as route-match-collision, catch-alls as"
+            " unreachable-route."
+        ),
+        "bad": """\
+routes:
+  - matchers: [severity=~"warning|critical"]
+    receiver: ops
+  - matchers: [severity="critical"]   # never reached
+    receiver: pager""",
+        "good": """\
+routes:
+  - matchers: [severity="critical"]   # specific first
+    receiver: pager
+  - matchers: [severity=~"warning|critical"]
+    receiver: ops
+# or: continue: true on the broader route to notify both""",
     },
 
     "template-file-missing": {

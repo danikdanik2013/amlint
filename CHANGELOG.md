@@ -3,6 +3,85 @@
 ## [Unreleased]
 
 ### Added
+- Python 3.14 and 3.15 support: CI runs the test suite on both, and the package lists them
+  in its classifiers. No code changes were needed.
+- A browser playground at https://danikdanik2013.github.io/amlint/playground/, published
+  with the docs. Paste or edit an `alertmanager.yml` and the page shows, as you type:
+  - findings, with the offending lines marked in the editor; click one to jump to its line,
+    or open "why it matters and how to fix it" (the `amlint explain` text)
+  - the route tree, with each route's matchers, receiver, settings and findings inline
+  - "Route an alert": labels in, receivers out, with the path through the tree and the
+    grouping and timings each route sets or inherits; alerts firing at the same time show
+    whether an inhibit rule mutes it
+  - a Diff tab with a second editor for the old config: new and fixed findings, and the
+    alerts that are routed differently
+  - a Rules tab for Prometheus alerting rules, which turns on the `--rules` checks
+
+  amlint runs in the page through Pyodide (WebAssembly) in a Web Worker and calls the
+  CLI's own `--format json` output, so the results match `amlint check`, `route` and
+  `diff`. The config is never uploaded. "Share link" compresses the config into the URL
+  fragment (after `#`, which browsers don't send to servers), after a warning that lists
+  the lines that may hold secrets. Examples, mostly from `testdata/real-world/`, load from
+  a menu. Works at phone width and follows the docs' light/dark toggle.
+  `template-file-missing` isn't checked there, since the template files aren't in the
+  browser.
+- The docs workflow now also runs on pull requests. It builds the amlint wheel and the
+  playground (`playground/build.py`), runs `mkdocs build --strict` and a headless
+  Playwright smoke test that lints a fixture, routes an alert, diffs two configs, opens a
+  share link and checks that no request carries the config. It deploys only from `main`.
+- amlint reads the config formats Alertmanager is deployed with, not only a plain
+  `alertmanager.yml`. The format is detected from the content; `--input-format`
+  (`auto`, `alertmanager`, `secret`, `helm`, `mimir`, `alertmanagerconfig`) on `check`,
+  `diff`, `tree`, `route` and `test` overrides it. Files can be multi-document streams and
+  `kind: List` objects, so `kubectl kustomize ... | amlint check -` works; other Kubernetes
+  objects in them are skipped. See the new "Kubernetes & Mimir" docs page.
+  - Kubernetes `Secret` (and `ConfigMap`) holding `alertmanager.yaml`, in `stringData` or
+    base64 `data`, including the operator's gzipped `alertmanager.yaml.gz`. The Secret's
+    other keys are the template files mounted in `/etc/alertmanager/config/`; `templates:`
+    entries there are checked against them instead of files on disk.
+  - kube-prometheus-stack values: `alertmanager.config` is merged over the default config of
+    chart 92.10.1 the way Helm merges values, which catches routes to the chart's `null`
+    receiver after `receivers:` was replaced. `alertmanager.templateFiles` are the template
+    files; `stringConfig` is used only with `tplConfig: true`, as in the chart.
+  - Mimir and Cortex tenant configs: the `alertmanager_config` string and `template_files`.
+  - prometheus-operator `AlertmanagerConfig` resources (`monitoring.coreos.com/v1alpha1` and
+    `v1beta1`), converted and merged into the base config of the same input as
+    prometheus-operator v0.94.1 does it: receiver and time interval names become
+    `<namespace>/<name>/<name>`; each resource's route gets a `namespace` matcher and
+    `continue: true` and goes before the base routes, in `namespace/name` order; inhibit
+    rules get the `namespace` matcher on both sides; `alertmanagerConfigMatcherStrategy`
+    (`OnNamespace`, `OnNamespaceExceptForAlertmanagerNamespace`, `None`) is read from an
+    `Alertmanager` resource or Helm values in the input, or set with `--matcher-strategy`.
+    Secret references (`apiURL`, `routingKey`, `urlSecret`, ...) count as set. Without a
+    base config the operator's default (`null` receiver) is used, and findings about it are
+    dropped. An `Alertmanager` with `spec.alertmanagerConfiguration` uses the named resource
+    as the whole config. Findings that only the operator's namespace matcher or forced
+    `continue: true` cause are dropped.
+  - Findings keep pointing at `file:line:col` in the file that was read: inside a literal
+    block (`alertmanager.yaml: |`) at the exact line and column, and `# amlint:` comments
+    there work; for base64 or quoted strings at the key holding the config; for resources at
+    the resource's own route, receiver or rule.
+- `note:` lines on stderr say how a file was read when it matters: which parts of a Helm
+  config come from the chart, a resource without a namespace or without a route, a field the
+  API server drops for that API version.
+- `lint()` takes `template_files=` (an `amlint.formats.BundledTemplates`) to check
+  `templates:` against template files that ship with the config.
+- The playground reads these formats too. Its route tree is drawn from the config as amlint
+  reads it, with each route at its line in the pasted text (a team's route at its
+  `AlertmanagerConfig`'s `spec.route`), and an input amlint can't read shows the same error
+  there as under Findings; before, the tree parsed the paste as a plain `alertmanager.yml`
+  and came out empty or wrong. New example: AlertmanagerConfig resources. Template files
+  that ship in the input are checked by `template-file-missing` there.
+- `shadowed-route` (warn) — a route never receives alerts because an earlier sibling without
+  `continue: true` matches every alert it would: `severity=~"warning|critical"` before
+  `severity="critical"`, `team!="db"` before `team="infra"`, `alertname=~"Kube.*"` before
+  `alertname=~"KubePod.*"`, or `severity="critical"` before `severity="critical", team="infra"`.
+  Regex and negative matchers are compared by the values they allow (a missing label is the
+  empty string, as in Alertmanager), and the parent routes' matchers count too. Only what
+  amlint can prove is reported: a regex with case folding (`(?i)`), word boundaries or
+  anchors mid-pattern, or one too large to compare, keeps the check silent. Identical
+  matchers stay `route-match-collision` and catch-alls stay `unreachable-route`, so each dead
+  route is reported once
 - Differential tests against the real Alertmanager (`tests/differential/`, run with
   `scripts/differential.sh`). Hypothesis generates seeded configs and label sets: nested
   routes, `continue` fan-out, `=` `!=` `=~` `!~` matchers in quoted, bare, braced and
@@ -30,14 +109,43 @@
   Alertmanager reads and suggests the quoted one (`code=~"[0-9]{3}"`).
 
 ### Changed
+- A file with several YAML documents that are all plain Alertmanager configs now fails with
+  "found 2 Alertmanager configs (lines 1, 3)" instead of a YAML error; it still exits 2.
+  `--input-format alertmanager` keeps the old behaviour.
 - `groupby-ellipsis` is an error instead of a warning: Alertmanager refuses to load
   `group_by: ['...', alertname]`.
 
 ### Fixed
+- `circular-inhibition` no longer reports two unrelated rules because one label value
+  matches. It took one shared label with the same value (say `namespace=x` on both sides
+  of both rules) as enough for each rule's source to be the other's target, even when
+  another shared label, such as `alertname`, contradicts it. Now every shared `=` label
+  must agree.
+- `circular-inhibition` now takes each rule's `equal` into account. A rule only mutes an
+  alert while its source fires when the two have the same value for every `equal` label,
+  so a pair isn't circular when an `equal` label has fixed, different values on the two
+  alerts. `severity=critical` → `severity=warning` with `equal: [alertname]` and
+  `alertname=ZoneDown` → `alertname=NodeDown` no longer warn: the critical alert that
+  mutes ZoneDown is a NodeDown, so the first rule never mutes ZoneDown while it fires.
+- `unreachable-route` treats a route whose only matchers are `label=~".*"` as a catch-all;
+  `route-match-collision` leaves such routes to it instead of reporting them twice
+- A route tree that contains itself through a YAML alias (`route: &r` with `routes: [*r]`,
+  or an anchor deeper in the tree aliased inside its own subtree) no longer crashes every
+  command with a `RecursionError` traceback. `check`, `tree`, `route`, `test` and `diff`
+  exit 2 with the path of the alias and the route it repeats, e.g. `route.routes[0] is a
+  YAML alias of route, which contains it`; Alertmanager can't load such a config either.
+  This holds for every input format: a plain config, the config in a Secret, Helm values
+  (`alertmanager.config.route...`), a Mimir config, and an AlertmanagerConfig's
+  `spec.route`, which is checked before it is converted. Routes shared through an alias
+  under several parents keep working, and the playground's route tree is left empty for
+  such a config while its findings show the message. Errors reading the input are no longer
+  wrapped mid-path at the terminal width.
+
 Differences from Alertmanager that the differential tests found:
 - YAML scalars in `match:` maps and other string fields keep their text, as Alertmanager
   (Go's yaml.v2) reads them: `country: NO` is "NO", not false; `version: 1.10` is "1.10";
-  `code: 0x1F` is "0x1F".
+  `code: 0x1F` is "0x1F". This holds for a plain config and for one in a Secret or a Mimir
+  config. Helm values stay typed, since Helm reads them as YAML 1.1 before rendering.
 - `matchers:` entries are parsed the way Alertmanager's default "fallback" mode parses them:
   with the classic parser whenever it can read the whole entry, and with the UTF-8 parser
   only when it can't. So:
