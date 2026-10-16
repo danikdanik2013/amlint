@@ -27,6 +27,12 @@
 - `amlint test`: a tests file can now be a plain list of cases, and `expect: [a, b]` asserts
   the receivers in any order. A failing case shows which receivers are missing or unexpected
   and which routes matched; JSON output adds `missing`, `unexpected` and `routes`
+- `amlint diff` compares routing behaviour, not just findings: it probes both configs with
+  label sets built from their matchers (`=` / `!=` values, strings each regex matches, absent
+  labels) and lists the ones whose receivers, `group_by`, timings or time intervals changed,
+  e.g. `team=db, severity=critical: pagerduty-db → slack-db`. Identical changes are folded
+  together; large configs are capped at 5000 label sets. Informational — the exit code still
+  depends on findings only. `--no-routing` turns it off; JSON output gets a `routing` key
 
 ### Changed
 - Routing simulation (`route`, `test`) moved to `amlint/routing.py`, replacing

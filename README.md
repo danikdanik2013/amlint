@@ -56,7 +56,7 @@ amlint check alertmanager.yml --format github  # PR annotations straight from a 
 amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
-amlint diff old.yml new.yml                 # show what changed
+amlint diff old.yml new.yml                 # what changed: findings, and alerts routed differently
 amlint tree alertmanager.yml                # visualize the route tree, issues inline
 amlint route alertmanager.yml team=infra severity=critical  # where does this alert go?
 amlint test alertmanager.yml tests.yml      # routing unit tests: labels -> expected receivers
@@ -136,6 +136,8 @@ amlint test alertmanager.yml tests.yml   # exit 1 on any failing case, with a di
 
 The simulation follows Alertmanager's own routing code: `continue: true` fan-out,
 inherited settings, fully anchored Go RE2 regexes, missing labels matching as `""`.
+`amlint diff` uses it too: after the findings it lists the label sets that two configs
+route differently, e.g. `team=db, severity=critical: pagerduty-db → slack-db`.
 Details in [docs/usage.md](docs/usage.md#route).
 
 ## CI example

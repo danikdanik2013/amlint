@@ -37,7 +37,7 @@ from rich.tree import Tree
 
 from .config import load_project_config
 from .linter import ERROR, INFO, WARN, _dict_items, _scalar, lint
-from .routing import GROUP_BY_ALL, Router, RoutingError
+from .routing import GROUP_BY_ALL, Router, RoutingError, diff_routing
 from .source import apply_source
 
 console = Console(highlight=False)
@@ -638,10 +638,74 @@ def _cmd_init() -> int:
     return 0
 
 
+def _routing_diff(old_cfg: dict, new_cfg: dict):
+    """(RoutingDiff, None), or (None, why the configs can't be compared)."""
+    routers = []
+    for side, cfg in (("old", old_cfg), ("new", new_cfg)):
+        try:
+            routers.append(Router(cfg.get("route")))
+        except RoutingError as e:
+            return None, f"{side} config: {e}"
+    return diff_routing(*routers), None
+
+
+def _routing_diff_json(rdiff, skipped) -> dict:
+    if rdiff is None:
+        return {"skipped": skipped}
+    return {
+        "checked": rdiff.checked,
+        "truncated": rdiff.truncated,
+        "changes": [{
+            "labels": c.labels,
+            "similar": c.similar,
+            "differences": c.differences(),
+            "old": [_route_match_json(m) for m in c.old],
+            "new": [_route_match_json(m) for m in c.new],
+        } for c in rdiff.changes],
+    }
+
+
+def _print_routing_diff(rdiff, skipped) -> None:
+    console.print(Rule("[bold]Routing[/bold]", style="dim"))
+    if rdiff is None:
+        console.print(f"\n  [yellow]Routing not compared:[/yellow] {escape(skipped)}\n")
+        return
+    checked = f"{rdiff.checked} label set{'s' if rdiff.checked != 1 else ''} checked"
+    if rdiff.truncated:
+        checked += " (limit reached, not every combination was tried)"
+    if not rdiff.changes:
+        console.print(
+            f"\n  [bold green]✓[/bold green]  No routing changes  [dim]· {checked}[/dim]\n"
+        )
+        return
+    console.print()
+    for c in rdiff.changes:
+        console.print(f"  [bold]{escape(_format_labels(c.labels))}[/bold]")
+        grid = Table.grid(padding=(0, 3))
+        grid.add_column(style="dim", no_wrap=True)
+        grid.add_column()
+        for d in c.differences():
+            same = d["setting"] == d["subject"]
+            what = d["subject"] if same else f"{d['subject']}  {d['setting']}"
+            grid.add_row(what, Text(f"{d['old']} → {d['new']}"))
+        console.print(Padding(grid, (0, 0, 0, 4), expand=False))
+        if c.similar:
+            more = "label set" if c.similar == 1 else "label sets"
+            console.print(f"    [dim]and {c.similar} more {more} with the same change[/dim]")
+        console.print()
+    noun = "change" if len(rdiff.changes) == 1 else "changes"
+    console.print(
+        f"  [yellow]{len(rdiff.changes)} routing {noun}[/yellow]  [dim]· {checked}[/dim]\n"
+    )
+
+
 def _cmd_diff(args):
     _, ignore, only, severity = _project_settings(args)
-    _, old_findings = _lint_file(args.old, ignore=ignore, severity=severity, only=only or None)
-    _, new_findings = _lint_file(args.new, ignore=ignore, severity=severity, only=only or None)
+    old_cfg, old_findings = _lint_file(args.old, ignore=ignore, severity=severity,
+                                       only=only or None)
+    new_cfg, new_findings = _lint_file(args.new, ignore=ignore, severity=severity,
+                                       only=only or None)
+    rdiff, skipped = (None, None) if args.no_routing else _routing_diff(old_cfg, new_cfg)
 
     def key(f):
         return (f.code, f.where)
@@ -671,15 +735,20 @@ def _cmd_diff(args):
         def entry(f):
             return {"code": f.code, "level": f.level, "message": f.msg, "where": f.where,
                     "line": f.line, "column": f.col}
-        print(json.dumps({
+        doc = {
             "added":  [entry(f) for f in added],
             "fixed":  [entry(f) for f in fixed],
             "unchanged": unchanged,
-        }, ensure_ascii=False, indent=2))
+        }
+        if not args.no_routing:
+            doc["routing"] = _routing_diff_json(rdiff, skipped)
+        print(json.dumps(doc, ensure_ascii=False, indent=2))
         return 1 if added else 0
 
     if not added and not fixed:
         console.print("\n  [bold green]✓[/bold green]  No changes in findings.\n")
+        if not args.no_routing:
+            _print_routing_diff(rdiff, skipped)
         return 0
 
     console.print()
@@ -704,6 +773,8 @@ def _cmd_diff(args):
         f"  ·  [red]{len(added)} new[/red]"
         f"  ·  {unchanged} unchanged\n"
     )
+    if not args.no_routing:
+        _print_routing_diff(rdiff, skipped)
     return 1 if added else 0
 
 
@@ -817,6 +888,8 @@ def main(argv=None):
                     help="skip findings with these codes")
     pd.add_argument("--only", action="append", metavar="CODE",
                     help="consider only findings with these codes")
+    pd.add_argument("--no-routing", action="store_true", dest="no_routing",
+                    help="skip the routing comparison (label sets routed differently)")
 
     pt = sub.add_parser("tree", help="print route tree with matchers, receivers, and issues")
     pt.add_argument("file", help="path to alertmanager.yml, or - for stdin")

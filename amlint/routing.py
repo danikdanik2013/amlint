@@ -1,5 +1,6 @@
 """
-Alertmanager routing, simulated in pure Python for `amlint route` and `amlint test`.
+Alertmanager routing, simulated in pure Python for `amlint route`, `amlint test` and the
+routing section of `amlint diff`.
 
 Mirrors Alertmanager's dispatch/route.go, no Go binary or running Alertmanager needed:
 
@@ -15,11 +16,18 @@ Mirrors Alertmanager's dispatch/route.go, no Go binary or running Alertmanager n
     (Alertmanager compiles `^(?:pattern)$`), so `service=~"api"` does not match `api-gw`.
 """
 
+import itertools
 import re
 import warnings
+from collections import Counter
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Dict, List, Mapping, Optional, Pattern, Tuple, Union
+from typing import Dict, Iterator, List, Mapping, Optional, Pattern, Sequence, Tuple, Union
+
+try:
+    import re._parser as _sre_parse  # Python 3.11+
+except ImportError:  # pragma: no cover - Python < 3.11
+    import sre_parse as _sre_parse
 
 from .linter import (
     _TIMING_DEFAULTS,
@@ -154,20 +162,18 @@ def _build(node: dict, path: str, parent: RouteOpts) -> _Route:
     return _Route(path, matchers, bool(node.get("continue")), opts, children)
 
 
+def _matcher_ok(op: str, value, actual: str) -> bool:
+    if op == "=":
+        return actual == value
+    if op == "!=":
+        return actual != value
+    if op == "=~":
+        return value.fullmatch(actual) is not None
+    return value.fullmatch(actual) is None
+
+
 def _matches(matchers: List[_Matcher], labels: Mapping[str, str]) -> bool:
-    for label, op, value in matchers:
-        actual = labels.get(label, "")
-        if op == "=":
-            ok = actual == value
-        elif op == "!=":
-            ok = actual != value
-        elif op == "=~":
-            ok = value.fullmatch(actual) is not None
-        else:
-            ok = value.fullmatch(actual) is None
-        if not ok:
-            return False
-    return True
+    return all(_matcher_ok(op, value, labels.get(label, "")) for label, op, value in matchers)
 
 
 def _match(route: _Route, labels: Mapping[str, str], trail: Tuple[str, ...]) -> List[RouteMatch]:
@@ -200,3 +206,266 @@ class Router:
         """Routes an alert with these labels reaches, in Alertmanager's order."""
         normalized = {str(k): _scalar(v) for k, v in labels.items()}
         return _match(self._root, normalized, ())
+
+    def _paths(self) -> Iterator[Tuple[List[_Matcher], _Route]]:
+        """Every route, with the matchers an alert has to pass to get there."""
+        def walk(route: _Route, above: List[_Matcher]):
+            conj = above + route.matchers
+            yield conj, route
+            for child in route.routes:
+                yield from walk(child, conj)
+        yield from walk(self._root, [])
+
+
+# ── Behavioural diff of two route trees, for `amlint diff` ───────────
+#
+# Probe both trees with the same label sets and report the ones whose outcome changed.
+# Candidate values per label come from the matchers of both configs: the value of = and
+# !=, a few strings each =~ / !~ regex matches, and the label being absent. Small configs
+# get every combination; larger ones, per route, a label set that reaches it and one that
+# stops on it (no child matches), then single-label variations of those, spread evenly
+# over the routes and capped at MAX_LABEL_SETS.
+
+MAX_LABEL_SETS = 5000
+_EXAMPLES_PER_REGEX = 6
+_CHAR_POOL = "a0x-_. A"
+_SETTINGS = (
+    "group_by", "group_wait", "group_interval", "repeat_interval",
+    "mute_time_intervals", "active_time_intervals",
+)
+
+
+def _examples(seq, limit: int = _EXAMPLES_PER_REGEX) -> List[str]:
+    """Strings a parsed (sre) pattern could match; checked against the regex afterwards."""
+    acc = [""]
+    for op, av in seq:
+        options = _item_examples(op, av, limit)
+        if not options:
+            return []
+        acc = [a + b for a in acc for b in options][:limit]
+    return acc
+
+
+def _item_examples(op, av, limit: int) -> List[str]:
+    P = _sre_parse
+    if op == P.LITERAL:
+        return [chr(av)]
+    if op == P.NOT_LITERAL:
+        return [c for c in _CHAR_POOL if ord(c) != av][:1]
+    if op == P.ANY:
+        return ["x"]
+    if op == P.AT:
+        return [""]
+    if op == P.IN:
+        chars, negate = [], False
+        for item_op, item in av:
+            if item_op == P.NEGATE:
+                negate = True
+            elif item_op == P.LITERAL:
+                chars.append(chr(item))
+            elif item_op == P.RANGE:
+                chars.append(chr(item[0]))
+        return [c for c in _CHAR_POOL if c not in chars][:1] if negate else chars[:2]
+    if op == P.BRANCH:
+        per_branch = [_examples(alt, 2) for alt in av[1]]
+        # round-robin, so every alternative of `a|b|c` gets a representative
+        return [x for row in itertools.zip_longest(*per_branch) for x in row if x is not None][
+            :limit
+        ]
+    if op == P.SUBPATTERN:
+        return _examples(av[-1], limit)
+    if op in (P.MAX_REPEAT, P.MIN_REPEAT):
+        low, _, sub = av
+        inner = _examples(sub, limit)
+        if low == 0:
+            return ([""] + inner)[:limit]
+        return [x * low for x in inner]
+    return []
+
+
+def _regex_examples(regex: Pattern) -> List[str]:
+    try:
+        parsed = _sre_parse.parse(regex.pattern, regex.flags)
+    except Exception:
+        return []
+    return list(dict.fromkeys(s for s in _examples(parsed) if regex.fullmatch(s)))
+
+
+def _domains(routers: Sequence[Router]) -> Dict[str, List[Optional[str]]]:
+    """Candidate values per label; None (absent) first, since that keeps label sets small."""
+    domains: Dict[str, List[Optional[str]]] = {}
+    for router in routers:
+        for conj, _ in router._paths():
+            for label, op, value in conj:
+                values = domains.setdefault(label, [None])
+                for v in [value] if isinstance(value, str) else _regex_examples(value):
+                    # an empty value is the same as the label being absent
+                    if v and v not in values:
+                        values.append(v)
+    return domains
+
+
+def _reaching(conj: List[_Matcher], domains) -> Optional[Dict[str, str]]:
+    """A label set, built from the candidate values, that passes all of these matchers."""
+    labels: Dict[str, str] = {}
+    for label in dict.fromkeys(m[0] for m in conj):
+        for v in domains[label]:
+            if all(_matcher_ok(op, value, v or "") for lbl, op, value in conj if lbl == label):
+                if v is not None:
+                    labels[label] = v
+                break
+        else:
+            return None
+    return labels
+
+
+def _stopping(conj, route: _Route, domains, labels: Dict[str, str]) -> Optional[Dict[str, str]]:
+    """A variant of `labels` (which reach `route`) that no child of `route` matches, so the
+    alert ends up on `route` itself; None if none of the candidate values gets there."""
+    labels = dict(labels)
+    for child in route.routes:
+        if not _matches(child.matchers, labels):
+            continue
+        for label, op, value in child.matchers:
+            for v in domains[label]:
+                trial = {k: x for k, x in labels.items() if k != label}
+                if v is not None:
+                    trial[label] = v
+                if not _matcher_ok(op, value, v or "") and _matches(conj, trial):
+                    labels = trial
+                    break
+            else:
+                continue
+            break
+    if any(_matches(child.matchers, labels) for child in route.routes):
+        return None
+    return labels
+
+
+def _variants(labels: Dict[str, str], domains) -> Iterator[Dict[str, str]]:
+    for name, values in domains.items():
+        for v in values:
+            variant = {k: x for k, x in labels.items() if k != name}
+            if v is not None:
+                variant[name] = v
+            yield variant
+
+
+def probe_label_sets(
+    routers: Sequence[Router], limit: int = MAX_LABEL_SETS
+) -> Tuple[List[Dict[str, str]], bool]:
+    """Label sets that exercise the given route trees; True if `limit` cut the list short."""
+    domains = _domains(routers)
+    total = 1
+    for values in domains.values():
+        total *= len(values)
+    if total <= limit:
+        names = list(domains)
+        sets = [
+            {k: v for k, v in zip(names, combo) if v is not None}
+            for combo in itertools.product(*domains.values())
+        ]
+        return sorted(sets, key=lambda s: (len(s), sorted(s.items()))), False
+
+    out: List[Dict[str, str]] = []
+    seen = set()
+
+    def add(labels: Dict[str, str]) -> bool:
+        key = frozenset(labels.items())
+        if key not in seen:
+            if len(out) >= limit:
+                return False
+            seen.add(key)
+            out.append(labels)
+        return True
+
+    bases = []
+    for router in routers:
+        for conj, route in router._paths():
+            labels = _reaching(conj, domains)
+            if labels is not None:
+                bases.append(labels)
+                stop = _stopping(conj, route, domains, labels)
+                if stop is not None:
+                    bases.append(stop)
+    for labels in bases:
+        if not add(labels):
+            return out, True
+    # round-robin over the routes, so a cap cuts every route's variations evenly
+    for row in itertools.zip_longest(*(_variants(labels, domains) for labels in bases)):
+        for variant in row:
+            if variant is not None and not add(variant):
+                return out, True
+    return out, False
+
+
+def _outcome(matches: List[RouteMatch]) -> tuple:
+    return tuple(sorted(
+        (m.receiver or "",) + tuple(getattr(m.opts, key) for key in _SETTINGS) for m in matches
+    ))
+
+
+def _show(value) -> str:
+    if isinstance(value, tuple):
+        return ", ".join(value) if value else "(none)"
+    return value or "(none)"
+
+
+@dataclass
+class RoutingChange:
+    """A label set whose routing differs between two configs."""
+    labels: Dict[str, str]
+    old: List[RouteMatch]
+    new: List[RouteMatch]
+    similar: int = 0  # further label sets with exactly the same old → new change
+
+    def differences(self) -> List[Dict[str, str]]:
+        """What changed: the receivers, and settings of receivers both sides deliver to."""
+        old_rcv = sorted(m.receiver or "(none)" for m in self.old)
+        new_rcv = sorted(m.receiver or "(none)" for m in self.new)
+        out = []
+        if Counter(old_rcv) != Counter(new_rcv):
+            out.append({"subject": "receivers", "setting": "receivers",
+                        "old": ", ".join(old_rcv), "new": ", ".join(new_rcv)})
+        old_by = {m.receiver: m for m in reversed(self.old)}
+        new_by = {m.receiver: m for m in reversed(self.new)}
+        for rcv in sorted(set(old_by) & set(new_by), key=str):
+            for key in _SETTINGS:
+                a, b = getattr(old_by[rcv].opts, key), getattr(new_by[rcv].opts, key)
+                if a != b:
+                    out.append({"subject": rcv or "(none)", "setting": key,
+                                "old": _show(a), "new": _show(b)})
+        if not out:  # e.g. the same receiver twice, once with other settings
+            out.append({"subject": "routes", "setting": "routes",
+                        "old": ", ".join(m.path[-1] for m in self.old),
+                        "new": ", ".join(m.path[-1] for m in self.new)})
+        return out
+
+
+@dataclass
+class RoutingDiff:
+    checked: int  # label sets probed
+    truncated: bool  # MAX_LABEL_SETS was hit, so some combinations were not tried
+    changes: List[RoutingChange]
+
+
+def diff_routing(old: Router, new: Router, limit: int = MAX_LABEL_SETS) -> RoutingDiff:
+    """Label sets routed differently by `new` than by `old`. Label sets with the same
+    old → new outcome are folded into one change, shown with the smallest label set."""
+    label_sets, truncated = probe_label_sets([old, new], limit)
+    changes: Dict[tuple, RoutingChange] = {}
+    for labels in label_sets:
+        before, after = old.match(labels), new.match(labels)
+        key = (_outcome(before), _outcome(after))
+        if key[0] == key[1]:
+            continue
+        change = changes.get(key)
+        if change is None:
+            changes[key] = RoutingChange(labels, before, after)
+            continue
+        change.similar += 1
+        if (len(labels), sorted(labels.items())) < (
+            len(change.labels), sorted(change.labels.items())
+        ):
+            change.labels, change.old, change.new = labels, before, after
+    return RoutingDiff(len(label_sets), truncated, list(changes.values()))

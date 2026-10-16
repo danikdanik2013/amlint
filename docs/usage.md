@@ -147,6 +147,52 @@ amlint diff main.yml feature-branch.yml
 
 Exits `1` if any **new** findings appeared (regressions), `0` otherwise.
 
+### Routing changes
+
+After the findings, `diff` compares how the two configs route alerts — the same simulation
+as [`route`](#route), run against both files with the same label sets:
+
+```
+───────────────────────────── Routing ─────────────────────────────
+
+  team=infra
+    infra-slack  group_wait   30s → 10s
+    and 5 more label sets with the same change
+
+  team=db, severity=critical
+    receivers   pagerduty-db → slack-db
+    and 2 more label sets with the same change
+
+  2 routing changes  · 18 label sets checked
+```
+
+A label set shows up when its receivers change, or when a receiver it reaches gets a
+different `group_by`, `group_wait`, `group_interval`, `repeat_interval` or time intervals.
+Edits that still deliver every alert the same way (`match:` rewritten as `matchers:`,
+siblings reordered that never match the same alert) don't.
+
+The label sets come from the matchers of both configs: for every label, the values used
+with `=` and `!=`, a few strings each `=~` / `!~` regex fully matches, and the label being
+absent. Small configs get every combination. Larger ones get, for every route, a label set
+that reaches it and one that stops on it, then single-label variations of those, spread
+evenly over the routes and capped at 5000 label sets — the summary says when the cap was
+hit. Label sets with exactly the same change are folded into one, shown with the smallest
+label set.
+
+Routing changes are informational: they don't change the exit code, since a PR that edits
+routing usually means to. If either config can't be simulated (see [`route`](#route)), the
+section says why and the findings diff still runs. `--no-routing` skips the comparison.
+With `--format json`, a `routing` key holds `checked`, `truncated` and `changes` — each
+with the `labels`, the `differences`, the full `old` / `new` routes, and how many `similar`
+label sets were folded into it — or `skipped` with the reason.
+
+**Options:**
+
+| flag | description |
+|------|-------------|
+| `--format json` | Machine-readable output |
+| `--no-routing` | Compare findings only |
+
 ### In CI (PR check)
 
 ```yaml

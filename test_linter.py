@@ -2100,3 +2100,191 @@ def test_source_map_receiver_names_as_loaded():
     assert smap.locate("receivers[True]") == (2, 5)
     assert smap.locate("receivers[31]") == (3, 5)
     assert smap.locate("receivers[007]") == (4, 5)
+
+
+# ── routing diff (amlint diff) ───────────────────────────────────────
+
+def _rdiff(old_route, new_route, **kw):
+    from amlint.routing import Router, diff_routing
+    return diff_routing(Router(old_route), Router(new_route), **kw)
+
+
+def _changes(rdiff):
+    return {
+        tuple(sorted(c.labels.items())): [(d["subject"], d["setting"], d["old"], d["new"])
+                                          for d in c.differences()]
+        for c in rdiff.changes
+    }
+
+
+_DB_ROUTE = {"receiver": "default", "group_by": ["alertname"], "routes": [
+    {"matchers": ['team="db"'], "receiver": "slack-db", "routes": [
+        {"matchers": ['severity="critical"'], "receiver": "pagerduty-db"}]},
+    {"matchers": ['team="infra"'], "receiver": "infra-slack"},
+]}
+
+
+def test_routing_diff_identical_configs_have_no_changes():
+    rdiff = _rdiff(_DB_ROUTE, _DB_ROUTE)
+    assert rdiff.changes == []
+    assert rdiff.checked > 0 and not rdiff.truncated
+
+
+def test_routing_diff_receiver_change_from_removed_child():
+    new = {**_DB_ROUTE, "routes": [{"matchers": ['team="db"'], "receiver": "slack-db"},
+                                   _DB_ROUTE["routes"][1]]}
+    assert _changes(_rdiff(_DB_ROUTE, new)) == {
+        (("severity", "critical"), ("team", "db")):
+            [("receivers", "receivers", "pagerduty-db", "slack-db")],
+    }
+
+
+def test_routing_diff_reports_timing_and_group_by_changes():
+    new = {**_DB_ROUTE, "routes": [
+        _DB_ROUTE["routes"][0],
+        {"matchers": ['team="infra"'], "receiver": "infra-slack", "group_wait": "10s",
+         "group_by": ["alertname", "cluster"]},
+    ]}
+    assert _changes(_rdiff(_DB_ROUTE, new)) == {
+        (("team", "infra"),): [
+            ("infra-slack", "group_by", "alertname", "alertname, cluster"),
+            ("infra-slack", "group_wait", "30s", "10s"),
+        ],
+    }
+
+
+def test_routing_diff_folds_same_change_into_smallest_label_set():
+    new = {**_DB_ROUTE, "group_interval": "1m"}  # inherited by every route
+    rdiff = _rdiff(_DB_ROUTE, new)
+    by_receiver = {c.differences()[0]["subject"]: c for c in rdiff.changes}
+    assert set(by_receiver) == {"default", "slack-db", "pagerduty-db", "infra-slack"}
+    assert by_receiver["default"].labels == {}
+    assert by_receiver["slack-db"].labels == {"team": "db"}
+    assert by_receiver["default"].similar > 0  # e.g. severity=critical alone
+
+
+def test_routing_diff_sibling_order_matters_only_for_overlapping_labels():
+    old = {"receiver": "d", "routes": [
+        {"matchers": ['team="db"'], "receiver": "db"},
+        {"matchers": ['severity="critical"'], "receiver": "pager"},
+    ]}
+    new = {"receiver": "d", "routes": list(reversed(old["routes"]))}
+    assert _changes(_rdiff(old, new)) == {
+        (("severity", "critical"), ("team", "db")): [("receivers", "receivers", "db", "pager")],
+    }
+
+
+def test_routing_diff_regex_and_negative_matchers():
+    old = {"receiver": "d", "routes": [{"matchers": ['service=~"api|web"'], "receiver": "fe"}]}
+    new = {"receiver": "d", "routes": [
+        {"matchers": ['service=~"api"'], "receiver": "fe"},
+        {"matchers": ['env!="prod"'], "receiver": "non-prod"},
+    ]}
+    changes = _changes(_rdiff(old, new))
+    # web no longer matches the regex and, having no env label, lands on env!="prod"
+    assert changes[(("service", "web"),)] == [("receivers", "receivers", "fe", "non-prod")]
+    # an alert without any of the labels: missing env is != "prod"
+    assert changes[()] == [("receivers", "receivers", "d", "non-prod")]
+    assert (("env", "prod"),) not in changes
+
+
+def test_routing_diff_continue_fan_out_change():
+    old = {"receiver": "d", "routes": [
+        {"matchers": ['team="infra"'], "receiver": "slack", "continue": True},
+        {"matchers": ['severity="critical"'], "receiver": "pager"},
+    ]}
+    new = {"receiver": "d", "routes": [{**old["routes"][0], "continue": False}, old["routes"][1]]}
+    assert _changes(_rdiff(old, new)) == {
+        (("severity", "critical"), ("team", "infra")):
+            [("receivers", "receivers", "pager, slack", "slack")],
+    }
+
+
+def test_routing_diff_capped_on_large_configs_still_reaches_parent_routes():
+    def tree(rename):
+        routes = [
+            {"matchers": [f'l{i % 9}="v{i}"', f'k{i % 7}=~"x{i}|y.*"'], "receiver": f"r{i}",
+             "routes": [{"matchers": ['sev!="info"'], "receiver": f"r{i}-child"}]}
+            for i in range(40)
+        ]
+        routes[25]["receiver"] = rename
+        return {"receiver": "default", "routes": routes}
+    rdiff = _rdiff(tree("r25"), tree("renamed"), limit=300)
+    assert rdiff.truncated and rdiff.checked == 300
+    # only an alert with sev=info stops on routes[25] itself instead of its child
+    [change] = rdiff.changes
+    assert change.labels["sev"] == "info"
+    assert change.differences() == [{"subject": "receivers", "setting": "receivers",
+                                     "old": "r25", "new": "renamed"}]
+
+
+@pytest.mark.parametrize("pattern, expected", [
+    ("prod|staging|dev", ["prod", "staging", "dev"]),
+    ("db-.*", ["db-", "db-x"]),
+    ("(?i)crit.*", ["crit", "critx"]),
+    ("[a-z]+-[0-9]{2}", ["a-00"]),
+])
+def test_routing_regex_examples_fully_match(pattern, expected):
+    from amlint.routing import _regex_examples, compile_regex
+    assert _regex_examples(compile_regex(pattern)) == expected
+
+
+def _write_diff_pair(tmp_path, new_route):
+    old_path, new_path = tmp_path / "old.yml", tmp_path / "new.yml"
+    receivers = [{"name": n} for n in ("default", "slack-db", "pagerduty-db", "infra-slack")]
+    old_path.write_text(yaml.dump({"route": _DB_ROUTE, "receivers": receivers}))
+    new_path.write_text(yaml.dump({"route": new_route, "receivers": receivers}))
+    return str(old_path), str(new_path)
+
+
+def test_cli_diff_shows_routing_changes_without_failing(tmp_path, capsys):
+    # swap two receivers: no finding changes, so routing changes alone don't fail diff
+    new = {**_DB_ROUTE, "routes": [
+        {**_DB_ROUTE["routes"][0], "routes": [
+            {"matchers": ['severity="critical"'], "receiver": "infra-slack"}]},
+        {"matchers": ['team="infra"'], "receiver": "pagerduty-db"},
+    ]}
+    old_path, new_path = _write_diff_pair(tmp_path, new)
+    assert main(["diff", old_path, new_path]) == 0
+    out = capsys.readouterr().out
+    assert "No changes in findings" in out
+    assert "Routing" in out
+    assert "team=db, severity=critical" in out
+    assert "pagerduty-db → infra-slack" in out
+    assert "infra-slack → pagerduty-db" in out
+    assert "2 routing changes" in out
+
+
+def test_cli_diff_no_routing_flag(tmp_path, capsys):
+    new = {**_DB_ROUTE, "group_wait": "1s"}
+    old_path, new_path = _write_diff_pair(tmp_path, new)
+    main(["diff", old_path, new_path, "--no-routing"])
+    assert "Routing" not in capsys.readouterr().out
+    main(["diff", old_path, new_path, "--no-routing", "--format", "json"])
+    assert "routing" not in json.loads(capsys.readouterr().out)
+
+
+def test_cli_diff_routing_json(tmp_path, capsys):
+    new = {**_DB_ROUTE, "routes": [_DB_ROUTE["routes"][0],
+                                   {**_DB_ROUTE["routes"][1], "repeat_interval": "1h"}]}
+    old_path, new_path = _write_diff_pair(tmp_path, new)
+    assert main(["diff", old_path, new_path, "--format", "json"]) == 0
+    routing = json.loads(capsys.readouterr().out)["routing"]
+    assert routing["truncated"] is False and routing["checked"] > 0
+    [change] = routing["changes"]
+    assert change["labels"] == {"team": "infra"}
+    assert change["differences"] == [{"subject": "infra-slack", "setting": "repeat_interval",
+                                      "old": "4h", "new": "1h"}]
+    assert change["old"][0]["repeat_interval"] == "4h"
+    assert change["new"][0]["set_by"]["repeat_interval"] == "route.routes[1]"
+
+
+def test_cli_diff_routing_skipped_when_config_cannot_be_simulated(tmp_path, capsys):
+    old_path = tmp_path / "old.yml"
+    old_path.write_text(yaml.dump({"receivers": [{"name": "x"}]}))
+    new_path = tmp_path / "new.yml"
+    new_path.write_text(yaml.dump({"route": {"receiver": "x"}, "receivers": [{"name": "x"}]}))
+    main(["diff", str(old_path), str(new_path)])
+    assert "Routing not compared" in capsys.readouterr().out
+    main(["diff", str(old_path), str(new_path), "--format", "json"])
+    assert "old config" in json.loads(capsys.readouterr().out)["routing"]["skipped"]
