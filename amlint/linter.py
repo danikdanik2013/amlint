@@ -67,12 +67,13 @@ def _walk_routes(node: dict, path: str = "route") -> Generator[Tuple[dict, str],
         yield from _walk_routes(child, f"{path}.routes[{i}]")
 
 
-def route_cycle(route) -> Optional[Tuple[str, str]]:
+def route_cycle(route, path: str = "route") -> Optional[Tuple[str, str]]:
     """(path, ancestor) when the route at `path` is the route at `ancestor` again, which
     contains it: a YAML alias of a route used inside that route. yaml.safe_load builds a
     recursive dict for it, and every walk over the tree would recurse forever, so the CLI
-    rejects it before linting (Alertmanager can't load it either). A route reused in
-    several places without nesting in itself is fine, and is walked once here."""
+    rejects it when it reads the config (Alertmanager can't load it either). A route
+    reused in several places without nesting in itself is fine, and is walked once here.
+    `path` names `route` in the paths returned."""
     if not isinstance(route, dict):
         return None
     walking: Dict[int, str] = {}  # id -> path of the routes from the root down to here
@@ -92,7 +93,7 @@ def route_cycle(route) -> Optional[Tuple[str, str]]:
         done.add(id(node))
         return None
 
-    return visit(route, "route")
+    return visit(route, path)
 
 
 # Matchers: match / match_re maps and matchers: lists all normalized to Matcher tuples,

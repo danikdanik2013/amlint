@@ -85,8 +85,12 @@
   command with a `RecursionError` traceback. `check`, `tree`, `route`, `test` and `diff`
   exit 2 with the path of the alias and the route it repeats, e.g. `route.routes[0] is a
   YAML alias of route, which contains it`; Alertmanager can't load such a config either.
-  Routes shared through an alias under several parents keep working, and the playground's
-  route tree is left empty for such a config while its findings show the message.
+  This holds for every input format: a plain config, the config in a Secret, Helm values
+  (`alertmanager.config.route...`), a Mimir config, and an AlertmanagerConfig's
+  `spec.route`, which is checked before it is converted. Routes shared through an alias
+  under several parents keep working, and the playground's route tree is left empty for
+  such a config while its findings show the message. Errors reading the input are no longer
+  wrapped mid-path at the terminal width.
 
 ## [0.4.1] - 2026-10-16
 

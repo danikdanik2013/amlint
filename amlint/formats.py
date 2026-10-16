@@ -29,7 +29,13 @@ import yaml
 from yaml.constructor import SafeConstructor
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
-from .linter import _parse_duration, _scalar, check_circular_inhibition, check_dead_inhibitions
+from .linter import (
+    _parse_duration,
+    _scalar,
+    check_circular_inhibition,
+    check_dead_inhibitions,
+    route_cycle,
+)
 from .source import Position, SourceMap, Suppressions, _mapping_pairs, parse_suppressions
 
 FORMATS = ("alertmanager", "secret", "helm", "mimir", "alertmanagerconfig")
@@ -469,8 +475,19 @@ def load_input(text: str, input_format: Optional[str] = None,
     base = bases[0] if bases else None
     if not crs:
         cfg, region, templates = _read_base(base, text, outer, notes, comments, problems)
+        _no_route_cycle(cfg.get("route"), "route")
         return Loaded(cfg, base.cls, region, comments, problems, templates, notes)
     return _operator(text, docs, crs, base, matcher_strategy, outer, notes, comments, problems)
+
+
+def _no_route_cycle(route, path: str, what: str = "") -> None:
+    """Raise if the route tree contains itself through a YAML alias: yaml.safe_load builds a
+    recursive dict for it, which every walk over the routes would follow forever."""
+    cycle = route_cycle(route, path)
+    if cycle:
+        raise FormatError("Route contains itself",
+                          f"{what}{cycle[0]} is a YAML alias of {cycle[1]}, which contains "
+                          f"it, so the route tree never ends")
 
 
 def _not_found(docs: List[_Doc], fmt: str) -> FormatError:
@@ -635,6 +652,8 @@ def _read_helm(doc: _Doc, text: str, outer: Suppressions, notes: List[Note],
         return cfg, region, templates
 
     values = config if isinstance(config, dict) else {}
+    # before the merge, which copies the root route, so the paths are the ones in the file
+    _no_route_cycle(values.get("route"), "alertmanager.config.route")
     cfg = _helm_merge(copy.deepcopy(_CHART_DEFAULT), values)
     from_chart = [k for k in _CHART_DEFAULT if k not in values]
     if isinstance(values.get("route"), dict):
@@ -686,6 +705,8 @@ class _CR:
         self.key = f"{namespace}/{self.name}"
         spec = doc.get("spec")
         self.spec = spec if isinstance(spec, dict) else {}
+        _no_route_cycle(self.spec.get("route"), "spec.route",
+                        f"AlertmanagerConfig {self.key} (line {doc.line}): ")
         # v1alpha1 spells the top-level time intervals muteTimeIntervals, v1beta1 timeIntervals
         self.intervals_key = "timeIntervals" if self.version == "v1beta1" else "muteTimeIntervals"
         other = "muteTimeIntervals" if self.version == "v1beta1" else "timeIntervals"
@@ -909,6 +930,7 @@ def _operator(text: str, docs: List[_Doc], crs_docs: List[_Doc], base: Optional[
         cfg, region = _global_base(global_cr, am, outer)
     elif base is not None:
         cfg, region, templates = _read_base(base, text, outer, notes, comments, problems)
+        _no_route_cycle(cfg.get("route"), "route")
     else:
         cfg = copy.deepcopy(_OPERATOR_DEFAULT)
         region = _Default(_pos(crs_docs[0].node))
