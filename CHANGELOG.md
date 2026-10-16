@@ -3,11 +3,30 @@
 ## [Unreleased]
 
 ### Added
+- Findings carry their source location. Text output shows `file:line:col` (clickable in
+  terminals and editors), JSON output has `line` / `column`, and SARIF regions point at the
+  real line instead of line 1. Paths that aren't in the file fall back to the nearest
+  enclosing part that is. Works for stdin too.
+- `--format github` — GitHub Actions workflow commands (`::error file=…,line=…,col=…,title=amlint
+  <code>::…`, `::warning`, `::notice` for info), so findings annotate the PR diff without a
+  SARIF upload. Paths are made relative to `$GITHUB_WORKSPACE`.
+- Inline suppressions: `# amlint: disable=code1,code2` at the end of a finding's line or on
+  the line above it, and `# amlint: disable-file=code` in the comment block at the top of the
+  file. Unknown codes get the "did you mean" warning; malformed `# amlint:` comments and a
+  `disable-file` below the top of the file are reported on stderr. Also applied by `diff`
+  and `tree`.
 - `invalid-root-route` (error) — root route has no `receiver`, or sets matchers, `continue`,
   `mute_time_intervals` or `active_time_intervals`; Alertmanager refuses to load such a config
   (also caught by `amtool check-config`, marked so in `amlint list`)
 - Warning on stderr for unknown check codes in `--ignore`, `--only` and `severity:`, with a
   "did you mean" suggestion
+
+### Changed
+- `empty-receiver` and `unused-receiver` report `where` as `receivers[<name>]` instead of
+  `receivers`, `duplicate-receiver` as `receivers[<index>]` of the second definition, and
+  `template-file-missing` as `templates[<index>]`, so each finding points at its own entry
+  (and can be suppressed there). `unused-receiver` findings come out in name order.
+- `amlint diff --format json` includes `line` and `column` for each finding.
 
 ### Fixed
 - `amlint test` (simulate.py) now matches the way Alertmanager does: regexes are anchored
@@ -15,6 +34,7 @@
   multi-matcher strings (`{a="1", b="2"}`) go through the linter's matcher parser, an
   unparseable matcher no longer turns a route into a catch-all, and a missing label
   compares as the empty string
+- `amlint diff` text output dropped the `[code]` of each finding (Rich read it as markup)
 - Inhibition checks (`inhibit-no-equal`, `inhibit-same-match`, `circular-inhibition`) now read
   `source_matchers` / `target_matchers`; previously only `source_match` / `target_match` were seen
 - `bad-regex` follows Go RE2 instead of Python `re`: lookarounds, backreferences, possessive

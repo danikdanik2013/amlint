@@ -2,10 +2,12 @@
 
 import json
 import os
-import yaml
+
 import pytest
-from amlint.linter import lint, ERROR, WARN, INFO
+import yaml
+
 from amlint.cli import main
+from amlint.linter import WARN, lint
 
 
 def codes(cfg):
@@ -193,8 +195,10 @@ def test_circular_inhibition():
         "route": {"receiver": "a"},
         "receivers": [{"name": "a"}],
         "inhibit_rules": [
-            {"source_match": {"severity": "critical"}, "target_match": {"severity": "warning"}, "equal": ["alertname"]},
-            {"source_match": {"severity": "warning"}, "target_match": {"severity": "critical"}, "equal": ["alertname"]},
+            {"source_match": {"severity": "critical"}, "target_match": {"severity": "warning"},
+             "equal": ["alertname"]},
+            {"source_match": {"severity": "warning"}, "target_match": {"severity": "critical"},
+             "equal": ["alertname"]},
         ],
     }
     assert "circular-inhibition" in codes(cfg)
@@ -480,7 +484,8 @@ def test_amtool_classification_matches_known_codes():
 def test_msteams_with_webhook_url_ok():
     cfg = {
         "route": {"receiver": "a"},
-        "receivers": [{"name": "a", "msteams_configs": [{"webhook_url": "https://outlook.office.com/..."}]}],
+        "receivers": [{"name": "a",
+                       "msteams_configs": [{"webhook_url": "https://outlook.office.com/..."}]}],
     }
     assert "msteams-no-webhook-url" not in codes(cfg)
 
@@ -505,7 +510,8 @@ def test_telegram_no_bot_token():
 def test_telegram_with_bot_token_ok():
     cfg = {
         "route": {"receiver": "a"},
-        "receivers": [{"name": "a", "telegram_configs": [{"bot_token": "123:ABC", "chat_id": -100123}]}],
+        "receivers": [{"name": "a",
+                       "telegram_configs": [{"bot_token": "123:ABC", "chat_id": -100123}]}],
     }
     assert "telegram-no-bot-token" not in codes(cfg)
 
@@ -513,7 +519,8 @@ def test_telegram_with_bot_token_ok():
 def test_telegram_with_bot_token_file_ok():
     cfg = {
         "route": {"receiver": "a"},
-        "receivers": [{"name": "a", "telegram_configs": [{"bot_token_file": "/etc/secrets/bot_token"}]}],
+        "receivers": [{"name": "a",
+                       "telegram_configs": [{"bot_token_file": "/etc/secrets/bot_token"}]}],
     }
     assert "telegram-no-bot-token" not in codes(cfg)
 
@@ -529,7 +536,8 @@ def test_discord_no_webhook_url():
 def test_discord_with_webhook_url_ok():
     cfg = {
         "route": {"receiver": "a"},
-        "receivers": [{"name": "a", "discord_configs": [{"webhook_url": "https://discord.com/api/webhooks/..."}]}],
+        "receivers": [{"name": "a",
+                       "discord_configs": [{"webhook_url": "https://discord.com/api/webhooks/..."}]}],
     }
     assert "discord-no-webhook-url" not in codes(cfg)
 
@@ -545,7 +553,8 @@ def test_victorops_no_api_key():
 def test_victorops_with_api_key_ok():
     cfg = {
         "route": {"receiver": "a"},
-        "receivers": [{"name": "a", "victorops_configs": [{"api_key": "secret", "routing_key": "team-key"}]}],
+        "receivers": [{"name": "a",
+                       "victorops_configs": [{"api_key": "secret", "routing_key": "team-key"}]}],
     }
     assert "victorops-no-api-key" not in codes(cfg)
 
@@ -570,7 +579,8 @@ def test_wechat_no_corp_id():
 def test_wechat_with_corp_id_ok():
     cfg = {
         "route": {"receiver": "a"},
-        "receivers": [{"name": "a", "wechat_configs": [{"corp_id": "abc123", "agent_id": "1000002"}]}],
+        "receivers": [{"name": "a",
+                       "wechat_configs": [{"corp_id": "abc123", "agent_id": "1000002"}]}],
     }
     assert "wechat-no-corp-id" not in codes(cfg)
 
@@ -595,7 +605,8 @@ def test_sns_no_target():
 def test_sns_with_topic_arn_ok():
     cfg = {
         "route": {"receiver": "a"},
-        "receivers": [{"name": "a", "sns_configs": [{"topic_arn": "arn:aws:sns:us-east-2:123:My-Topic"}]}],
+        "receivers": [{"name": "a",
+                       "sns_configs": [{"topic_arn": "arn:aws:sns:us-east-2:123:My-Topic"}]}],
     }
     assert "sns-no-target" not in codes(cfg)
 
@@ -611,7 +622,8 @@ def test_sns_with_phone_number_ok():
 def test_sns_with_target_arn_ok():
     cfg = {
         "route": {"receiver": "a"},
-        "receivers": [{"name": "a", "sns_configs": [{"target_arn": "arn:aws:sns:us-west-2:123:endpoint/x"}]}],
+        "receivers": [{"name": "a",
+                       "sns_configs": [{"target_arn": "arn:aws:sns:us-west-2:123:endpoint/x"}]}],
     }
     assert "sns-no-target" not in codes(cfg)
 
@@ -835,7 +847,7 @@ def test_template_literal_exists_ok(tmp_path):
 
 
 def test_template_glob_no_match(tmp_path):
-    from amlint.linter import lint as _lint, WARN
+    from amlint.linter import lint as _lint
     cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
            "templates": ["*.tmpl"]}
     findings = _lint(cfg, basedir=str(tmp_path))
@@ -1509,3 +1521,315 @@ def test_simulate_skips_malformed_routes():
     from amlint.simulate import simulate_route
     route = {"receiver": "default", "routes": ["oops", {"match": {"a": "b"}, "receiver": "x"}]}
     assert [r for r, _ in simulate_route(route, {"a": "b"})] == ["x"]
+
+
+# ── Source locations: logical path -> line:column ───────────────────
+
+LOCATED = """\
+global:
+  resolve_timeout: 5m
+route:
+  receiver: default
+  routes:
+    - matchers: [team="infra"]
+      receiver: infra
+      routes:
+        - matchers: [severity="critical"]
+          receiver: ghost
+    - receiver: default
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://example
+  - name: infra
+    webhook_configs:
+      - {}
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+"""
+
+
+def test_source_map_routes():
+    from amlint.source import SourceMap
+    smap = SourceMap(LOCATED)
+    assert smap.locate("route") == (3, 1)
+    assert smap.locate("route.routes[0]") == (6, 7)
+    assert smap.locate("route.routes[1]") == (11, 7)
+
+
+def test_source_map_nested_routes():
+    from amlint.source import SourceMap
+    assert SourceMap(LOCATED).locate("route.routes[0].routes[0]") == (9, 11)
+
+
+def test_source_map_receivers_by_name_and_index():
+    from amlint.source import SourceMap
+    smap = SourceMap(LOCATED)
+    assert smap.locate("receivers") == (12, 1)
+    assert smap.locate("receivers[infra]") == (16, 5)
+    assert smap.locate("receivers[1]") == (16, 5)
+    assert smap.locate("receivers[infra].webhook_configs[0]") == (18, 9)
+
+
+def test_source_map_inhibit_rules():
+    from amlint.source import SourceMap
+    assert SourceMap(LOCATED).locate("inhibit_rules[0]") == (20, 5)
+
+
+def test_source_map_falls_back_to_nearest_parent():
+    from amlint.source import SourceMap
+    smap = SourceMap(LOCATED)
+    assert smap.locate("route.routes[0].routes[7]") == (8, 7)   # the routes: key
+    assert smap.locate("receivers[nope].email_configs[0]") == (12, 1)
+    assert smap.locate("templates") == (1, 1)                   # nothing to anchor to
+
+
+def test_source_map_merge_keys_and_empty_doc():
+    from amlint.source import SourceMap
+    smap = SourceMap("defaults: &d\n  receiver: a\nroute:\n  <<: *d\n  routes:\n    - {}\n")
+    assert smap.locate("route.receiver") == (2, 3)  # defined at the anchor
+    assert smap.locate("route.routes[0]") == (6, 7)
+    assert SourceMap("").locate("route") == (1, 1)
+
+
+def test_cli_json_has_line_and_column(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(LOCATED)
+    main(["check", "--format", "json", str(cfg)])
+    by_code = {f["code"]: f for f in json.loads(capsys.readouterr().out)}
+    def pos(code):
+        return by_code[code]["line"], by_code[code]["column"]
+    assert pos("undefined-receiver") == (9, 11)
+    assert pos("webhook-no-url") == (18, 9)
+    assert pos("inhibit-no-equal") == (20, 5)
+
+
+def test_cli_receiver_findings_point_at_the_receiver(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n"
+                   "    webhook_configs: [{url: 'http://x'}]\n  - name: spare\n  - name: a\n")
+    main(["check", "--format", "json", str(cfg)])
+    found = {(f["code"], f["where"], f["line"]) for f in json.loads(capsys.readouterr().out)}
+    assert ("empty-receiver", "receivers[spare]", 6) in found
+    assert ("unused-receiver", "receivers[spare]", 6) in found
+    assert ("duplicate-receiver", "receivers[2]", 7) in found  # the second definition
+
+
+def test_cli_sarif_region_has_real_line(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(LOCATED)
+    main(["check", "--format", "sarif", str(cfg)])
+    results = json.loads(capsys.readouterr().out)["runs"][0]["results"]
+    hit = next(r for r in results if r["ruleId"] == "undefined-receiver")
+    region = hit["locations"][0]["physicalLocation"]["region"]
+    assert region == {"startLine": 9, "startColumn": 11}
+
+
+def test_cli_text_shows_file_line_col(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(LOCATED)
+    main(["check", str(cfg)])
+    assert f"{cfg}:9:11" in capsys.readouterr().out
+
+
+def test_cli_stdin_has_locations(monkeypatch, capsys):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(LOCATED))
+    assert main(["check", "-", "--format", "json"]) == 1
+    out = json.loads(capsys.readouterr().out)
+    hit = next(f for f in out if f["code"] == "undefined-receiver")
+    assert (hit["file"], hit["line"], hit["column"]) == ("-", 9, 11)
+
+
+# ── Inline suppressions: # amlint: disable=... ──────────────────────
+
+SUPPRESS_BASE = """\
+route:
+  receiver: a
+  routes:
+    - receiver: a{same_line}
+    - matchers: [team="x"]
+      receiver: a
+receivers:
+  - name: a
+    webhook_configs: [{{url: 'http://x'}}]
+"""
+
+
+def _check_json(tmp_path, capsys, text, *extra):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(text)
+    main(["check", "--format", "json", str(cfg), *extra])
+    captured = capsys.readouterr()
+    return {f["code"] for f in json.loads(captured.out)}, captured.err
+
+
+def test_suppression_on_same_line(tmp_path, capsys):
+    text = SUPPRESS_BASE.format(same_line="")
+    found, _ = _check_json(tmp_path, capsys, text)
+    assert "unreachable-route" in found
+    text = SUPPRESS_BASE.format(same_line="  # amlint: disable=unreachable-route")
+    found, err = _check_json(tmp_path, capsys, text)
+    assert "unreachable-route" not in found
+    assert err == ""
+
+
+def test_suppression_on_line_above(tmp_path, capsys):
+    text = SUPPRESS_BASE.format(same_line="").replace(
+        "    - receiver: a\n",
+        "    # amlint: disable=unreachable-route, useless-continue\n"
+        "    # (catch-all on purpose)\n"
+        "    - receiver: a\n",
+    )
+    found, err = _check_json(tmp_path, capsys, text)
+    assert "unreachable-route" not in found
+    assert err == ""
+
+
+def test_trailing_suppression_does_not_cover_next_line(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n"
+                   "    webhook_configs: [{url: 'http://x'}]\n"
+                   "  - name: b    # amlint: disable=empty-receiver\n"
+                   "  - name: c\n")
+    main(["check", "--format", "json", "--only", "empty-receiver", str(cfg)])
+    assert [f["where"] for f in json.loads(capsys.readouterr().out)] == ["receivers[c]"]
+
+
+def test_suppression_file_wide(tmp_path, capsys):
+    text = ("# Team alerting config\n"
+            "# amlint: disable-file=global-resolve-timeout-missing,unreachable-route\n"
+            "---\n" + SUPPRESS_BASE.format(same_line=""))
+    found, err = _check_json(tmp_path, capsys, text)
+    assert "global-resolve-timeout-missing" not in found
+    assert "unreachable-route" not in found
+    assert err == ""
+
+
+def test_disable_file_below_content_is_ignored(tmp_path, capsys):
+    text = SUPPRESS_BASE.format(same_line="") + "# amlint: disable-file=unreachable-route\n"
+    found, err = _check_json(tmp_path, capsys, text)
+    assert "unreachable-route" in found
+    assert "only works in the comment block at the top" in err
+
+
+def test_suppression_unknown_code_warns(tmp_path, capsys):
+    text = SUPPRESS_BASE.format(same_line="  # amlint: disable=unreachable-rout")
+    found, err = _check_json(tmp_path, capsys, text)
+    assert "unreachable-route" in found
+    assert "unknown check code 'unreachable-rout'" in err
+    assert "am.yml:4" in err
+    assert "did you mean 'unreachable-route'" in err
+
+
+def test_suppression_malformed_comment_warns(tmp_path, capsys):
+    text = SUPPRESS_BASE.format(same_line="  # amlint: disabel=unreachable-route")
+    found, err = _check_json(tmp_path, capsys, text)
+    assert "unreachable-route" in found
+    assert "unrecognized '# amlint:' comment" in err
+
+
+def test_suppression_inside_string_is_not_a_comment(tmp_path, capsys):
+    # the would-be directive sits on the finding's own line, but inside a quoted string
+    text = SUPPRESS_BASE.format(same_line="").replace(
+        "    - receiver: a\n",
+        "    - {receiver: a, group_by: ['x # amlint: disable=unreachable-route']}\n", 1,
+    )
+    found, err = _check_json(tmp_path, capsys, text)
+    assert "unreachable-route" in found
+    assert err == ""
+
+
+def test_suppression_via_stdin(monkeypatch, capsys):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(
+        SUPPRESS_BASE.format(same_line="  # amlint: disable=unreachable-route")
+    ))
+    main(["check", "-", "--format", "json"])
+    assert "unreachable-route" not in {f["code"] for f in json.loads(capsys.readouterr().out)}
+
+
+def test_suppression_applies_to_diff(tmp_path, capsys):
+    old = tmp_path / "old.yml"
+    new = tmp_path / "new.yml"
+    old.write_text(SUPPRESS_BASE.format(same_line="").replace("    - receiver: a\n", "", 1))
+    new.write_text(SUPPRESS_BASE.format(same_line="  # amlint: disable=unreachable-route"))
+    assert main(["diff", str(old), str(new), "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["added"] == []
+
+
+# ── --format github ─────────────────────────────────────────────────
+
+def test_cli_github_format(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(LOCATED)
+    assert main(["check", "--format", "github", str(cfg)]) == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert (f"::error file={cfg},line=9,col=11,title=amlint undefined-receiver::"
+            f"Route references receiver 'ghost'") in lines[0]
+    assert lines[0].endswith("(route.routes[0].routes[0])")
+    assert any(ln.startswith(f"::warning file={cfg},line=20,col=5,"
+                             f"title=amlint inhibit-no-equal::") for ln in lines)
+    assert all(ln.startswith(("::error ", "::warning ", "::notice ")) for ln in lines)
+
+
+def test_cli_github_format_notice_and_escaping(tmp_path, capsys, monkeypatch):
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+    cfg = tmp_path / "odd,name.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n"
+                   "    webhook_configs: [{url: 'http://x'}]\n  - name: '100%'\n")
+    main(["check", "--format", "github", "--only", "unused-receiver", str(cfg)])
+    out = capsys.readouterr().out
+    assert out.startswith("::notice file=")
+    assert "odd%2Cname.yml,line=6,col=5,title=amlint unused-receiver::" in out
+    assert "Receiver '100%25'" in out
+
+
+def test_cli_github_format_relative_to_workspace(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
+    (tmp_path / "deploy").mkdir()
+    cfg = tmp_path / "deploy" / "am.yml"
+    cfg.write_text(LOCATED)
+    main(["check", "--format", "github", str(cfg)])
+    assert "::error file=deploy/am.yml,line=9,col=11," in capsys.readouterr().out
+    # a step with `working-directory: deploy` passes a path relative to that directory;
+    # the runner reads relative file= paths from the repo root, so it must be rewritten
+    monkeypatch.chdir(tmp_path / "deploy")
+    main(["check", "--format", "github", "am.yml"])
+    assert "::error file=deploy/am.yml,line=9,col=11," in capsys.readouterr().out
+
+
+def test_cli_github_format_stdin_has_no_file(monkeypatch, capsys):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(LOCATED))
+    main(["check", "-", "--format", "github"])
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first.startswith("::error title=amlint undefined-receiver::")
+
+
+def test_unused_receivers_with_mixed_name_types():
+    cfg = {"route": {"receiver": "a"},
+           "receivers": [{"name": "a"}, {"name": 123}, {"name": "b"}]}
+    found = [f.where for f in lint(cfg) if f.code == "unused-receiver"]
+    assert found == ["receivers[123]", "receivers[b]"]
+
+
+def test_cli_github_format_cannot_inject_commands(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text('route:\n  receiver: a\nreceivers:\n  - name: a\n'
+                   '    webhook_configs: [{url: "http://x"}]\n'
+                   '  - name: "x\\n::error::injected\\r\\n::add-mask::y"\n')
+    main(["check", "--format", "github", "--only", "unused-receiver", str(cfg)])
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 1
+    assert "x%0A::error::injected%0D%0A::add-mask::y" in lines[0]
+
+
+def test_source_map_receiver_names_as_loaded():
+    from amlint.source import SourceMap
+    smap = SourceMap("receivers:\n  - name: true\n  - name: 0x1F\n  - name: '007'\n")
+    assert smap.locate("receivers[True]") == (2, 5)
+    assert smap.locate("receivers[31]") == (3, 5)
+    assert smap.locate("receivers[007]") == (4, 5)

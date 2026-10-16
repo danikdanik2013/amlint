@@ -26,13 +26,16 @@ Matcher = Tuple[str, str, str]
 
 
 class Finding:
-    __slots__ = ("level", "code", "msg", "where")
+    __slots__ = ("level", "code", "msg", "where", "line", "col")
 
     def __init__(self, level: str, code: str, msg: str, where: str = "") -> None:
         self.level = level
         self.code = code
         self.msg = msg
         self.where = where
+        # 1-based position of `where` in the source file, filled in by the CLI
+        self.line: Optional[int] = None
+        self.col: Optional[int] = None
 
 
 def _dict_items(value) -> List[Tuple[int, dict]]:
@@ -175,11 +178,11 @@ def check_unused_receivers(cfg):
         for node, _ in _walk_routes(route):
             if node.get("receiver"):
                 used.add(node["receiver"])
-    for name in defined - used:
+    for name in sorted(defined - used, key=str):
         out.append(Finding(
             INFO, "unused-receiver",
             f"Receiver '{name}' is defined but not referenced by any route.",
-            "receivers",
+            f"receivers[{name}]",
         ))
     return out
 
@@ -497,7 +500,7 @@ def _describe_timing(value, path: str) -> str:
 def check_duplicate_receivers(cfg):
     out = []
     seen = set()
-    for r in _receivers(cfg):
+    for i, r in _dict_items(cfg.get("receivers")):
         name = r.get("name")
         if not name:
             continue
@@ -506,7 +509,7 @@ def check_duplicate_receivers(cfg):
                 ERROR, "duplicate-receiver",
                 f"Receiver '{name}' is defined more than once. "
                 f"The second definition will be silently ignored.",
-                "receivers",
+                f"receivers[{i}]",  # by index: by name would point at the first definition
             ))
         seen.add(name)
     return out
@@ -537,7 +540,7 @@ def check_empty_receivers(cfg):
                 f"Receiver '{name}' has no integration configured "
                 f"(no slack_configs, pagerduty_configs, webhook_configs, etc.). "
                 f"Alerts sent here will be silently dropped.",
-                "receivers",
+                f"receivers[{name}]",
             ))
     return out
 
@@ -814,7 +817,7 @@ def check_route_match_collision(cfg: dict) -> List[Finding]:
 def check_template_files(cfg: dict, basedir: str) -> List[Finding]:
     out: List[Finding] = []
     templates = cfg.get("templates")
-    for tpl in templates if isinstance(templates, list) else []:
+    for i, tpl in enumerate(templates if isinstance(templates, list) else []):
         if not isinstance(tpl, str):
             continue
         full = tpl if os.path.isabs(tpl) else os.path.join(basedir, tpl)
@@ -826,14 +829,14 @@ def check_template_files(cfg: dict, basedir: str) -> List[Finding]:
                 WARN, "template-file-missing",
                 f"templates glob '{tpl}' matches no files. "
                 f"Alertmanager will load no custom templates.",
-                "templates",
+                f"templates[{i}]",
             ))
         else:
             out.append(Finding(
                 ERROR, "template-file-missing",
                 f"Template file '{tpl}' does not exist. "
                 f"Alertmanager will fail to start.",
-                "templates",
+                f"templates[{i}]",
             ))
     return out
 
