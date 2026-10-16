@@ -903,3 +903,75 @@ def test_input_format_flag_on_every_command(capsys):
         assert exit_code(argv + ["--input-format", "helm"]) == 2, argv
         assert "found no kube-prometheus-stack Helm values" in \
             " ".join(capsys.readouterr().err.split())
+
+
+# ── a route tree that contains itself ────────────────────────────────
+
+@pytest.mark.parametrize("text, message", [
+    ("""
+        apiVersion: v1
+        kind: Secret
+        metadata: {name: alertmanager-main}
+        stringData:
+          alertmanager.yaml: |
+            route: &r
+              receiver: a
+              routes: [*r]
+            receivers: [{name: a}]
+     """, "route.routes[0] is a YAML alias of route, which contains it"),
+    ("""
+        alertmanager:
+          config:
+            route: &r
+              receiver: "null"
+              routes: [*r]
+     """, "alertmanager.config.route.routes[0] is a YAML alias of alertmanager.config.route"),
+    ("""
+        alertmanager_config: |
+          route:
+            receiver: a
+            routes:
+              - &x
+                receiver: a
+                routes: [*x]
+          receivers: [{name: a}]
+     """, "route.routes[0].routes[0] is a YAML alias of route.routes[0], which contains it"),
+    (_CR.replace("  route:\n    receiver: slack\n    routes:",
+                 "  route: &r\n    receiver: slack\n    routes:\n      - *r"),
+     "AlertmanagerConfig team-a/payments (line 1): spec.route.routes[0] is a YAML alias of "
+     "spec.route, which contains it"),
+])
+def test_route_that_contains_itself_exits_2(tmp_path, capsys, text, message):
+    """yaml.safe_load builds a recursive dict for it, which every route walk (and the
+    AlertmanagerConfig conversion) would follow until RecursionError."""
+    path = write(tmp_path, text)
+    for argv in (["check", path], ["tree", path], ["route", path, "a=b"],
+                 ["test", path, fixture("alertmanagerconfig-tests.yaml")],
+                 ["diff", path, path]):
+        assert exit_code(argv) == 2, argv
+        err = capsys.readouterr().err
+        assert f"Route contains itself ({path}): {message}" in err, argv
+        assert "Traceback" not in err
+
+
+def test_routes_shared_by_alias_in_a_resource_still_work(tmp_path, capsys):
+    path = write(tmp_path, _CR.replace("""
+    routes:
+      - receiver: pager
+        matchers:
+          - name: severity
+            value: critical
+""", """
+    routes:
+      - matchers: [{name: team, value: db}]
+        routes: &common
+          - receiver: pager
+            matchers: [{name: severity, value: critical}]
+      - matchers: [{name: team, value: web}]
+        routes: *common
+"""))
+    code, findings, _ = check(capsys, path)
+    assert code == 0, findings
+    assert main(["route", path, "namespace=team-a", "team=web", "severity=critical",
+                 "--format", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["receivers"] == ["team-a/payments/pager"]
