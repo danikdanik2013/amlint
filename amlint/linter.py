@@ -193,6 +193,11 @@ def check_dead_inhibitions(cfg):
     An inhibition rule silences target alerts when a source alert fires,
     but only when labels in 'equal' match. Missing 'equal' means the rule
     will silence across unrelated alerts — almost never intentional.
+
+    A rule with target matchers but no source matchers is the exception: every
+    alert counts as its source, so it mutes its targets whenever anything else
+    fires. That is a deliberate "always mute" idiom (kube-prometheus uses it for
+    InfoInhibitor), not a forgotten 'equal'.
     """
     out = []
     for i, rule in _dict_items(cfg.get("inhibit_rules")):
@@ -201,7 +206,7 @@ def check_dead_inhibitions(cfg):
         tgt = _matchers(rule, "target_")
         equal = rule.get("equal", []) or []
 
-        if not equal and (src or tgt):
+        if not equal and src:
             out.append(Finding(
                 WARN, "inhibit-no-equal",
                 "Inhibition rule has no 'equal' field: it will silence alerts across "
@@ -587,6 +592,9 @@ _INTEGRATION_KEYS = {
     "incidentio_configs",
 }
 
+# Names that say "drop these on purpose" (kube-prometheus routes Watchdog/InfoInhibitor to "null")
+_BLACKHOLE_NAMES = {"null", "blackhole", "devnull", "dev-null", "discard", "drop"}
+
 def check_empty_receivers(cfg):
     out = []
     route = _root_route(cfg)
@@ -597,7 +605,8 @@ def check_empty_receivers(cfg):
             continue
         # an empty list (`webhook_configs: []`) delivers nothing either
         if not any(r.get(k) for k in _INTEGRATION_KEYS):
-            level = INFO if name == default_rcv else WARN
+            intentional = name == default_rcv or str(name).lower() in _BLACKHOLE_NAMES
+            level = INFO if intentional else WARN
             out.append(Finding(
                 level, "empty-receiver",
                 f"Receiver '{name}' has no integration configured "
@@ -878,27 +887,35 @@ def check_route_match_collision(cfg: dict) -> List[Finding]:
 
 # CHECK 22: templates: references files that do not exist on disk
 def check_template_files(cfg: dict, basedir: str) -> List[Finding]:
+    """
+    Relative paths are resolved against the config file's directory, as Alertmanager
+    does. Absolute paths (e.g. /etc/alertmanager/templates/*.tmpl) point into the
+    Alertmanager host or container, not wherever amlint runs, so they aren't checked.
+    Alertmanager itself starts fine when a path matches nothing; it just loads no
+    templates from it, and notifications that use them fail to render.
+    """
     out: List[Finding] = []
     templates = cfg.get("templates")
     for i, tpl in enumerate(templates if isinstance(templates, list) else []):
-        if not isinstance(tpl, str):
+        if not isinstance(tpl, str) or os.path.isabs(tpl):
             continue
-        full = tpl if os.path.isabs(tpl) else os.path.join(basedir, tpl)
-        if _glob.glob(full):
+        if _glob.glob(os.path.join(basedir, tpl)):
             continue
         is_glob = any(c in tpl for c in "*?[")
         if is_glob:
             out.append(Finding(
                 WARN, "template-file-missing",
-                f"templates glob '{tpl}' matches no files. "
-                f"Alertmanager will load no custom templates.",
+                f"templates glob '{tpl}' matches no files (relative to the config file). "
+                f"Alertmanager loads no templates from it, so notifications that use "
+                f"templates defined there fail to render.",
                 f"templates[{i}]",
             ))
         else:
             out.append(Finding(
                 ERROR, "template-file-missing",
-                f"Template file '{tpl}' does not exist. "
-                f"Alertmanager will fail to start.",
+                f"Template file '{tpl}' does not exist (relative to the config file). "
+                f"Alertmanager loads nothing from it, so notifications that use its "
+                f"templates fail to render.",
                 f"templates[{i}]",
             ))
     return out

@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- The kube-prometheus-stack default config no longer fails `--strict` out of the box:
+  - `inhibit-no-equal` skips rules with target matchers but no source matchers, the
+    deliberate "always mute" idiom kube-prometheus uses for `InfoInhibitor`
+  - `template-file-missing` no longer checks absolute paths, which point into the
+    Alertmanager host or container rather than wherever amlint runs, and no longer claims
+    Alertmanager fails to start: it starts and loads no templates from a path that matches
+    nothing
+- `empty-receiver` reports receivers named `null`, `blackhole`, `devnull`, `dev-null`,
+  `discard` or `drop` as info, like the default receiver: they are deliberate drops
+
+### Added
+- `testdata/real-world/`: configs modeled on kube-prometheus and Alertmanager's docs example;
+  the test suite fails if any of them gets a WARN or ERROR
+
 ## [0.4.0] - 2026-10-16
 
 First PyPI release since 0.2.0: it also ships everything under 0.2.1 and 0.3.0 below, which
