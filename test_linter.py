@@ -2037,6 +2037,56 @@ def test_circular_inhibition_with_a_shared_extra_label():
     assert [f.where for f in found] == ["inhibit_rules[0]"]
 
 
+def test_circular_inhibition_source_equal_cannot_agree():
+    # the critical alert that mutes ZoneDown is a NodeDown, so A (equal: [alertname]) never
+    # mutes ZoneDown while it fires
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical", "namespace=x"],
+             "target_matchers": ["severity=warning", "namespace=x"], "equal": ["alertname"]},
+            {"source_matchers": ["alertname=ZoneDown", "namespace=x"],
+             "target_matchers": ["alertname=NodeDown", "namespace=x"], "equal": ["zone"]},
+        ],
+    }
+    assert "circular-inhibition" not in codes(cfg)
+
+
+def test_circular_inhibition_target_equal_cannot_agree():
+    # the warning alert A mutes is in cluster b, its critical source in cluster a, so B
+    # (equal: [cluster]) never mutes that source while the warning fires
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical", "cluster=a"],
+             "target_matchers": ["severity=warning", "cluster=b"], "equal": ["alertname"]},
+            {"source_matchers": ["severity=warning"],
+             "target_matchers": ["severity=critical"], "equal": ["cluster"]},
+        ],
+    }
+    assert "circular-inhibition" not in codes(cfg)
+
+
+@pytest.mark.parametrize("warning_matchers", [
+    ["severity=warning"],  # alertname free on one side
+    ["severity=warning", "alertname=NodeDown"],  # same value on both sides
+])
+def test_circular_inhibition_equal_can_agree(warning_matchers):
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical", "alertname=NodeDown"],
+             "target_matchers": warning_matchers, "equal": ["alertname"]},
+            {"source_matchers": warning_matchers,
+             "target_matchers": ["severity=critical"], "equal": ["alertname"]},
+        ],
+    }
+    assert "circular-inhibition" in codes(cfg)
+
+
 # ── bad-regex: Go RE2 semantics, inhibit rules ───────────────────────
 
 def _route_regex(pattern):

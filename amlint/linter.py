@@ -673,16 +673,28 @@ def _same_alert(a: Dict[str, str], b: Dict[str, str]) -> bool:
     return bool(shared) and all(a[k] == b[k] for k in shared)
 
 
+def _can_agree(equal: List[str], a: Dict[str, str], b: Dict[str, str]) -> bool:
+    """Whether two alerts can have the same value for every label in a rule's 'equal':
+    no label there is fixed to different values on the two sides."""
+    return all(k not in a or k not in b or a[k] == b[k] for k in equal)
+
+
 def check_circular_inhibition(cfg):
     out = []
     rules = [
-        (i, _equality(_matchers(r, "source_")), _equality(_matchers(r, "target_")))
+        (i, _equality(_matchers(r, "source_")), _equality(_matchers(r, "target_")),
+         [_scalar(k) for k in r["equal"]] if isinstance(r.get("equal"), list) else [])
         for i, r in _dict_items(cfg.get("inhibit_rules"))
     ]
-    for pos, (i, src_a, tgt_a) in enumerate(rules):
-        for j, src_b, tgt_b in rules[pos + 1:]:
+    for pos, (i, src_a, tgt_a, equal_a) in enumerate(rules):
+        for j, src_b, tgt_b, equal_b in rules[pos + 1:]:
             # each rule's source alert is the other rule's target
-            if _same_alert(src_a, tgt_b) and _same_alert(src_b, tgt_a):
+            if not (_same_alert(src_a, tgt_b) and _same_alert(src_b, tgt_a)):
+                continue
+            # x fires for A and is muted by B, y the other way round; each rule mutes only
+            # when the two alerts agree on its 'equal' labels
+            x, y = {**src_a, **tgt_b}, {**src_b, **tgt_a}
+            if _can_agree(equal_a, x, y) and _can_agree(equal_b, x, y):
                 out.append(Finding(
                     WARN, "circular-inhibition",
                     f"inhibit_rules[{i}] and inhibit_rules[{j}] may silence each other — "

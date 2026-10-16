@@ -36,6 +36,12 @@
   of both rules) as enough for each rule's source to be the other's target, even when
   another shared label, such as `alertname`, contradicts it. Now every shared `=` label
   must agree.
+- `circular-inhibition` now takes each rule's `equal` into account. A rule only mutes an
+  alert while its source fires when the two have the same value for every `equal` label,
+  so a pair isn't circular when an `equal` label has fixed, different values on the two
+  alerts. `severity=critical` → `severity=warning` with `equal: [alertname]` and
+  `alertname=ZoneDown` → `alertname=NodeDown` no longer warn: the critical alert that
+  mutes ZoneDown is a NodeDown, so the first rule never mutes ZoneDown while it fires.
 
 ## [0.4.1] - 2026-10-16
 
