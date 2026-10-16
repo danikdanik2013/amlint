@@ -1,8 +1,8 @@
 # Checks overview
 
-amlint runs **31 checks** grouped into four categories. 18 of them duplicate validation
+amlint runs **32 checks** grouped into four categories. 18 of them duplicate validation
 that `amtool check-config` already does (Alertmanager refuses to start on these — included
-for unified output, not because amtool misses them). The other 13 are configs that load
+for unified output, not because amtool misses them). The other 14 are configs that load
 and run fine, and just don't do what you meant — the real reason to run amlint at all.
 
 | code | level | also in amtool | category |
@@ -13,6 +13,7 @@ and run fine, and just don't do what you meant — the real reason to run amlint
 | [`bad-regex`](routing.md#bad-regex) | error | ✓ | Routing |
 | [`unreachable-route`](routing.md#unreachable-route) | warn | | Routing |
 | [`route-match-collision`](routing.md#route-match-collision) | warn | | Routing |
+| [`shadowed-route`](routing.md#shadowed-route) | warn | | Routing |
 | [`groupby-ellipsis`](routing.md#groupby-ellipsis) | warn | ✓ | Routing |
 | [`useless-continue`](routing.md#useless-continue) | info | | Routing |
 | [`deep-nesting`](routing.md#deep-nesting) | info | | Routing |

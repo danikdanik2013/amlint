@@ -12,7 +12,7 @@ Semantic linter for Prometheus Alertmanager configs.
 Alertmanager's own `amtool check-config` already validates most schema-level mistakes —
 undefined receivers, missing integration fields, bad regex — and refuses to start over them.
 **amlint covers that same ground in one dependency-free CLI with JSON/SARIF/diff output,
-plus 13 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
+plus 14 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
 starts and runs, and just silently doesn't do what you meant.**
 
 **[Try it in your browser](https://danikdanik2013.github.io/amlint/playground/)**: paste a
@@ -29,11 +29,12 @@ schema violations — they're valid configs that behave wrong:
 - catch-all branch before specific ones → specific branches **are unreachable** (config loads fine)
 - inhibition without `equal` → silences unrelated alerts, config loads fine, you think it's quiet
 - two sibling routes with identical matchers → the second **never fires**, no error anywhere
+- a broader sibling first (`severity="critical"` before `severity="critical", team="infra"`) → the narrower route **never fires** either
 - `group_wait` longer than `group_interval`, or `repeat_interval` shorter than `group_interval` → timing that quietly doesn't do what the numbers suggest
 - receiver defined but never routed to, or routed to but has no integration configured
 
 None of this fails `amtool check-config` or stops Alertmanager from starting. Run
-`amlint list` to see which of the 31 checks are these vs. which duplicate amtool's own
+`amlint list` to see which of the 32 checks are these vs. which duplicate amtool's own
 validation (included for convenience — one tool, one output format, no Go binary needed).
 
 ## Install
@@ -274,6 +275,7 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `deep-nesting` | info | route tree deeper than 5 levels |
 | `global-resolve-timeout-missing` | info | `global.resolve_timeout` not set; defaults to 5m |
 | `route-match-collision` | warn | two sibling routes with identical matchers |
+| `shadowed-route` | warn | earlier sibling with a subset of the route's matchers catches every alert first |
 | `route-unknown-alertname` | warn | with `--rules`: route matches an `alertname` no alerting rule produces |
 | `inhibit-unknown-alertname` | warn | with `--rules`: inhibit rule matches an `alertname` no alerting rule produces |
 | `alert-hits-default-receiver` | info | with `--rules`: by their static labels, alerts match no child route (grouped by routing labels) |

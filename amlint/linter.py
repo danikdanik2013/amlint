@@ -17,7 +17,7 @@ import os
 import posixpath
 import re
 import warnings
-from typing import Dict, Generator, List, Optional, Set, Tuple
+from typing import Dict, FrozenSet, Generator, Iterable, List, Optional, Set, Tuple
 
 ERROR = "error"      # config is broken: alerts will be lost
 WARN = "warn"        # almost certainly not what you intended
@@ -177,6 +177,12 @@ def _matchers(node: dict, prefix: str = "") -> List[Matcher]:
 
 def _equality(matchers: List[Matcher]) -> Dict[str, str]:
     return {label: value for label, op, value in matchers if op == "="}
+
+
+def _is_catch_all(matchers: Iterable[Matcher]) -> bool:
+    """True if a route matches every alert: no matchers, or only label=~".*" ones.
+    (RE2's `.` skips newlines, but label values practically never contain one.)"""
+    return all(op == "=~" and value == ".*" for _, op, value in matchers)
 
 
 # CHECK 1: route references a receiver that doesn't exist
@@ -496,8 +502,8 @@ def check_unreachable_routes(cfg):
     """
     Alertmanager evaluates sibling routes in order. If a route matches
     and continue is not true, subsequent siblings won't receive the alert.
-    A catch-all route (no matchers) with continue:false makes all following
-    siblings unreachable.
+    A catch-all route (no matchers, or only =~".*") with continue:false makes
+    all following siblings unreachable.
     """
     out = []
     route = _root_route(cfg)
@@ -508,13 +514,14 @@ def check_unreachable_routes(cfg):
         siblings = _dict_items(node.get("routes"))
         for pos, (i, child) in enumerate(siblings):
             path = f"{parent_path}.routes[{i}]"
-            is_catch_all = not _matchers(child)
+            matchers = _matchers(child)
             cont = child.get("continue", False)
             remaining = len(siblings) - pos - 1
-            if is_catch_all and not cont and remaining:
+            if _is_catch_all(matchers) and not cont and remaining:
+                kind = "no matchers" if not matchers else 'only =~".*" matchers'
                 out.append(Finding(
                     WARN, "unreachable-route",
-                    f"Catch-all route (no matchers) with continue:false will intercept all alerts "
+                    f"Catch-all route ({kind}) with continue:false will intercept all alerts "
                     f"— {remaining} subsequent sibling(s) are unreachable.",
                     path,
                 ))
@@ -917,7 +924,7 @@ def check_route_match_collision(cfg: dict) -> List[Finding]:
             path = f"{parent_path}.routes[{i}]"
             # match:, match_re: and matchers: spellings of the same matcher compare equal
             key = frozenset(_matchers(child))
-            if key:
+            if not _is_catch_all(key):  # catch-alls are reported by unreachable-route
                 if key in seen:
                     prev = seen[key]
                     out.append(Finding(
@@ -1136,6 +1143,43 @@ def check_root_route(cfg: dict) -> List[Finding]:
     return out
 
 
+# CHECK 30: sibling route that an earlier, broader sibling always matches first
+def check_shadowed_routes(cfg: dict) -> List[Finding]:
+    """
+    If an earlier sibling without continue:true has a strict subset of this route's
+    matchers, every alert this route matches stops there first. Only exact
+    (label, op, value) subsets count, nothing is inferred from regexes. Identical
+    matchers are left to route-match-collision and catch-alls to unreachable-route,
+    so each dead route is reported by one check.
+    """
+    out: List[Finding] = []
+    route = _root_route(cfg)
+    if not route:
+        return out
+
+    def scan(node, parent_path):
+        # earlier siblings that stop evaluation when they match
+        earlier: List[Tuple[str, FrozenSet[Matcher]]] = []
+        for i, child in _dict_items(node.get("routes")):
+            path = f"{parent_path}.routes[{i}]"
+            key = frozenset(_matchers(child))
+            covering = [(prev_path, prev) for prev_path, prev in earlier if prev <= key]
+            if covering and all(prev != key for _, prev in covering):
+                out.append(Finding(
+                    WARN, "shadowed-route",
+                    f"Earlier sibling {covering[0][0]} uses a subset of these matchers and has "
+                    f"no continue:true — this route will never receive alerts because the "
+                    f"earlier sibling always matches first.",
+                    path,
+                ))
+            if not child.get("continue") and not _is_catch_all(key):
+                earlier.append((path, key))
+            scan(child, path)
+
+    scan(route, "route")
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -1165,6 +1209,7 @@ ALL_CHECKS = [
     check_wechat_no_corp_id,
     check_sns_no_target,
     check_root_route,
+    check_shadowed_routes,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}

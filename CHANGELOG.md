@@ -72,6 +72,10 @@
   there as under Findings; before, the tree parsed the paste as a plain `alertmanager.yml`
   and came out empty or wrong. New example: AlertmanagerConfig resources. Template files
   that ship in the input are checked by `template-file-missing` there.
+- `shadowed-route` (warn) — a route never receives alerts because an earlier sibling without
+  `continue: true` has a strict subset of its matchers (`severity="critical"` before
+  `severity="critical", team="infra"`). Identical matchers stay `route-match-collision` and
+  catch-alls stay `unreachable-route`, so each dead route is reported once
 
 ### Changed
 - A file with several YAML documents that are all plain Alertmanager configs now fails with
@@ -90,6 +94,8 @@
   alerts. `severity=critical` → `severity=warning` with `equal: [alertname]` and
   `alertname=ZoneDown` → `alertname=NodeDown` no longer warn: the critical alert that
   mutes ZoneDown is a NodeDown, so the first rule never mutes ZoneDown while it fires.
+- `unreachable-route` treats a route whose only matchers are `label=~".*"` as a catch-all;
+  `route-match-collision` leaves such routes to it instead of reporting them twice
 
 ### Fixed
 - A route tree that contains itself through a YAML alias (`route: &r` with `routes: [*r]`,

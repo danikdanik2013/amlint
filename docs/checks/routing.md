@@ -120,7 +120,7 @@ Regexes in routes (`match_re`, `matchers`) and in inhibit rules (`source_match_r
 
 **Level:** warn
 
-A catch-all route (no `match`, `match_re`, or `matchers`) with `continue: false` appears before sibling routes. All subsequent siblings are unreachable — they will never receive alerts.
+A catch-all route — no `match`, `match_re`, or `matchers`, or only `label=~".*"` matchers — with `continue: false` appears before sibling routes. All subsequent siblings are unreachable — they will never receive alerts.
 
 === "Bad"
     ```yaml
@@ -217,6 +217,50 @@ Two sibling routes have identical matchers. Alertmanager evaluates siblings in o
       - match: {team: infra, severity: warning}    # different severity
         receiver: slack-infra
     ```
+
+---
+
+## shadowed-route
+
+**Level:** warn
+
+An earlier sibling route without `continue: true` has a strict subset of this route's matchers. Every alert this route matches also matches the earlier sibling, which comes first — so this route never receives alerts.
+
+Only exact subsets are reported: the same label, operator and value, with `match:`, `match_re:` and `matchers:` spellings comparing equal. amlint does not reason about regexes, so `severity=~"crit.*"` before `severity="critical", team="infra"` is not reported — every finding is a route that really is dead.
+
+=== "Bad"
+    ```yaml
+    routes:
+      - matchers: [severity="critical"]
+        receiver: pager
+      - matchers: [severity="critical", team="infra"]   # never reached
+        receiver: infra-pager
+    ```
+
+=== "Fixed — specific first"
+    ```yaml
+    routes:
+      - matchers: [severity="critical", team="infra"]   # more specific first
+        receiver: infra-pager
+      - matchers: [severity="critical"]
+        receiver: pager
+    ```
+
+=== "Fixed — use continue"
+    ```yaml
+    routes:
+      - matchers: [severity="critical"]
+        receiver: pager
+        continue: true          # pass to next sibling too
+      - matchers: [severity="critical", team="infra"]
+        receiver: infra-pager
+    ```
+
+!!! note
+    Each dead route is reported by one check. Identical matchers are
+    [`route-match-collision`](#route-match-collision), and a catch-all sibling (no matchers, or
+    only `label=~".*"`) is [`unreachable-route`](#unreachable-route); `shadowed-route` reports
+    the remaining provable case, a strict subset.
 
 ---
 
