@@ -96,6 +96,7 @@ const state = {
   docs: {},
   findings: [],
   tree: null,
+  treeError: null, // why amlint can't read the config, when it can't
   routeLines: new Map(), // route path -> line, from the last tree
   matched: new Set(), // route paths the "Route an alert" labels go through
   loaded: "", // the config text last loaded from an example or a link
@@ -363,6 +364,10 @@ function renderTree() {
   const out = $("amp-tree");
   out.replaceChildren();
   const tree = state.tree;
+  if (state.treeError) {
+    out.append(errorBox("No route tree: amlint can't read this config.", state.treeError, editor));
+    return;
+  }
   if (!tree) {
     out.append(h("p", { class: "amp-muted" }, "No route tree: the config has no valid route: mapping."));
     return;
@@ -529,6 +534,7 @@ function scheduleCheck(ms) {
     if (stale()) return;
     state.findings = Array.isArray(res.data) ? res.data : [];
     state.tree = tree.tree;
+    state.treeError = tree.error || null;
     state.routeLines = new Map();
     (function collect(n) {
       if (!n) return;
