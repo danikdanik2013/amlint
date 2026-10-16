@@ -38,6 +38,13 @@ and run fine, and just don't do what you meant — the real reason to run amlint
 | [`wait-exceeds-interval`](timing.md#wait-exceeds-interval) | warn | | Timing |
 | [`undefined-time-interval`](timing.md#undefined-time-interval) | error | ✓ | Timing |
 | [`global-resolve-timeout-missing`](timing.md#global-resolve-timeout-missing) | info | | Timing |
+| [`route-unknown-alertname`](rules.md#route-unknown-alertname) | warn | | Prometheus rules |
+| [`inhibit-unknown-alertname`](rules.md#inhibit-unknown-alertname) | warn | | Prometheus rules |
+| [`alert-hits-default-receiver`](rules.md#alert-hits-default-receiver) | info | | Prometheus rules |
+
+The three **Prometheus rules** checks are extra: they run only with `amlint check --rules`,
+which reads your Prometheus alerting rules and checks routes and inhibit rules against the
+alerts they produce. See [Prometheus rules](rules.md).
 
 Same info from the CLI: `amlint list` shows the same column; `amlint explain <code>` says
 it for any individual check.

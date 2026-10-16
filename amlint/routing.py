@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import (
     Dict,
+    FrozenSet,
     Iterable,
     Iterator,
     List,
@@ -208,6 +209,37 @@ def _match(route: _Route, labels: Mapping[str, str], trail: Tuple[str, ...]) -> 
     return found or [RouteMatch(trail, route.opts)]
 
 
+def _matches_partial(matchers: List[_Matcher], labels: Mapping[str, str],
+                     unknown: FrozenSet[str]) -> Optional[bool]:
+    """_matches when the labels in `unknown` may have any value: False as soon as a matcher
+    on a known label fails, None if the rest read an unknown label."""
+    undecided = False
+    for label, op, value in matchers:
+        if label in unknown:
+            undecided = True
+        elif not _matcher_ok(op, value, labels.get(label, "")):
+            return False
+    return None if undecided else True
+
+
+def _match_partial(route: _Route, labels: Mapping[str, str], unknown: FrozenSet[str],
+                   trail: Tuple[str, ...]) -> Optional[List[RouteMatch]]:
+    """_match, or None when the outcome depends on a label in `unknown`."""
+    hit = _matches_partial(route.matchers, labels, unknown)
+    if hit is not True:
+        return None if hit is None else []
+    trail = trail + (route.path,)
+    found: List[RouteMatch] = []
+    for child in route.routes:
+        child_matches = _match_partial(child, labels, unknown, trail)
+        if child_matches is None:
+            return None
+        found.extend(child_matches)
+        if child_matches and not child.continue_:
+            break
+    return found or [RouteMatch(trail, route.opts)]
+
+
 class Router:
     """A parsed route tree. Raises RoutingError for trees Alertmanager would not load."""
 
@@ -228,6 +260,12 @@ class Router:
     def paths(self) -> List[str]:
         """Every route's path, depth-first in definition order, the root first."""
         return [route.path for _, route in self._paths()]
+
+    def match_partial(self, labels: Mapping[str, object],
+                      unknown: Iterable[str]) -> Optional[List[RouteMatch]]:
+        """match() for an alert known only in part: the labels named in `unknown` may have
+        any value. None when the routes reached depend on one of them."""
+        return _match_partial(self._root, _labels(labels), frozenset(unknown), ())
 
     def _paths(self) -> Iterator[Tuple[List[_Matcher], _Route]]:
         """Every route, with the matchers an alert has to pass to get there."""

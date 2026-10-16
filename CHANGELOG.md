@@ -42,6 +42,25 @@
   amlint can't evaluate exits 2, but only when `--firing` or `firing:` needs the rules.
 - `testdata/real-world/`: configs modeled on kube-prometheus and Alertmanager's docs example;
   the test suite fails if any of them gets a WARN or ERROR
+- `amlint check --rules GLOB` (repeatable) checks the config against Prometheus alerting
+  rules: rule files (`groups:`) and prometheus-operator `PrometheusRule` manifests
+  (`spec.groups:`, also several per file or in a `kind: List`). Recording rules are skipped.
+  Each alert is described by its static labels, `alertname` plus the rule's `labels:`, with
+  templated values unknown. Three new checks, which run only with `--rules`:
+  - `route-unknown-alertname` (warn) — a route matches an `alertname` no rule produces, with
+    a "did you mean" suggestion. Checks `=` and `!=`, each name of a plain `=~"A|B|C"` list,
+    and any other regex that matches none of the alert names
+  - `inhibit-unknown-alertname` (warn) — the same for inhibit rule source and target matchers
+  - `alert-hits-default-receiver` (info) — based on their static labels, alerts match no
+    child route and go to the root receiver. One finding per combination of the labels the
+    routes match on (`severity=warning`, "no severity label"), so a deliberate fallback is
+    one line. Alerts whose route depends on a templated label, or on a label no rule sets
+    (so it comes from the series or `external_labels`), are skipped
+- A `--rules` glob that matches no files, or a rule file that isn't valid YAML, exits 2. A
+  config to check that looks like a rule file (an unquoted `--rules` glob the shell
+  expanded) gets a warning
+- `testdata/real-world/rules/`: alerting rules for the real-world configs; the test suite
+  fails if `--rules` adds a WARN on them
 
 ### Changed
 - The GitHub Action reports findings as PR annotations (`--format github`) by default,

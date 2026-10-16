@@ -1077,12 +1077,18 @@ ALL_CHECKS = [
 _VALID_LEVELS = {ERROR, WARN, INFO}
 
 
-def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None) -> List[Finding]:
+def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None,
+         rules=None) -> List[Finding]:
+    """Run every check. `rules`, the alerting rules from amlint.rules.load_rules, adds the
+    checks against Prometheus rules."""
     findings: List[Finding] = []
     for check in ALL_CHECKS:
         findings.extend(check(cfg))
     if basedir is not None:
         findings.extend(check_template_files(cfg, basedir))
+    if rules is not None:
+        from .rules import check_rules  # imported here: rules.py builds on this module
+        findings.extend(check_rules(cfg, rules))
     if severity:
         for f in findings:
             if f.code in severity and severity[f.code] in _VALID_LEVELS:

@@ -746,4 +746,108 @@ receivers:
           region: us-east-2
 # or use phone_number (SMS) or target_arn (mobile endpoint) instead""",
     },
+
+    "route-unknown-alertname": {
+        "level": "warn",
+        "summary": (
+            "With --rules: a route matches an alertname that no alerting rule in the rule"
+            " files produces."
+        ),
+        "why": (
+            "The route is valid, so Alertmanager loads it — it just never receives the alert "
+            "it was written for. Usually the name has a typo or the rule was renamed, and the "
+            "alert falls through to another route instead. Equality matchers, each name of a "
+            "plain alternation like alertname=~\"A|B|C\", and other regexes that match none of "
+            "the rules' alert names are checked; != and !~ ones too, since excluding a name "
+            "nothing produces excludes nothing. Alerts from other sources (another Prometheus, "
+            "Loki, Grafana) aren't in the rule files: pass those files too, or suppress the "
+            "finding with `# amlint: disable=route-unknown-alertname`."
+        ),
+        "bad": """\
+# rules/node.yml
+groups:
+  - name: node
+    rules:
+      - alert: HighCPUUsage
+        expr: node_cpu_busy > 0.9
+
+# alertmanager.yml   (amlint check alertmanager.yml --rules 'rules/*.yml')
+route:
+  receiver: default
+  routes:
+    - matchers: [alertname="HighCpuUsage"]   # no rule produces this alert
+      receiver: infra-pager""",
+        "good": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [alertname="HighCPUUsage"]
+      receiver: infra-pager""",
+    },
+
+    "inhibit-unknown-alertname": {
+        "level": "warn",
+        "summary": (
+            "With --rules: an inhibit rule's source or target matches an alertname that no"
+            " alerting rule in the rule files produces."
+        ),
+        "why": (
+            "An inhibit rule whose source alert never fires never mutes anything, and one "
+            "whose target alert never fires has nothing to mute — Alertmanager loads it either "
+            "way and gives no sign. Same matching as route-unknown-alertname, for "
+            "source_match / source_matchers and target_match / target_matchers."
+        ),
+        "bad": """\
+# rules/node.yml defines NodeDown and NodeHighLoad
+inhibit_rules:
+  - source_matchers: [alertname="NodeDwn"]   # typo: never fires
+    target_matchers: [alertname="NodeHighLoad"]
+    equal: [instance]""",
+        "good": """\
+inhibit_rules:
+  - source_matchers: [alertname="NodeDown"]
+    target_matchers: [alertname="NodeHighLoad"]
+    equal: [instance]""",
+    },
+
+    "alert-hits-default-receiver": {
+        "level": "info",
+        "summary": (
+            "With --rules: based on their static labels, alerts match no child route and"
+            " go to the root route's receiver."
+        ),
+        "why": (
+            "Each alerting rule is routed with alertname plus its own labels: — typically a "
+            "rule that forgot its severity or team label and lands on the catch-all receiver "
+            "nobody watches. At runtime an alert also has the labels of its PromQL series and "
+            "Prometheus' external_labels, so amlint doesn't guess about those: when the route "
+            "taken depends on a label that no rule sets, or on a label whose value is a "
+            "template, the alert is skipped. Alerts are grouped by the labels the routes match "
+            "on, so sending every severity=warning alert to the default receiver on purpose is "
+            "one finding, and a rule missing a label the others set stands out on its own. "
+            "Info only, since static labels are not the whole story. To make a fallback "
+            "explicit, give those alerts their own route to the default receiver."
+        ),
+        "bad": """\
+# rules/app.yml
+groups:
+  - name: app
+    rules:
+      - alert: DiskFull
+        expr: disk_free_ratio < 0.05
+        labels: {severity: critical}
+      - alert: QueueBacklog
+        expr: queue_depth > 1000   # no severity label: lands on 'default'
+
+# alertmanager.yml
+route:
+  receiver: default
+  routes:
+    - matchers: [severity="critical"]
+      receiver: pager""",
+        "good": """\
+      - alert: QueueBacklog
+        expr: queue_depth > 1000
+        labels: {severity: critical}""",
+    },
 }

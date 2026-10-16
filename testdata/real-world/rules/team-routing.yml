@@ -1,0 +1,32 @@
+# Alerting rules for team-routing.yml: service and severity set by the rules, as the
+# routes expect, plus a templated severity and a recording rule.
+groups:
+  - name: services
+    rules:
+      - record: service:request_errors:ratio_rate5m
+        expr: sum by (service) (rate(http_requests_total{code=~"5.."}[5m])) / sum by (service) (rate(http_requests_total[5m]))
+      - alert: Foo1HighErrorRate
+        expr: service:request_errors:ratio_rate5m{service="foo1"} > 0.05
+        labels:
+          service: foo1
+          severity: warning
+      - alert: BazDown
+        expr: up{job="baz"} == 0
+        labels:
+          service: baz
+          severity: critical
+      - alert: FilesBackupFailed
+        expr: files_backup_last_success_timestamp_seconds < time() - 86400
+        labels:
+          service: files
+          severity: '{{ if gt $value 172800.0 }}critical{{ else }}warning{{ end }}'
+      - alert: DatabaseReplicationLag
+        expr: pg_replication_lag_seconds > 300
+        labels:
+          service: database
+          severity: warning
+      - alert: DatabaseDown
+        expr: pg_up == 0
+        labels:
+          service: database
+          severity: critical

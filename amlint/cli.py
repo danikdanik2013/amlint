@@ -49,6 +49,7 @@ from .linter import (
 )
 from .markdown import diff_report
 from .routing import GROUP_BY_ALL, Inhibitor, Router, RoutingError, diff_routing, route_coverage
+from .rules import RulesError, load_rules, rule_files
 from .source import SourceMap, apply_source
 
 console = Console(highlight=False)
@@ -301,14 +302,46 @@ def _print_github(all_findings) -> None:
             print(f"::{_GITHUB_LEVEL[f.level]} {','.join(props)}::{_github_escape(msg)}")
 
 
+def _load_rules(patterns):
+    """Alerting rules for --rules, or None if the files have none; exits 2 if a glob
+    matches no file or a file can't be parsed."""
+    try:
+        alerts, notes = load_rules(rule_files(patterns))
+    except RulesError as e:
+        err_console.print(f"[red]Cannot load --rules:[/red] {escape(str(e))}", soft_wrap=True)
+        sys.exit(2)
+    for note in notes:
+        err_console.print(f"[yellow]warning:[/yellow] {escape(note)}", soft_wrap=True)
+    if not alerts:
+        err_console.print("[yellow]warning:[/yellow] no alerting rules in the --rules files, "
+                          "so the checks against them are skipped", soft_wrap=True)
+        return None
+    return alerts
+
+
+def _warn_if_rule_file(path, cfg) -> None:
+    """An unquoted --rules glob expands in the shell, and all but the first file end up
+    as configs to check."""
+    if isinstance(cfg.get("groups"), list) and "route" not in cfg:
+        err_console.print(
+            f"[yellow]warning:[/yellow] {escape(_display(path))} looks like a Prometheus rule "
+            f"file, not an Alertmanager config. Quote the --rules glob so the shell doesn't "
+            f"expand it: --rules 'rules/*.yml'", soft_wrap=True,
+        )
+
+
 def _cmd_check(args):
     proj, ignore, only, severity = _project_settings(args)
     strict = args.strict or proj.get("strict", False)
+    rules = _load_rules(args.rules) if args.rules else None
 
     multi = len(args.files) > 1
     all_findings = []
     for path in args.files:
-        _, findings = _lint_file(path, ignore=ignore, severity=severity, only=only or None)
+        cfg, findings = _lint_file(path, ignore=ignore, severity=severity, only=only or None,
+                                   rules=rules)
+        if args.rules:
+            _warn_if_rule_file(path, cfg)
         all_findings.append((path, findings))
 
     if args.format == "json":
@@ -1080,6 +1113,9 @@ def main(argv=None):
                     help="run only findings with these codes (comma-separated or repeat the flag)")
     pc.add_argument("--exit-zero", action="store_true", dest="exit_zero",
                     help="always exit 0 regardless of findings; useful for informational CI runs")
+    pc.add_argument("--rules", action="append", metavar="GLOB",
+                    help="Prometheus rule files (or PrometheusRule manifests) to check routes "
+                         "and inhibit rules against; quote the glob, repeat the flag for more")
 
     pd = sub.add_parser("diff", help="show findings that changed between two configs")
     pd.add_argument("old", help="baseline config")
