@@ -3,6 +3,19 @@
 ## [Unreleased]
 
 ### Added
+- `amlint diff --format markdown` — a compact, deterministic report for a pull-request
+  comment: a one-line summary, a table of label sets whose receivers changed (labels |
+  before | after), changed `group_by` and timings, and new and fixed findings with
+  `file:line:col`. Each table stops after 50 rows with "…and N more". Names from the config
+  are escaped, so they can't add Markdown, HTML or @mentions to the comment.
+- GitHub Action: `diff-base` input (e.g. `${{ github.event.pull_request.base.sha }}`). On
+  `pull_request` events the action extracts the config at that ref, runs
+  `amlint diff --format markdown` and creates or updates one PR comment, found by the
+  `<!-- amlint-routing-diff -->` marker, through the REST API with `curl` (no third-party
+  actions). It also writes the report to the job summary. A config that doesn't exist at the
+  base is diffed as new. Needs `permissions: pull-requests: write` and the base commit in the
+  checkout (`fetch-depth: 0`). On other events it does nothing. New `github-token` input.
+- GitHub Action: `format` input for the check step, `github` (default) or `text`.
 - `amlint test --coverage` lists the routes that no test case reaches, with their path
   (`route.routes[2].routes[0]`), `file:line:col` and matchers, plus the share of routes that
   are covered. A route counts as covered when an alert went through it, so the parents of the
@@ -27,6 +40,14 @@
   alerts inhibit the one being routed, and which rule does it (`inhibit_rules[1]` and
   `file:line:col`). JSON output adds `firing`, `inhibited` and `inhibited_by`. An inhibit rule
   amlint can't evaluate exits 2, but only when `--firing` or `firing:` needs the rules.
+
+### Changed
+- The GitHub Action reports findings as PR annotations (`--format github`) by default,
+  instead of the text report. `format: text` restores the old output; `sarif: true` still
+  uploads SARIF.
+- `amlint diff` treats an empty old file as no config: every finding in the new file is
+  new, none is fixed (the empty file's `no-root-route` used to show up as fixed), and the
+  routing section lists every label set's receivers as changed from `(none)`.
 
 ## [0.4.0] - 2026-10-16
 

@@ -57,6 +57,7 @@ amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
 amlint diff old.yml new.yml                 # what changed: findings, and alerts routed differently
+amlint diff old.yml new.yml --format markdown  # the same as a compact PR comment
 amlint tree alertmanager.yml                # visualize the route tree, issues inline
 amlint route alertmanager.yml team=infra severity=critical  # where does this alert go?
 amlint route alertmanager.yml alertname=DiskFull --firing alertname=NodeDown  # inhibited?
@@ -170,8 +171,14 @@ Details in [docs/usage.md](docs/usage.md#route).
     strict: true
 ```
 
-No `pip install` step needed. Supports `--ignore`/`--only` via inputs and optional SARIF upload
-for PR annotations — see the [GitHub Action docs](https://danikdanik2013.github.io/amlint/github-action/).
+No `pip install` step needed. Findings annotate the PR diff; `--ignore`/`--only` work via
+inputs, and SARIF upload to Code Scanning is optional.
+
+Add `diff-base: ${{ github.event.pull_request.base.sha }}` and the action also posts the
+routing diff against the PR's base as one comment: which label sets now reach other
+receivers, changed `group_by` and timings, and new and fixed findings. It updates that
+comment on every push. It needs `permissions: pull-requests: write` and the base commit in
+the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik2013.github.io/amlint/github-action/).
 
 ## Checks
 
