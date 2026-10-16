@@ -1,123 +1,146 @@
 # Timing checks
 
+These checks catch notification timing that doesn't do what it says, and routes that point
+at time intervals that don't exist.
+
+Alertmanager batches alerts into **groups** (alerts on the same route that share its
+`group_by` labels) and times each group's notifications with three settings:
+
+- **`group_wait`**: how long to wait after a group's first alert before the first
+  notification. Default `30s`.
+- **`group_interval`**: how often to notify about changes, such as new or resolved alerts,
+  to a group that was already notified. Default `5m`.
+- **`repeat_interval`**: how long to wait before sending a notification again for alerts
+  that are still firing and unchanged. Default `4h`.
+
+A child route inherits any of these it doesn't set from its parent, and the root route
+falls back to the defaults. amlint works out the values the same way, and reports a finding
+on the route that sets one of the two values involved.
+
+---
+
 ## repeat-before-group
 
-**Level:** warn
+**Level:** warn · **amtool:** doesn't catch it
 
-`repeat_interval` is shorter than `group_interval`. This means Alertmanager will send repeat notifications before the grouped batch has had a chance to fire again — generating more noise than expected.
+**What goes wrong:** `repeat_interval` is shorter than `group_interval`.
 
-Values are resolved the way Alertmanager resolves them: a child route inherits unset timing from its parent, and the root falls back to the defaults (`group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 4h`). The finding is reported on the route that sets one of the two values.
+```yaml title="Bad"
+route:
+  receiver: default
+  group_interval: 1h
+  repeat_interval: 15m   # shorter than group_interval
+```
 
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-      group_interval: 1h
-      repeat_interval: 5m     # repeats every 5m, but group fires every 1h
-    ```
+**What Alertmanager does:** Loads the config. After the first notification, Alertmanager
+sends a group's notifications only once per `group_interval`, and re-sends still-firing
+alerts at the first of those sends after `repeat_interval` has passed. So the reminders
+come every hour, not every 15 minutes.
 
-=== "Fixed"
-    ```yaml
-    route:
-      receiver: default
-      group_interval: 5m
-      repeat_interval: 4h     # repeat_interval should be >= group_interval
-    ```
+**How to fix:** Make `repeat_interval` at least as long as `group_interval`, ideally a
+multiple of it. To get reminders more often, shorten `group_interval` too.
 
-**Typical values:**
-
-| field | recommended |
-|-------|-------------|
-| `group_wait` | `30s` – `2m` |
-| `group_interval` | `5m` – `15m` |
-| `repeat_interval` | `1h` – `24h` |
+```yaml title="Fixed"
+route:
+  receiver: default
+  group_interval: 5m
+  repeat_interval: 15m   # a multiple of group_interval
+```
 
 ---
 
 ## wait-exceeds-interval
 
-**Level:** warn
+**Level:** warn · **amtool:** doesn't catch it
 
-`group_wait` is longer than `group_interval`. This means subsequent alerts in the group will be sent before the initial `group_wait` has expired.
+**What goes wrong:** `group_wait` is longer than `group_interval`. The two values are
+usually swapped: `group_wait` is meant to be a short pause that collects the first burst of
+alerts.
 
-Inherited values and Alertmanager defaults are taken into account, as for `repeat-before-group`.
+```yaml title="Bad"
+route:
+  receiver: default
+  group_wait: 10m       # wait 10 minutes before the first notification
+  group_interval: 2m    # but report changes every 2 minutes
+```
 
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-      group_wait: 10m      # wait 10 minutes before first notification
-      group_interval: 2m   # but send updates every 2 minutes
-    ```
+**What Alertmanager does:** Loads the config. A new group waits the full 10 minutes before
+its first notification; after that, changes go out every 2 minutes. The first notification
+about a new problem is the slowest one.
 
-=== "Fixed"
-    ```yaml
-    route:
-      receiver: default
-      group_wait: 30s
-      group_interval: 5m   # group_interval should be > group_wait
-    ```
+**How to fix:** Keep `group_wait` shorter than `group_interval`.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  group_wait: 30s
+  group_interval: 5m
+```
 
 ---
 
 ## undefined-time-interval
 
-**Level:** error
+**Level:** error · **amtool:** also catches it
 
-A route references a time interval name in `mute_time_intervals` or `active_time_intervals` that is not defined in `time_intervals`. Alertmanager will reject this config at runtime.
+**What goes wrong:** A route's `mute_time_intervals` (mute the route during these times) or
+`active_time_intervals` (send only during these times) names an interval that isn't
+defined under `time_intervals:`.
 
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-      mute_time_intervals: [maintenance]   # not defined below!
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers: [team="infra"]
+      receiver: infra
+      mute_time_intervals: [maintenance]   # not defined anywhere
+```
 
-    receivers:
-      - name: default
-        slack_configs: [...]
-    ```
+**What Alertmanager does:** Refuses to load the config:
+`undefined time interval "maintenance" used in route`.
 
-=== "Fixed"
-    ```yaml
-    route:
-      receiver: default
+**How to fix:** Define the interval under `time_intervals:`, or fix the name. Intervals
+defined under the older top-level `mute_time_intervals:` key count too.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers: [team="infra"]
+      receiver: infra
       mute_time_intervals: [maintenance]
-
-    receivers:
-      - name: default
-        slack_configs: [...]
-
+time_intervals:
+  - name: maintenance
     time_intervals:
-      - name: maintenance
-        time_intervals:
-          - weekdays: [saturday, sunday]
-            times:
-              - start_time: '00:00'
-                end_time: '24:00'
-    ```
+      - weekdays: [saturday, sunday]
+```
 
 ---
 
 ## global-resolve-timeout-missing
 
-**Level:** info
+**Level:** info · **amtool:** doesn't catch it
 
-`global.resolve_timeout` is not set. Alertmanager uses a default of `5m` — after 5 minutes without a firing alert, it marks the alert resolved and sends a resolve notification.
+**What goes wrong:** `global.resolve_timeout` isn't set, so Alertmanager uses its default
+of `5m`. Nothing breaks; the value just isn't visible in your config.
 
-This may be too short (spurious resolves for flapping alerts) or too long (delayed recovery notices). Setting it explicitly makes the intent clear and reviewable in code.
+```yaml title="Bad"
+route:
+  receiver: default
+# no global.resolve_timeout
+```
 
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-    # no global: section — resolve_timeout silently defaults to 5m
-    ```
+**What Alertmanager does:** Uses `resolve_timeout` only for alerts that arrive without an
+end time (`endsAt`): if such an alert isn't sent again within that time, Alertmanager marks
+it resolved. Prometheus always sets an end time, so this setting doesn't change alerts that
+come from Prometheus.
 
-=== "Fixed"
-    ```yaml
-    global:
-      resolve_timeout: 5m   # explicit: 5m, 15m, 1h — whatever fits your alerts
+**How to fix:** Set the value you want. If all your alerts come from Prometheus, you can
+ignore this check instead (see [Ignoring checks](index.md#ignoring-checks)).
 
-    route:
-      receiver: default
-    ```
+```yaml title="Fixed"
+global:
+  resolve_timeout: 5m
+route:
+  receiver: default
+```
