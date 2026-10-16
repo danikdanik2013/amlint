@@ -7,6 +7,7 @@ class Amlint < Formula
   sha256 "733bc827fbf43d6cdf283737a7b353ccb1597de523fad680733c5300caf5f7e6"
   license "MIT"
 
+  depends_on "libyaml"
   depends_on "python@3.12"
 
   resource "markdown-it-py" do
