@@ -1,6 +1,12 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] - 2026-10-16
+
+First PyPI release since 0.2.0: it also ships everything under 0.2.1 and 0.3.0 below, which
+were never published. Some configs that passed before get new findings: timing checks now use
+inherited values and Alertmanager's defaults, regexes Go RE2 rejects are errors, and
+`invalid-root-route` is new. `amlint test` now anchors regexes like Alertmanager, so test
+suites that relied on substring matches will fail.
 
 ### Added
 - Findings carry their source location. Text output shows `file:line:col` (clickable in
@@ -42,8 +48,6 @@
 - `amlint test` exits 2 when the config can't be simulated (a regex RE2 rejects, an
   unparseable matcher, a malformed duration, matchers on the root route, a `\pL`-style
   Unicode class) instead of guessing
-
-### Changed
 - `empty-receiver` and `unused-receiver` report `where` as `receivers[<name>]` instead of
   `receivers`, `duplicate-receiver` as `receivers[<index>]` of the second definition, and
   `template-file-missing` as `templates[<index>]`, so each finding points at its own entry

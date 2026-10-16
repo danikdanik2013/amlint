@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: danikdanik2013/amlint@v0.2.0
+      - uses: danikdanik2013/amlint@v0.4.0
         with:
           config-path: alertmanager.yml
           strict: true
@@ -30,7 +30,7 @@ jobs:
 | `strict` | no | `false` | Exit non-zero on WARN as well as ERROR |
 | `ignore` | no | `""` | Comma-separated check codes to skip |
 | `only` | no | `""` | Comma-separated check codes to run exclusively |
-| `version` | no | `""` (latest) | Pin a specific amlint version, e.g. `0.2.0` |
+| `version` | no | `""` (latest) | Pin a specific amlint version, e.g. `0.4.0` |
 | `sarif` | no | `false` | Upload findings to GitHub Code Scanning as SARIF (PR annotations) |
 
 ## With Code Scanning annotations
@@ -40,7 +40,7 @@ Requires Code Scanning enabled on the repo (on by default for public repos):
 ```yaml
     steps:
       - uses: actions/checkout@v7
-      - uses: danikdanik2013/amlint@v0.2.0
+      - uses: danikdanik2013/amlint@v0.4.0
         with:
           config-path: alertmanager.yml
           sarif: true
@@ -58,8 +58,8 @@ Use `version` to pin amlint itself independently of the action tag — useful if
 action's argument-handling to stay current while freezing the linter's rule set:
 
 ```yaml
-      - uses: danikdanik2013/amlint@v0.2.0
+      - uses: danikdanik2013/amlint@v0.4.0
         with:
           config-path: alertmanager.yml
-          version: '0.2.0'
+          version: '0.4.0'
 ```

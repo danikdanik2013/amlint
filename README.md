@@ -152,7 +152,7 @@ Details in [docs/usage.md](docs/usage.md#route).
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: danikdanik2013/amlint@v0.2.0
+- uses: danikdanik2013/amlint@v0.4.0
   with:
     config-path: alertmanager.yml
     strict: true
