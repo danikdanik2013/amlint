@@ -14,6 +14,10 @@ playground/node_modules/
 .pytest_cache/
 .coverage
 htmlcov/
+.hypothesis/
+
+# Alertmanager releases fetched for the differential tests
+.cache/
 
 # macOS
 .DS_Store

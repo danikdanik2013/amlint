@@ -6,6 +6,7 @@
 [![PyPI](https://img.shields.io/pypi/v/amlint)](https://pypi.org/project/amlint)
 [![Python](https://img.shields.io/pypi/pyversions/amlint)](https://pypi.org/project/amlint)
 [![Docker](https://ghcr-badge.egpl.dev/danikdanik2013/amlint/size?tag=latest&label=docker)](https://github.com/danikdanik2013/amlint/pkgs/container/amlint)
+[![Verified against Alertmanager](https://github.com/danikdanik2013/amlint/actions/workflows/differential.yml/badge.svg)](https://danikdanik2013.github.io/amlint/fidelity/)
 
 Semantic linter for Prometheus Alertmanager configs.
 
@@ -19,6 +20,12 @@ starts and runs, and just silently doesn't do what you meant.**
 config and see the findings, the route tree, where an alert goes and what a change does to
 routing. amlint runs inside the page (Python compiled to WebAssembly), so your config never
 leaves your browser. Nothing to install.
+
+**Verified against Alertmanager v0.32.2, v0.33.1 and v0.34.1.** amlint simulates routing and
+inhibition in Python, so a [CI job](.github/workflows/differential.yml) checks it against
+Alertmanager's own `amtool` and a running `alertmanager` on thousands of generated configs:
+same receivers, same inhibitions, and the same configs rejected. See
+[what is compared, and the known differences](https://danikdanik2013.github.io/amlint/fidelity/).
 
 ## Why
 
@@ -122,7 +129,7 @@ Example output:
   ⚠  WARN   [unreachable-route]  ·  alertmanager.yml:8:7  ·  route.routes[0]
      Catch-all route (no matchers) with continue:false will intercept all alerts — 2 subsequent sibling(s) are unreachable.
 
-  ✖ 2 errors  ·  ⚠ 5 warnings  ·  ℹ 3 info
+  ✖ 3 errors  ·  ⚠ 4 warnings  ·  ℹ 3 info
 ```
 
 Every finding carries `file:line:col`, so terminals and editors can jump straight to it.
@@ -247,6 +254,7 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `undefined-receiver` | error | route references a receiver that doesn't exist |
 | `invalid-root-route` | error | root route has no `receiver`, or has matchers / `continue` / time intervals |
 | `bad-regex` | error | regex fails to compile or uses syntax Go RE2 rejects (lookarounds, backrefs) |
+| `groupby-ellipsis` | error | `...` mixed with explicit labels in `group_by` |
 | `no-root-route` | error | no root `route` defined |
 | `duplicate-receiver` | error | receiver name defined more than once |
 | `undefined-time-interval` | error | `mute_time_intervals` / `active_time_intervals` references unknown interval |
@@ -264,7 +272,6 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `template-file-missing` | error/warn | `templates:` references a file that doesn't exist |
 | `inhibit-no-equal` | warn | inhibition without `equal` silences too broadly |
 | `unreachable-route` | warn | catch-all hides subsequent sibling routes |
-| `groupby-ellipsis` | warn | `...` mixed with explicit labels in `group_by` |
 | `repeat-before-group` | warn | `repeat_interval` shorter than `group_interval` |
 | `circular-inhibition` | warn | two inhibition rules that silence each other |
 | `wait-exceeds-interval` | warn | `group_wait` longer than `group_interval` |

@@ -328,15 +328,16 @@ routes:
     },
 
     "groupby-ellipsis": {
-        "level": "warn",
+        "level": "error",
         "summary": "group_by contains '...' alongside explicit labels.",
         "why": (
-            "'...' means group by all labels. "
-            "Mixing it with explicit labels is contradictory and makes intent unclear."
+            "'...' means group by all labels, so explicit labels next to it contradict it. "
+            "Alertmanager refuses to load such a config: `amtool check-config` fails with "
+            "'cannot have wildcard group_by (`...`) and other labels at the same time'."
         ),
         "bad": """\
 route:
-  group_by: ['...', alertname, cluster]  # alertname and cluster are redundant""",
+  group_by: ['...', alertname, cluster]  # rejected: '...' plus explicit labels""",
         "good": """\
 route:
   group_by: ['...']       # group by everything

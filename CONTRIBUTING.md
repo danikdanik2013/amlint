@@ -14,6 +14,42 @@ pip install -e ".[dev]"
 pytest test_linter.py -v
 ```
 
+## Differential tests against Alertmanager
+
+amlint simulates Alertmanager in Python, so its routing, inhibition and the config errors
+it shares with `amtool check-config` are tested against the real thing. One command:
+
+```bash
+scripts/differential.sh
+```
+
+It downloads an Alertmanager release (0.34.1 by default) into `.cache/alertmanager/`,
+checks the tarball's sha256 against the release's `sha256sums.txt`, and runs
+`tests/differential/` with that release's `amtool` and `alertmanager` binaries:
+
+- `test_routing.py`: generated configs and label sets, amlint's receivers against
+  `amtool config routes test`
+- `test_validation.py`: `amtool check-config` rejects a config exactly when amlint reports
+  an error-level finding of a code amtool also catches (`ALSO_CAUGHT_BY_AMTOOL`)
+- `test_inhibition.py`: alerts POSTed to a running `alertmanager`; each one's
+  `status.inhibitedBy` and receivers against amlint's simulation
+
+```bash
+AM_VERSION=0.32.2 scripts/differential.sh                       # another release
+AMLINT_DIFF_SEED=7 AMLINT_DIFF_EXAMPLES=2000 scripts/differential.sh -x   # explore more
+```
+
+Cases come from Hypothesis with a fixed seed (`AMLINT_DIFF_SEED`, default 0), so a run is
+reproducible. CI prints the seed in the pytest header. On a mismatch the test reduces the
+case to a minimal config and label set and prints both results, plus the `amtool` command
+that reproduces it. Plain `pytest` skips these tests when `amtool` isn't on PATH.
+
+CI runs them in `.github/workflows/differential.yml` against the last two minor releases
+and the newest, on pull requests that touch the routing engine, and weekly with a fresh
+seed. A mismatch is either a bug in amlint, which you fix with a regression test in
+`test_linter.py`, or a deliberate difference or an Alertmanager bug, which you document in
+[docs/fidelity.md](docs/fidelity.md) and teach the test to recognize, narrowly.
+
 ## Working on the playground
 
 The browser playground (`docs/playground/`, built by `playground/build.py`) has its own

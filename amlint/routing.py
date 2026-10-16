@@ -16,6 +16,9 @@ Mirrors Alertmanager's dispatch/route.go, no Go binary or running Alertmanager n
     (Alertmanager compiles `^(?:pattern)$`), so `service=~"api"` does not match `api-gw`.
 
 Inhibition mirrors inhibit/inhibit.go (Inhibitor.Mutes): see Inhibitor below.
+
+tests/differential checks all of this against amtool and a running Alertmanager on
+generated configs (scripts/differential.sh); docs/fidelity.md lists the known differences.
 """
 
 import itertools
@@ -167,8 +170,21 @@ def _build(node: dict, path: str, parent: RouteOpts) -> _Route:
     return _Route(path, matchers, bool(node.get("continue")), opts, children)
 
 
+# Keys of match / match_re maps: Alertmanager checks them against the classic label name
+# syntax (a quoted "service.name" works in matchers: only).
+_LEGACY_LABEL_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+
+
 def _compile_matchers(node: dict, path: str, prefix: str = "") -> List[_Matcher]:
     """Matchers of a route, or of one side of an inhibit rule, with regexes compiled."""
+    for key in (prefix + "match", prefix + "match_re"):
+        names = node.get(key)
+        for name in names if isinstance(names, dict) else ():
+            if not _LEGACY_LABEL_NAME.fullmatch(str(name)):
+                raise RoutingError(
+                    f"{path}: {key} label name {str(name)!r} is invalid, which Alertmanager "
+                    f"rejects (use {prefix}matchers: ['\"{name}\"=...'] for such names)"
+                )
     matchers: List[_Matcher] = []
     for label, op, value in _matchers(node, prefix):
         if op == "?":

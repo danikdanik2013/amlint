@@ -37,6 +37,7 @@ nav:
   - Kubernetes & Mimir: kubernetes.md
   - Playground: playground/index.md
   - GitHub Action: github-action.md
+  - Verified against Alertmanager: fidelity.md
   - Checks:
     - Overview: checks/index.md
     - Routing: checks/routing.md

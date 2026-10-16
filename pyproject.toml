@@ -26,7 +26,10 @@ classifiers = [
 dependencies = ["pyyaml>=5.1", "rich>=13"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.4", "argcomplete>=3", "tomli>=2; python_version<'3.11'"]
+dev = [
+    "pytest>=7", "pytest-cov>=4", "ruff>=0.4", "argcomplete>=3", "hypothesis>=6.80",
+    "tomli>=2; python_version<'3.11'",
+]
 completions = ["argcomplete>=3"]
 docs = ["mkdocs-material>=9"]
 

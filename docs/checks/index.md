@@ -11,10 +11,10 @@ and run fine, and just don't do what you meant — the real reason to run amlint
 | [`no-root-route`](routing.md#no-root-route) | error | ✓ | Routing |
 | [`invalid-root-route`](routing.md#invalid-root-route) | error | ✓ | Routing |
 | [`bad-regex`](routing.md#bad-regex) | error | ✓ | Routing |
+| [`groupby-ellipsis`](routing.md#groupby-ellipsis) | error | ✓ | Routing |
 | [`unreachable-route`](routing.md#unreachable-route) | warn | | Routing |
 | [`route-match-collision`](routing.md#route-match-collision) | warn | | Routing |
 | [`shadowed-route`](routing.md#shadowed-route) | warn | | Routing |
-| [`groupby-ellipsis`](routing.md#groupby-ellipsis) | warn | ✓ | Routing |
 | [`useless-continue`](routing.md#useless-continue) | info | | Routing |
 | [`deep-nesting`](routing.md#deep-nesting) | info | | Routing |
 | [`duplicate-receiver`](receivers.md#duplicate-receiver) | error | ✓ | Receivers |

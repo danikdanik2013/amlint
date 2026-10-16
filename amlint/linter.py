@@ -17,6 +17,7 @@ import os
 import posixpath
 import re
 import warnings
+from functools import lru_cache
 from typing import Dict, FrozenSet, Generator, Iterable, List, Optional, Set, Tuple
 
 ERROR = "error"      # config is broken: alerts will be lost
@@ -98,7 +99,21 @@ def route_cycle(route, path: str = "route") -> Optional[Tuple[str, str]]:
 
 # Matchers: match / match_re maps and matchers: lists all normalized to Matcher tuples,
 # so checks compare `match: {sev: crit}` and `matchers: [sev="crit"]` as the same thing.
-_MATCHER_RE = re.compile(r'^\s*("(?:[^"\\]|\\.)*"|[^=!~"\s]+)\s*(=~|!~|!=|=)\s*(.*?)\s*$', re.S)
+#
+# Alertmanager reads each `matchers:` entry with two parsers ("fallback" mode, the
+# default): the classic one (labels.ParseMatchers) whenever it can parse the whole entry,
+# even where the UTF-8 one would read it differently, and the UTF-8 one (matcher/parse)
+# only when the classic one fails, e.g. on a quoted label name such as "service.name".
+# Both are mirrored below, quirks included: the classic parser strips one leading "{" and
+# one trailing "}" separately, so a bare `code=~[0-9]{3}` loses its closing brace, and the
+# UTF-8 one unescapes quoted strings like Go string literals (\t, \u00e9; \. is an error).
+
+# labels.ParseMatcher's pattern; [\t\n\f\r ] is Go's \s
+_CLASSIC_MATCHER_RE = re.compile(
+    r"[\t\n\f\r ]*([a-zA-Z_:][a-zA-Z0-9_:]*)[\t\n\f\r ]*(=~|=|!=|!~)[\t\n\f\r ]*(.*?)"
+    r"[\t\n\f\r ]*\Z", re.S)
+_UTF8_RESERVED = "{}!=~,\\\"'`"
+_GO_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11, "\\": 92, '"': 34}
 
 
 def _scalar(value) -> str:
@@ -107,23 +122,35 @@ def _scalar(value) -> str:
     return "" if value is None else str(value)
 
 
-def _unquote(raw: str) -> str:
-    """Strip quotes the way Alertmanager does: \\n, \\" and \\\\ are escapes, any other
-    backslash is kept literally (so regex escapes like \\. survive)."""
-    if not (len(raw) >= 2 and raw[0] == raw[-1] == '"'):
-        return raw
+def _classic_value(raw: str) -> Optional[str]:
+    """A value as labels.ParseMatcher unquotes it: optional double quotes around it, \\n,
+    \\" and \\\\ as escapes, any other backslash kept (so regex escapes like \\. survive),
+    in quoted and bare values alike. None where it fails: a stray double quote."""
+    quoted = raw.startswith('"')
+    body = raw[1:] if quoted else raw
     out, escaped = [], False
-    for ch in raw[1:-1]:
+    for i, ch in enumerate(body):
         if escaped:
             out.append({"n": "\n", '"': '"', "\\": "\\"}.get(ch, "\\" + ch))
             escaped = False
         elif ch == "\\":
-            escaped = True
+            if i < len(body) - 1:
+                escaped = True
+            else:
+                out.append(ch)  # a backslash at the very end is literal
+        elif ch == '"':
+            if not quoted or i < len(body) - 1:
+                return None
+            quoted = False  # the closing quote
         else:
             out.append(ch)
-    if escaped:
-        out.append("\\")
-    return "".join(out)
+    return None if quoted else "".join(out)
+
+
+def _unquote(raw: str) -> str:
+    """A matcher value as Alertmanager's classic parser reads it, or `raw` if it can't."""
+    value = _classic_value(raw)
+    return raw if value is None else value
 
 
 def _split_matchers(line: str) -> List[str]:
@@ -148,18 +175,168 @@ def _split_matchers(line: str) -> List[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def _classic_matchers(entry: str) -> Optional[List[Matcher]]:
+    """labels.ParseMatchers, or None where it fails."""
+    if entry.startswith("{"):
+        entry = entry[1:]
+    if entry.endswith("}"):
+        entry = entry[:-1]
+    tokens, buf, in_quotes, escaped = [], [], False, False
+    for ch in entry:  # Go's tokenizer, which keeps `escaped` set across a comma
+        if ch == ",":
+            if not in_quotes:
+                tokens.append("".join(buf))
+                buf = []
+                continue
+        elif ch == '"':
+            if escaped:
+                escaped = False
+            else:
+                in_quotes = not in_quotes
+        elif ch == "\\":
+            escaped = not escaped
+        else:
+            escaped = False
+        buf.append(ch)
+    if "".join(buf).strip():
+        tokens.append("".join(buf).strip())
+    out: List[Matcher] = []
+    for token in tokens:
+        hit = _CLASSIC_MATCHER_RE.match(token)
+        value = _classic_value(hit.group(3)) if hit else None
+        if value is None:
+            return None
+        out.append((hit.group(1), hit.group(2), value))
+    return out
+
+
+def _go_unquote(text: str) -> Optional[str]:
+    """strconv.Unquote of a double-quoted Go string literal, or None if it is invalid."""
+    body, out, i = text[1:-1], bytearray(), 0
+    if "\n" in body:
+        return None
+    while i < len(body):
+        ch, nxt = body[i], body[i + 1:i + 2]
+        if ch != "\\":
+            out += ch.encode()
+            i += 1
+        elif nxt and nxt in _GO_ESCAPES:
+            out.append(_GO_ESCAPES[nxt])
+            i += 2
+        elif nxt and nxt in "xuU":
+            size = {"x": 2, "u": 4, "U": 8}[nxt]
+            digits = body[i + 2:i + 2 + size]
+            if not re.fullmatch("[0-9a-fA-F]{%d}" % size, digits):
+                return None
+            code = int(digits, 16)
+            if nxt == "x":
+                out.append(code)
+            elif code > 0x10FFFF or 0xD800 <= code < 0xE000:
+                return None
+            else:
+                out += chr(code).encode()
+            i += 2 + size
+        elif re.fullmatch("[0-7]{3}", body[i + 1:i + 4]) and int(body[i + 1:i + 4], 8) < 256:
+            out.append(int(body[i + 1:i + 4], 8))
+            i += 4
+        else:
+            return None
+    try:
+        return out.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _utf8_tokens(entry: str) -> Optional[List[Tuple[str, str]]]:
+    """matcher/parse's lexer: (kind, text) for braces, commas, operators and strings."""
+    out: List[Tuple[str, str]] = []
+    i = 0
+    while i < len(entry):
+        ch = entry[i]
+        if ch in "{},":
+            out.append((ch, ch))
+            i += 1
+        elif entry[i:i + 2] in ("=~", "!=", "!~") or ch == "=":
+            op = entry[i:i + 2] if entry[i:i + 2] in ("=~", "!=", "!~") else "="
+            out.append(("op", op))
+            i += len(op)
+        elif ch == '"':
+            j, escaped = i + 1, False
+            while j < len(entry) and (escaped or entry[j] != '"'):
+                escaped = not escaped and entry[j] == "\\"
+                j += 1
+            text = _go_unquote(entry[i:j + 1]) if j < len(entry) else None
+            if text is None:
+                return None
+            out.append(("str", text))
+            i = j + 1
+        elif ch.isspace():
+            i += 1
+        elif ch not in _UTF8_RESERVED:
+            j = i
+            while j < len(entry) and not entry[j].isspace() and entry[j] not in _UTF8_RESERVED:
+                j += 1
+            out.append(("str", entry[i:j]))
+            i = j
+        else:
+            return None
+    return out
+
+
+def _utf8_matchers(entry: str) -> Optional[List[Matcher]]:
+    """matcher/parse.Matchers: `{a="b", c=~d}`, braces optional, a trailing comma allowed."""
+    tokens = _utf8_tokens(entry)
+    if tokens is None:
+        return None
+    if tokens and tokens[0][0] == "{":
+        if tokens[-1][0] != "}":
+            return None
+        tokens = tokens[1:-1]
+    out: List[Matcher] = []
+    i = 0
+    while i < len(tokens):
+        kinds = tuple(kind for kind, _ in tokens[i:i + 3])
+        if kinds != ("str", "op", "str"):
+            return None
+        out.append((tokens[i][1], tokens[i + 1][1], tokens[i + 2][1]))
+        i += 3
+        if i < len(tokens):
+            if tokens[i][0] != ",":
+                return None
+            i += 1
+    return out
+
+
+@lru_cache(maxsize=4096)
+def _parse_matcher_entry(entry: str) -> Optional[Tuple[Matcher, ...]]:
+    """One `matchers:` entry as Alertmanager reads it; None if it rejects the entry. An
+    invalid regex makes a parser fail too, so where neither reading works the classic one
+    is kept, and check_bad_regex reports it."""
+    def ok(matchers):
+        return not any(op in ("=~", "!~") and _regex_problem(v) for _, op, v in matchers)
+
+    classic = _classic_matchers(entry)
+    if classic is not None and ok(classic):
+        return tuple(classic)
+    utf8 = _utf8_matchers(entry)
+    if utf8 is not None and ok(utf8):
+        return tuple(utf8)
+    found = classic if classic is not None else utf8
+    return None if found is None else tuple(found)
+
+
 def _parse_matchers(items) -> List[Matcher]:
     out: List[Matcher] = []
     if not isinstance(items, list):
         return out
     for item in items:
-        for part in _split_matchers(_scalar(item)):
-            hit = _MATCHER_RE.match(part)
-            if hit:
-                out.append((_unquote(hit.group(1)), hit.group(2), _unquote(hit.group(3))))
-            else:
-                # Unparseable, but still a matcher: keep it so the route isn't a catch-all.
-                out.append((part, "?", ""))
+        entry = _scalar(item)
+        parsed = _parse_matcher_entry(entry)
+        if parsed is None:
+            # Unparseable, but still a matcher: keep it so the route isn't a catch-all.
+            out.append((entry.strip(), "?", ""))
+        else:
+            out.extend(parsed)
     return out
 
 
@@ -276,6 +453,12 @@ _POSIX_CLASSES = {
     "print": " -~", "punct": "!-/:-@\\[-`{-~", "space": "\\t\\n\\v\\f\\r ", "upper": "A-Z",
     "word": "0-9A-Za-z_", "xdigit": "0-9A-Fa-f",
 }
+# RE2's \b and \B look at ASCII word characters only, case folding aside, and \B
+# matches in an empty string (Python's does not before 3.14): spelled out as lookarounds.
+_GO_WORD_BOUNDARY = {
+    "b": "(?-i:(?<=[0-9A-Za-z_])(?![0-9A-Za-z_])|(?<![0-9A-Za-z_])(?=[0-9A-Za-z_]))",
+    "B": "(?-i:(?<=[0-9A-Za-z_])(?=[0-9A-Za-z_])|(?<![0-9A-Za-z_])(?![0-9A-Za-z_]))",
+}
 
 
 def _python_flags(go_flags: str) -> str:
@@ -295,8 +478,10 @@ def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
     By default the result is only meant to be compiled: Go-only syntax (\\pL, \\z, \\x{..},
     \\Q..\\E, [:alpha:], (?<name>), (?U)) is swapped for a Python stand-in and flags are
     dropped. With exact=True the result matches what Go matches: flags are kept as scoped
-    groups, \\d \\w \\s and POSIX classes stay ASCII-only as in RE2, and constructs with
-    no exact Python equivalent (\\pL, [:^alpha:]) are reported in `unsupported`.
+    groups, \\d \\w \\s \\b and POSIX classes stay ASCII-only as in RE2, `$` outside (?m)
+    matches only at the very end, and constructs with no exact Python equivalent (\\pL,
+    [:^alpha:]) are reported in `unsupported`. Zero-width assertions (^ $ \\A \\z \\b \\B)
+    are grouped either way, since Go lets a quantifier follow them and Python does not.
     """
     out: List[str] = []
     i, n = 0, len(pattern)
@@ -305,6 +490,7 @@ def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
     # Python only allows flags at the very start, Go anywhere: a mid-pattern (?i) becomes
     # (?i: ... ) closed at the end of its group, one entry per open scope per group level.
     flag_scopes: List[List[str]] = [[]]
+    multiline = [False]  # whether (?m) is in effect, per group level like flag_scopes
     while i < n:
         ch = pattern[i]
         nxt = pattern[i + 1:i + 2]
@@ -337,6 +523,14 @@ def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
                 i += 1 + len(octal.group(0))
             elif nxt in "ZuUN":
                 return "", "the \\%s escape" % nxt
+            elif nxt in "bBAz" and in_class:
+                return "", "\\%s inside [...]" % nxt
+            elif exact and nxt in "bB":
+                out.append(_GO_WORD_BOUNDARY[nxt])
+                i += 2
+            elif nxt in "bBAz":
+                out.append("(?:\\%s)" % ("Z" if nxt == "z" else nxt))
+                i += 2
             elif exact and nxt.lower() in _PERL_CLASSES:
                 chars = _PERL_CLASSES[nxt.lower()]
                 if not in_class:
@@ -347,7 +541,7 @@ def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
                     return "", "negated classes (\\%s) inside [...]" % nxt
                 i += 2
             else:
-                out.append("\\Z" if nxt == "z" else "\\" + nxt)
+                out.append("\\" + nxt)
                 i += 2
             after_quantifier = False
             continue
@@ -399,6 +593,7 @@ def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
                 # named group: Go accepts (?<name>) and (?P<name>), Python only the latter
                 out.append("(?P<")
                 flag_scopes.append([])
+                multiline.append(multiline[-1])
                 i += 3 if ext[:1] == "<" else 4
                 continue
             flags = _GO_FLAGS_RE.match(pattern, i)
@@ -407,12 +602,17 @@ def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
                 if bad:
                     return "", "the (?%s) flag" % "".join(bad)
                 py_flags = _python_flags(flags.group(1)) if exact else ""
+                on, _, off = flags.group(1).partition("-")
+                m = False if "m" in off else True if "m" in on else multiline[-1]
                 if flags.group(2) == ":":
                     out.append("(?%s:" % py_flags)
                     flag_scopes.append([])
-                elif py_flags:
-                    out.append("(?%s:" % py_flags)
-                    flag_scopes[-1].append("(?%s:" % py_flags)
+                    multiline.append(m)
+                else:
+                    if py_flags:
+                        out.append("(?%s:" % py_flags)
+                        flag_scopes[-1].append("(?%s:" % py_flags)
+                    multiline[-1] = m
                 # Without exact, flags are dropped: they never change whether a pattern
                 # compiles (Python lacks U and rejects global flags mid-pattern, Go allows both).
                 i = flags.end()
@@ -420,8 +620,17 @@ def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
 
         if ch == "(":
             flag_scopes.append([])
+            multiline.append(multiline[-1])
         elif ch == ")" and len(flag_scopes) > 1:
             out.append(")" * len(flag_scopes.pop()))
+            multiline.pop()
+        elif ch in "^$":
+            # Go's `$` outside (?m) is \z; Python's also matches before a final newline
+            exact_end = ch == "$" and exact and not multiline[-1]
+            out.append("(?:\\Z)" if exact_end else "(?:%s)" % ch)
+            i += 1
+            after_quantifier = False
+            continue
         elif ch == "|":
             # a flag scope must not swallow the alternation: a(?i)b|c is a(?i:b)|(?i:c)
             out.append(")" * len(flag_scopes[-1]) + "|" + "".join(flag_scopes[-1]))
@@ -531,7 +740,7 @@ def check_unreachable_routes(cfg):
     return out
 
 
-# CHECK 6: group_by with '...' mixed with explicit labels
+# CHECK 6: group_by with '...' mixed with explicit labels, which Alertmanager rejects
 def check_groupby(cfg):
     out = []
     route = _root_route(cfg)
@@ -541,9 +750,10 @@ def check_groupby(cfg):
         gb = node.get("group_by") or []
         if isinstance(gb, list) and "..." in gb and len(gb) > 1:
             out.append(Finding(
-                WARN, "groupby-ellipsis",
-                "group_by contains '...' alongside other labels — '...' already groups by all "
-                "labels, making the others redundant. Remove either '...' or the explicit labels.",
+                ERROR, "groupby-ellipsis",
+                "group_by contains '...' alongside other labels. Alertmanager refuses to load "
+                "this config ('cannot have wildcard group_by and other labels at the same "
+                "time'). Keep either '...' or the explicit labels.",
                 path,
             ))
     return out
@@ -867,13 +1077,22 @@ def check_slack_no_api_url(cfg: dict) -> List[Finding]:
     global_url = g.get("slack_api_url") or g.get("slack_api_url_file")
     for r in _receivers(cfg):
         for i, sl in _dict_items(r.get("slack_configs")):
-            if not sl.get("api_url") and not sl.get("api_url_file") and not global_url:
+            where = f"receivers[{r.get('name')}].slack_configs[{i}]"
+            if sl.get("api_url") == "":
+                # an empty URL is not "unset": it overrides the global one and fails to load
+                out.append(Finding(
+                    ERROR, "slack-no-api-url",
+                    f"slack_configs[{i}] in receiver '{r.get('name')}' has an empty 'api_url'. "
+                    f"Alertmanager rejects it as a URL instead of using global.slack_api_url.",
+                    where,
+                ))
+            elif not sl.get("api_url") and not sl.get("api_url_file") and not global_url:
                 out.append(Finding(
                     ERROR, "slack-no-api-url",
                     f"slack_configs[{i}] in receiver '{r.get('name')}' has no 'api_url' or "
                     f"'api_url_file', and global.slack_api_url is not set. "
                     f"Slack notifications cannot be sent.",
-                    f"receivers[{r.get('name')}].slack_configs[{i}]",
+                    where,
                 ))
     return out
 

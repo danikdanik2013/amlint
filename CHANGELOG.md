@@ -82,11 +82,28 @@
   anchors mid-pattern, or one too large to compare, keeps the check silent. Identical
   matchers stay `route-match-collision` and catch-alls stay `unreachable-route`, so each dead
   route is reported once
+- Differential tests against the real Alertmanager (`tests/differential/`, run with
+  `scripts/differential.sh`). Hypothesis generates seeded configs and label sets: nested
+  routes, `continue` fan-out, `=` `!=` `=~` `!~` matchers in quoted, bare, braced and
+  quoted-label-name spellings, regex alternations and anchors, missing labels, and YAML 1.1
+  scalars. amlint's receivers must equal `amtool config routes test`'s, `amtool
+  check-config` must reject a config exactly when amlint reports an error amtool also
+  catches, and alerts POSTed to a running Alertmanager must be inhibited
+  (`status.inhibitedBy`) and routed as amlint simulates. A mismatch is reduced to a minimal
+  config and label set and printed with both results.
+- CI workflow `differential.yml` runs them against Alertmanager 0.32.2, 0.33.1 and 0.34.1
+  (release tarballs with pinned sha256), on pull requests that touch the routing engine and
+  weekly with a fresh seed. The README badge and the new docs page "Verified against
+  Alertmanager" (`docs/fidelity.md`) are backed by it. The page also lists the known
+  differences, such as Alertmanager before 0.34.1 missing some inhibitions depending on the
+  order alerts arrive (fixed upstream in 0.34.1, which amlint follows).
 
 ### Changed
 - A file with several YAML documents that are all plain Alertmanager configs now fails with
   "found 2 Alertmanager configs (lines 1, 3)" instead of a YAML error; it still exits 2.
   `--input-format alertmanager` keeps the old behaviour.
+- `groupby-ellipsis` is an error instead of a warning: Alertmanager refuses to load
+  `group_by: ['...', alertname]`.
 
 ### Fixed
 - `circular-inhibition` no longer reports two unrelated rules because one label value
@@ -102,8 +119,6 @@
   mutes ZoneDown is a NodeDown, so the first rule never mutes ZoneDown while it fires.
 - `unreachable-route` treats a route whose only matchers are `label=~".*"` as a catch-all;
   `route-match-collision` leaves such routes to it instead of reporting them twice
-
-### Fixed
 - A route tree that contains itself through a YAML alias (`route: &r` with `routes: [*r]`,
   or an anchor deeper in the tree aliased inside its own subtree) no longer crashes every
   command with a `RecursionError` traceback. `check`, `tree`, `route`, `test` and `diff`
@@ -115,6 +130,32 @@
   under several parents keep working, and the playground's route tree is left empty for
   such a config while its findings show the message. Errors reading the input are no longer
   wrapped mid-path at the terminal width.
+
+Differences from Alertmanager that the differential tests found:
+- YAML scalars in `match:` maps and other string fields keep their text, as Alertmanager
+  (Go's yaml.v2) reads them: `country: NO` is "NO", not false; `version: 1.10` is "1.10";
+  `code: 0x1F` is "0x1F". This holds for a plain config and for one in a Secret or a Mimir
+  config. Helm values stay typed, since Helm reads them as YAML 1.1 before rendering.
+- `matchers:` entries are parsed the way Alertmanager's default "fallback" mode parses them:
+  with the classic parser whenever it can read the whole entry, and with the UTF-8 parser
+  only when it can't. So:
+  - the classic parser strips a trailing `}` even without a leading `{`. A bare
+    `code=~[0-9]{3}` is the regex `[0-9]{3`, with a literal `{3`: it matches `1{3`, not
+    `123`, in Alertmanager and now in amlint
+  - bare values are unescaped like quoted ones: `a=x\\y` is the value `x\y`
+  - an entry with a quoted label name (`"service.name"="api"`) is read with Go string
+    escapes, all of its matchers: `\t` is a tab, and `\.` is an error
+  - a regex that only the UTF-8 reading makes valid (`a=~"\u0041+"`) is no longer
+    `bad-regex`
+  - `amlint route` and `amlint test` exit 2 on entries Alertmanager rejects (`a=b,,c=d`,
+    `a=b"c`, `"x.y"="a\.b"`) and on `match:` keys that aren't classic label names
+    (`k8s.ns`), instead of simulating them
+- Regexes: `\b` and `\B` see ASCII word characters only and ignore `(?i)`, and `\B`
+  matches an empty value, as in Go. `$` outside `(?m)` no longer matches before a final
+  newline. A quantifier after an anchor (`^*`, `\b+`) is valid Go and no longer
+  `bad-regex`. `[\b]` is `bad-regex`, since Go rejects it.
+- `slack-no-api-url` also reports `api_url: ""` (say, an empty Helm value). Alertmanager
+  rejects it as a URL instead of falling back to `global.slack_api_url`.
 
 ## [0.4.1] - 2026-10-16
 
