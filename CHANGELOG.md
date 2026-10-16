@@ -1,5 +1,33 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `amlint test --coverage` lists the routes that no test case reaches, with their path
+  (`route.routes[2].routes[0]`), `file:line:col` and matchers, plus the share of routes that
+  are covered. A route counts as covered when an alert went through it, so the parents of the
+  route it lands on count, and so does every branch of a `continue: true` fan-out.
+  Unreachable routes, such as one behind a catch-all, show up here. `--fail-under N` exits 1
+  when coverage is below N% and turns on `--coverage` by itself. With `--format json` the
+  output becomes `{"tests": [...], "coverage": {...}}`, and `coverage` lists the uncovered
+  routes with `line` / `column`. Without these flags the JSON is the same list as before.
+- Inhibition simulation, mirroring Alertmanager's `inhibit/inhibit.go`. A test case can list
+  `firing:` (other alerts firing at the same time) and assert `inhibited: true|false`,
+  alongside a receiver assertion or on its own. With `firing:` and no `inhibited:`, the case
+  expects the alert not to be inhibited. The alert is inhibited when a firing alert matches a
+  rule's source matchers, the alert matches its target matchers, and every `equal` label has
+  the same value on both (a label missing on both sides counts as equal). As in
+  Alertmanager, an alert that matches both sides of a rule isn't inhibited by firing alerts
+  that also match both sides, so it never inhibits itself. `source_matchers` /
+  `target_matchers` and the older `source_match(_re)` / `target_match(_re)` both work, with
+  the same anchored RE2 regexes as routing. A failing case names the rule that inhibited the
+  alert, with its `file:line:col`. JSON results add `firing`, `expected_inhibited`,
+  `inhibited` and `inhibited_by`.
+- `amlint route --firing 'alertname=NodeDown,instance=a'` (repeatable) shows whether those
+  alerts inhibit the one being routed, and which rule does it (`inhibit_rules[1]` and
+  `file:line:col`). JSON output adds `firing`, `inhibited` and `inhibited_by`. An inhibit rule
+  amlint can't evaluate exits 2, but only when `--firing` or `firing:` needs the rules.
+
 ## [0.4.0] - 2026-10-16
 
 First PyPI release since 0.2.0: it also ships everything under 0.2.1 and 0.3.0 below, which

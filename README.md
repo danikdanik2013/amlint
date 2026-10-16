@@ -59,7 +59,9 @@ amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
 amlint diff old.yml new.yml                 # what changed: findings, and alerts routed differently
 amlint tree alertmanager.yml                # visualize the route tree, issues inline
 amlint route alertmanager.yml team=infra severity=critical  # where does this alert go?
+amlint route alertmanager.yml alertname=DiskFull --firing alertname=NodeDown  # inhibited?
 amlint test alertmanager.yml tests.yml      # routing unit tests: labels -> expected receivers
+amlint test alertmanager.yml tests.yml --fail-under 90  # and fail if tests reach < 90% of routes
 amlint init > alertmanager.yml              # generate minimal valid config
 amlint list                                 # all check codes with level + description
 amlint explain undefined-receiver           # detailed explanation + examples
@@ -128,14 +130,24 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
   expect: [infra-pager, pager]   # any order
 - labels: {team: unknown}
   expect: [default]
+- name: disk alerts are muted while their node is down
+  labels: {alertname: DiskFull, instance: db-1}
+  firing:                        # other alerts firing at the same time
+    - {alertname: NodeDown, instance: db-1}
+  inhibited: true
 ```
 
 ```bash
-amlint test alertmanager.yml tests.yml   # exit 1 on any failing case, with a diff
+amlint test alertmanager.yml tests.yml              # exit 1 on any failing case, with a diff
+amlint test alertmanager.yml tests.yml --coverage   # also list routes no case reaches, file:line
+amlint test alertmanager.yml tests.yml --fail-under 90   # exit 1 below 90% route coverage
 ```
 
 The simulation follows Alertmanager's own routing code: `continue: true` fan-out,
 inherited settings, fully anchored Go RE2 regexes, missing labels matching as `""`.
+Inhibition follows Alertmanager's `inhibit_rules` evaluation, `equal` labels and the rule
+that an alert matching both sides of a rule doesn't inhibit itself. `amlint route --firing`
+shows which rule mutes an alert.
 `amlint diff` uses it too: after the findings it lists the label sets that two configs
 route differently, e.g. `team=db, severity=critical: pagerduty-db → slack-db`.
 Details in [docs/usage.md](docs/usage.md#route).

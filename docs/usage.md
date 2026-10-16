@@ -302,10 +302,57 @@ Alertmanager's default).
 `amlint route` also shows the effective `group_by` and timings and which route each one
 comes from, and needs no Go binary.
 
+### Inhibition
+
+`--firing` adds another alert that is firing at the same time, as comma-separated
+`label=value` pairs (quote a value that contains a comma: `summary="a, b"`). Repeat the flag
+for more alerts. amlint then checks the config's `inhibit_rules` and shows the rule that
+mutes the alert, if any:
+
+```bash
+amlint route alertmanager.yml alertname=DiskFull instance=db-1 team=infra \
+  --firing 'alertname=NodeDown,instance=db-1'
+```
+
+```
+  Labels  alertname=DiskFull, instance=db-1, team=infra
+  Firing  alertname=NodeDown, instance=db-1
+
+  route → route.routes[0]
+    receiver          infra-slack          set here
+    ...
+
+  Inhibited by inhibit_rules[1]  ·  alertmanager.yml:31:5
+     while firing: alertname=NodeDown, instance=db-1
+  Routed to: infra-slack, but no notification is sent while it is inhibited.
+```
+
+The evaluation follows Alertmanager's `inhibit/inhibit.go`. The alert is inhibited when, for
+some rule:
+
+- the alert matches the rule's `target_matchers`,
+- a firing alert matches its `source_matchers`, and
+- every label in `equal` has the same value on both alerts. A label missing on both sides
+  counts as equal, since Alertmanager compares missing labels as `""`.
+
+If the alert matches the `source_matchers` as well, firing alerts that also match both sides
+don't count. An alert therefore never inhibits itself, and alerts on both sides of a rule
+don't inhibit each other. A firing alert still inhibits when it is inhibited or silenced
+itself, as in Alertmanager. Rules are checked in order, and the first one that applies is
+shown.
+
+`source_matchers` / `target_matchers` and the older `source_match` / `source_match_re` /
+`target_match` / `target_match_re` both work, with the same anchored Go RE2 regexes as
+routing. Inhibition doesn't change routing: the alert still lands on the same routes, but
+Alertmanager sends no notification for it. A rule amlint can't evaluate exits `2`, but only
+when `--firing` is given. With `--format json` the output adds `firing`, `inhibited` and
+`inhibited_by` (`rule`, `line`, `column`, and the `source` alert that matched).
+
 **Options:**
 
 | flag | description |
 |------|-------------|
+| `--firing 'label=value,...'` | Another alert firing at the same time; repeatable. Shows whether an inhibit rule mutes this alert |
 | `--format json` | Machine-readable output |
 
 ## test
@@ -346,6 +393,43 @@ amlint test alertmanager.yml routing-tests.yml
 
 Files from amlint 0.3.0, with the cases under a top-level `tests:` key, still work.
 
+### Inhibition in tests
+
+A case can list `firing:`, the label sets of other alerts firing at the same time, and
+assert `inhibited: true` or `inhibited: false`. The alert is checked against the config's
+`inhibit_rules` the same way [`route --firing`](#inhibition) does:
+
+```yaml
+- name: disk alerts are muted while their node is down
+  labels: {alertname: DiskFull, instance: db-1, team: db}
+  firing:
+    - {alertname: NodeDown, instance: db-1}
+  expect: [db-slack]       # where it is routed
+  inhibited: true          # ...and that nothing is sent
+
+- name: another node's outage doesn't mute it
+  labels: {alertname: DiskFull, instance: db-1, team: db}
+  firing:
+    - {alertname: NodeDown, instance: db-2}
+  expect: [db-slack]       # firing: without inhibited: expects inhibited: false
+```
+
+`inhibited:` goes alongside the receiver assertion, which still checks routing, or on its
+own. With `firing:` and no `inhibited:`, the case expects the alert not to be inhibited. A
+case that fails on inhibition names the rule. Had the second case listed `NodeDown` on
+`db-1`:
+
+```
+  ✗  another node's outage doesn't mute it
+     labels:    alertname=DiskFull, instance=db-1, team=db
+     firing:    alertname=NodeDown, instance=db-1
+     expected:  db-slack
+     actual:    db-slack
+     inhibited: expected no, actual yes
+       by inhibit_rules[1]  ·  alertmanager.yml:31:5  ·  while firing: alertname=NodeDown, instance=db-1
+     routes:    route.routes[2]
+```
+
 A failing case shows what differs, and which routes the alert matched. Had the second
 case said `expect: [infra-slack, pager]`:
 
@@ -363,7 +447,57 @@ case said `expect: [infra-slack, pager]`:
 
 Exit code `1` if any case fails — same CI story as `check` — and `2` if the config can't
 be simulated (see [`route`](#route)). `--format json` gives, per case, `passed`,
-`expected`, `actual`, `missing`, `unexpected` and the matched `routes`.
+`expected`, `actual`, `missing`, `unexpected`, the matched `routes`, and `firing`,
+`expected_inhibited`, `inhibited` and `inhibited_by`. `expected` is `null` for a case that
+only asserts `inhibited:`.
+
+### Coverage
+
+`--coverage` lists the routes that no case reaches, so you can see what the suite doesn't
+test:
+
+```bash
+amlint test alertmanager.yml routing-tests.yml --coverage
+```
+
+```
+  ✓  critical infra alerts page infra and the on-call
+  ✓  warning infra alerts go to slack only
+  ✓  unrelated alerts aren't swallowed
+
+  3 passed
+
+  Route coverage  4 of 6 routes  ·  66.7%
+  Not matched by any test case:
+    route.routes[2]             alertmanager.yml:13:7    {team="db"}  →  db-slack
+    route.routes[2].routes[0]   alertmanager.yml:16:11   {severity="critical"}  →  db-pager
+```
+
+A route is covered when a case's alert went through it. That includes the parents of the
+route the alert lands on, and every branch of a `continue: true` fan-out. Cases that fail
+still count. Malformed ones don't, since they aren't routed. The root route counts too.
+
+A route that no label set can reach stays uncovered. Above, `route.routes[2].routes[0]`
+can't be covered: `route.routes[1]` takes every critical alert first. Adding a case for
+`{team: db, severity: critical}` shows it going to `pager`.
+
+`--fail-under N` exits `1` when coverage is below N% (it turns on `--coverage` by itself),
+so CI can require a minimum. The percentage is rounded to one decimal before the
+comparison, and is only 100 when every route is covered. With `--format json` and coverage,
+the output is an object instead of a list:
+
+```json
+{
+  "tests": [ ... ],
+  "coverage": {
+    "routes": 6, "covered": 4, "percent": 66.7, "fail_under": 90.0,
+    "uncovered": [
+      {"path": "route.routes[2]", "line": 13, "column": 7},
+      {"path": "route.routes[2].routes[0]", "line": 16, "column": 11}
+    ]
+  }
+}
+```
 
 `amtool config routes test` checks one alert at a time from the command line; `amlint test`
 runs a whole suite from a file, in CI, without the Go binary.
@@ -373,6 +507,8 @@ runs a whole suite from a file, in CI, without the Go binary.
 | flag | description |
 |------|-------------|
 | `--format json` | Machine-readable output |
+| `--coverage` | List the routes no case reaches, with `file:line:col`, and the coverage percentage |
+| `--fail-under N` | Exit 1 if route coverage is below N% (implies `--coverage`) |
 
 ## list
 

@@ -14,6 +14,8 @@ Mirrors Alertmanager's dispatch/route.go, no Go binary or running Alertmanager n
     `continue: true`. A route none of whose children match is itself the match.
   - Matchers: a missing label matches as the empty string, and regexes are fully anchored
     (Alertmanager compiles `^(?:pattern)$`), so `service=~"api"` does not match `api-gw`.
+
+Inhibition mirrors inhibit/inhibit.go (Inhibitor.Mutes): see Inhibitor below.
 """
 
 import itertools
@@ -22,7 +24,19 @@ import warnings
 from collections import Counter
 from dataclasses import dataclass, field
 from functools import lru_cache
-from typing import Dict, Iterator, List, Mapping, Optional, Pattern, Sequence, Tuple, Union
+from typing import (
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Pattern,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 try:
     import re._parser as _sre_parse  # Python 3.11+
@@ -144,8 +158,18 @@ def _build(node: dict, path: str, parent: RouteOpts) -> _Route:
         else:
             origin.pop(key, None)
 
+    matchers = _compile_matchers(node, path)
+    opts = RouteOpts(receiver=receiver, group_by=group_by, origin=origin, **timings, **intervals)
+    children = [
+        _build(child, f"{path}.routes[{i}]", opts) for i, child in _dict_items(node.get("routes"))
+    ]
+    return _Route(path, matchers, bool(node.get("continue")), opts, children)
+
+
+def _compile_matchers(node: dict, path: str, prefix: str = "") -> List[_Matcher]:
+    """Matchers of a route, or of one side of an inhibit rule, with regexes compiled."""
     matchers: List[_Matcher] = []
-    for label, op, value in _matchers(node):
+    for label, op, value in _matchers(node, prefix):
         if op == "?":
             raise RoutingError(f"{path}: cannot parse matcher {label!r}")
         if op in ("=~", "!~"):
@@ -154,12 +178,7 @@ def _build(node: dict, path: str, parent: RouteOpts) -> _Route:
             except RoutingError as e:
                 raise RoutingError(f"{path}: {e}") from None
         matchers.append((label, op, value))
-
-    opts = RouteOpts(receiver=receiver, group_by=group_by, origin=origin, **timings, **intervals)
-    children = [
-        _build(child, f"{path}.routes[{i}]", opts) for i, child in _dict_items(node.get("routes"))
-    ]
-    return _Route(path, matchers, bool(node.get("continue")), opts, children)
+    return matchers
 
 
 def _matcher_ok(op: str, value, actual: str) -> bool:
@@ -204,8 +223,11 @@ class Router:
 
     def match(self, labels: Mapping[str, object]) -> List[RouteMatch]:
         """Routes an alert with these labels reaches, in Alertmanager's order."""
-        normalized = {str(k): _scalar(v) for k, v in labels.items()}
-        return _match(self._root, normalized, ())
+        return _match(self._root, _labels(labels), ())
+
+    def paths(self) -> List[str]:
+        """Every route's path, depth-first in definition order, the root first."""
+        return [route.path for _, route in self._paths()]
 
     def _paths(self) -> Iterator[Tuple[List[_Matcher], _Route]]:
         """Every route, with the matchers an alert has to pass to get there."""
@@ -215,6 +237,102 @@ class Router:
             for child in route.routes:
                 yield from walk(child, conj)
         yield from walk(self._root, [])
+
+
+def _labels(labels: Mapping[str, object]) -> Dict[str, str]:
+    return {str(k): _scalar(v) for k, v in labels.items()}
+
+
+# ── Route coverage, for `amlint test --coverage` ─────────────────────
+
+@dataclass
+class Coverage:
+    """Which routes of a tree a set of alerts went through."""
+    routes: List[str]  # every route, depth-first in definition order
+    covered: Set[str]
+
+    @property
+    def uncovered(self) -> List[str]:
+        return [p for p in self.routes if p not in self.covered]
+
+    @property
+    def percent(self) -> float:
+        return 100.0 * len(self.covered) / len(self.routes)
+
+
+def route_coverage(router: Router, results: Iterable[List[RouteMatch]]) -> Coverage:
+    """Coverage of the tree by these Router.match results. A route is covered when an alert
+    went through it: every route on a match's path counts, so a parent whose child took the
+    alert is covered, and so is every branch of a `continue: true` fan-out."""
+    covered = {p for matches in results for m in matches for p in m.path}
+    return Coverage(router.paths(), covered)
+
+
+# ── Inhibition, for `amlint route --firing` and `firing:` in `amlint test` ──
+#
+# Mirrors inhibit/inhibit.go (Inhibitor.Mutes, InhibitRule.hasEqual). Rules are tried in
+# definition order; an alert is inhibited by the first one whose target matchers it matches
+# and for which some firing alert
+#   - matches the source matchers,
+#   - has the alert's value for every `equal` label (a missing label is "", so a label
+#     missing on both sides counts as equal), and
+#   - if the alert matches the source matchers too, does not match the target matchers
+#     itself: alerts on both sides of a rule don't inhibit each other, or themselves.
+# A firing alert inhibits even when it is inhibited or silenced itself, as in Alertmanager.
+
+@dataclass
+class Inhibition:
+    """Why an alert is inhibited: the rule, and the firing alert that matched its source."""
+    rule: str  # inhibit_rules[i]
+    source: Dict[str, str]
+
+
+@dataclass
+class _InhibitRule:
+    path: str
+    source: List[_Matcher]
+    target: List[_Matcher]
+    equal: Tuple[str, ...]
+
+
+class Inhibitor:
+    """A config's inhibit_rules. Raises RoutingError for rules Alertmanager would not load,
+    or with a regex amlint cannot evaluate."""
+
+    def __init__(self, rules) -> None:
+        self._rules: List[_InhibitRule] = []
+        for i, rule in _dict_items(rules):
+            path = f"inhibit_rules[{i}]"
+            equal = rule.get("equal")
+            if equal is not None and not isinstance(equal, list):
+                raise RoutingError(f"{path}: equal must be a list of label names")
+            self._rules.append(_InhibitRule(
+                path,
+                _compile_matchers(rule, path, "source_"),
+                _compile_matchers(rule, path, "target_"),
+                _string_list(equal),
+            ))
+
+    def inhibited_by(
+        self, labels: Mapping[str, object], firing: Sequence[Mapping[str, object]]
+    ) -> Optional[Inhibition]:
+        """Why an alert with these labels is inhibited while the `firing` alerts fire, or None
+        if it isn't. Checks every rule in order and, per rule, the firing alerts in order."""
+        alert = _labels(labels)
+        sources = [_labels(a) for a in firing]
+        for rule in self._rules:
+            if not _matches(rule.target, alert):
+                continue
+            two_sided = _matches(rule.source, alert)
+            for src in sources:
+                if not _matches(rule.source, src):
+                    continue
+                if any(src.get(name, "") != alert.get(name, "") for name in rule.equal):
+                    continue
+                if two_sided and _matches(rule.target, src):
+                    continue
+                return Inhibition(rule.path, src)
+        return None
 
 
 # ── Behavioural diff of two route trees, for `amlint diff` ───────────
