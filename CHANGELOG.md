@@ -5,6 +5,7 @@
 ### Added
 - `invalid-root-route` (error) — root route has no `receiver`, or sets matchers, `continue`,
   `mute_time_intervals` or `active_time_intervals`; Alertmanager refuses to load such a config
+  (also caught by `amtool check-config`, marked so in `amlint list`)
 - Warning on stderr for unknown check codes in `--ignore`, `--only` and `severity:`, with a
   "did you mean" suggestion
 
@@ -23,12 +24,81 @@
 - `undefined-time-interval` accepts intervals defined in legacy top-level `mute_time_intervals:`
 - `route-match-collision` treats `match:` and `matchers:` spellings as equal, and no longer
   fires when the earlier sibling has `continue: true`
-- `slack-no-api-url` accepts `global.slack_api_url_file`
+- `slack-no-api-url` accepts `global.slack_api_url_file`; `victorops-no-api-key` accepts
+  `api_key_file`
 - Durations are parsed strictly (`30sec` is no longer read as `30s`) and support `y`
 - `diff` now runs the `template-file-missing` check
 - No more tracebacks on malformed input: a non-mapping top level exits 2 with a message,
   non-mapping list entries are skipped
 - `--version` fallback no longer reports a stale `0.1.2` when run from a source checkout
+
+## [0.3.0] - 2026-08-16
+
+### Added
+- `amlint test <config> <tests-file>` — routing regression tests. Write a YAML file
+  with a `tests:` list asserting label-set → expected receiver(s), run it as a
+  suite in CI. Replicates Alertmanager's own dispatch algorithm (deepest-match-wins,
+  `continue: true` fan-out in definition order, receiver inheritance) in pure Python
+  — no Go binary or live Alertmanager needed.
+  - Verified against real `amtool config routes test` output on 7 scenarios
+    (deepest-match, no-child-match, continue fan-out with both orderings,
+    receiver inheritance) before shipping — all matched exactly.
+  - `amtool config routes test` already does single-alert interactive testing;
+    this is the missing batch/CI piece, not a wholly new idea — see docs/index.md
+    for the honest comparison.
+  - Each test case asserts one of `receiver:` (single), `receivers:` (ordered list,
+    for `continue` fan-out), or `drop: true` (no receiver reached).
+  - `--format json` for machine-readable output.
+- New module `amlint/simulate.py` with the reusable routing-simulation core.
+- 12 new tests (7 unit tests on `simulate_route`, 8 CLI-level) — 119 total.
+- docs/usage.md: new `## test` section with a full example.
+
+## [0.2.1] - 2026-08-16
+
+### Changed
+- Corrected the "why not just amtool" comparison in README.md and docs/index.md: 17 of
+  amlint's 30 checks (undefined-receiver, undefined-time-interval, bad-regex,
+  groupby-ellipsis, no-root-route, duplicate-receiver, and the 11 "-no-x" integration
+  required-field checks) duplicate validation `amtool check-config` already performs —
+  confirmed empirically against amtool v0.33.1. Alertmanager refuses to start on all of
+  these; it does not silently misbehave. Previous docs incorrectly claimed amtool misses
+  several of them.
+- Fixed misleading "why" text on 13 of those checks that claimed silent/partial failure
+  ("alerts just vanish", "notifications fail") when the actual behavior is Alertmanager
+  refusing to start entirely.
+- `amlint list` now shows an `amtool` column marking which checks duplicate amtool's own
+  validation vs. which are gaps amtool doesn't cover.
+- `amlint explain <code>` now states, for every check, whether amtool also catches it.
+- `docs/checks/index.md` overview table annotated the same way.
+
+## [0.2.0] - 2026-08-16
+
+### Added
+- `action.yml` — official GitHub Action wrapping the CLI: install + run + optional SARIF
+  upload to Code Scanning in one `uses:` step (`config-path`, `strict`, `ignore`, `only`,
+  `version`, `sarif` inputs); docs at `docs/github-action.md`
+- `amlint tree <file>` — new command, prints the route tree (matchers, receivers, `[continue]`)
+  with routing-related findings (`undefined-receiver`, `unreachable-route`, `route-match-collision`,
+  `bad-regex`, `groupby-ellipsis`, etc.) annotated inline on the node they apply to
+- `--ignore` support on `tree` to quiet specific codes while browsing
+- `sns-no-target` (error) — `sns_configs` missing all of `topic_arn`/`phone_number`/`target_arn`
+  (exactly one destination is required; AWS rejects the publish call otherwise)
+- Completes required-field coverage for every integration key amlint tracks (30 checks total)
+
+## [0.1.12] - 2026-08-16
+
+### Added
+- `victorops-no-api-key` (error) — `victorops_configs` without `api_key` and no global fallback
+- `wechat-no-corp-id` (error) — `wechat_configs` without `corp_id` and no global fallback
+- Completes required-field coverage for all `_INTEGRATION_KEYS` integrations (29 checks total)
+
+## [0.1.11] - 2026-08-16
+
+### Added
+- `telegram-no-bot-token` (error) — `telegram_configs` without `bot_token`/`bot_token_file`
+- `discord-no-webhook-url` (error) — `discord_configs` without `webhook_url`/`webhook_url_file`
+- 2 new receiver-integration checks bring the total to 25 → 27
+
 
 ## [0.1.10] - 2026-06-23
 

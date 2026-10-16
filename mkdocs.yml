@@ -33,6 +33,7 @@ nav:
   - Home: index.md
   - Install: install.md
   - Usage: usage.md
+  - GitHub Action: github-action.md
   - Checks:
     - Overview: checks/index.md
     - Routing: checks/routing.md

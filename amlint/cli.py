@@ -32,9 +32,11 @@ from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
+from rich.tree import Tree
 
 from .config import load_project_config
-from .linter import ERROR, INFO, WARN, lint
+from .linter import ERROR, INFO, WARN, _dict_items, lint
+from .simulate import simulate_route
 
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
@@ -68,7 +70,8 @@ def _warn_unknown_codes(codes, source: str) -> None:
         hint = difflib.get_close_matches(code, list(EXPLAINS), n=1)
         suffix = f" — did you mean '{hint[0]}'?" if hint else ""
         err_console.print(
-            f"[yellow]warning:[/yellow] unknown check code '{escape(code)}' in {source}{suffix}"
+            f"[yellow]warning:[/yellow] unknown check code '{escape(code)}' in {source}{suffix}",
+            soft_wrap=True,  # one line, so the suggested code can be copied as-is
         )
 
 
@@ -88,7 +91,8 @@ def _basedir(path):
     return os.path.dirname(os.path.abspath(path)) if path != "-" else None
 
 
-def load(path):
+def _read_yaml(path):
+    """Parse a YAML file, or stdin for "-"; exits 2 if it is missing or unparsable."""
     try:
         if path == "-":
             content = sys.stdin.read()
@@ -98,10 +102,15 @@ def load(path):
                 sys.exit(2)
             with open(path) as f:
                 content = f.read()
-        cfg = yaml.safe_load(content)
+        return yaml.safe_load(content)
     except yaml.YAMLError as e:
         err_console.print(f"[red]Failed to parse YAML[/red] ({path}): {e}")
         sys.exit(2)
+
+
+def load(path):
+    """Load an Alertmanager config; exits 2 unless its top level is a mapping."""
+    cfg = _read_yaml(path)
     if cfg is None:
         return {}
     if not isinstance(cfg, dict):
@@ -245,6 +254,160 @@ def _cmd_check(args):
     return 1 if has_err or (strict and has_warn) else 0
 
 
+def _format_matchers(node: dict) -> list:
+    parts = []
+    for k, v in (node.get("match") or {}).items():
+        parts.append(f"{k}={v}")
+    for k, v in (node.get("match_re") or {}).items():
+        parts.append(f"{k}=~{v}")
+    for m in node.get("matchers") or []:
+        parts.append(str(m))
+    return parts
+
+
+def _cmd_tree(args) -> int:
+    _, ignore, _, severity = _project_settings(args)
+
+    cfg = load(args.file)
+    route = cfg.get("route")
+    if not isinstance(route, dict):
+        err_console.print("[red]No root 'route' defined.[/red]")
+        return 2
+
+    findings = lint(cfg, ignore=ignore, severity=severity, basedir=_basedir(args.file))
+    by_path: dict = {}
+    for f in findings:
+        by_path.setdefault(f.where, []).append(f)
+    level_order = {ERROR: 0, WARN: 1, INFO: 2}
+    shown: list = []
+
+    def label_for(node: dict, path: str) -> str:
+        parts = _format_matchers(node)
+        piece = "{" + ", ".join(parts) + "}" if parts else (
+            "(catch-all)" if path != "route" else "(root)"
+        )
+        rcv = node.get("receiver")
+        if rcv:
+            piece += f"  →  [bold]{rcv}[/bold]"
+        else:
+            piece += "  →  [dim italic](inherited)[/dim italic]"
+        if node.get("continue"):
+            piece += "  [dim]\\[continue][/dim]"
+
+        fs = by_path.get(path, [])
+        if fs:
+            shown.extend(fs)
+            worst = min(fs, key=lambda f: level_order[f.level])
+            codes = ", ".join(sorted({f.code for f in fs}))
+            style = STYLE[worst.level]
+            return f"[{style}]{ICON[worst.level]}[/{style}]  {piece}  [{style}]({codes})[/{style}]"
+        return f"   {piece}"
+
+    tree = Tree(label_for(route, "route"), guide_style="dim")
+
+    def add_children(node: dict, path: str, branch: Tree) -> None:
+        for i, child in _dict_items(node.get("routes")):
+            cpath = f"{path}.routes[{i}]"
+            cbranch = branch.add(label_for(child, cpath))
+            add_children(child, cpath, cbranch)
+
+    add_children(route, "route", tree)
+
+    console.print()
+    console.print(tree)
+    console.print()
+    if shown:
+        noun = "issue" if len(shown) == 1 else "issues"
+        console.print(
+            f"  [dim]{len(shown)} routing {noun} flagged above — run "
+            f"'amlint check {args.file}' for full details.[/dim]\n"
+        )
+    other = sum(len(v) for p, v in by_path.items()) - len(shown)
+    if other:
+        noun = "issue" if other == 1 else "issues"
+        console.print(
+            f"  [dim]{other} more {noun} outside routing (receivers, global, timing) — "
+            f"run 'amlint check {args.file}' for full details.[/dim]\n"
+        )
+    return 0
+
+
+def _cmd_test(args) -> int:
+    cfg = load(args.config)
+    route = cfg.get("route")
+    if not route:
+        err_console.print("[red]No root 'route' defined.[/red]")
+        return 2
+
+    tests_doc = _read_yaml(args.tests)  # not an Alertmanager config: validated below
+    cases = tests_doc.get("tests") if isinstance(tests_doc, dict) else None
+    if not isinstance(cases, list):
+        err_console.print(
+            f"[red]Invalid test file:[/red] {args.tests} must have a top-level "
+            f"'tests:' list."
+        )
+        return 2
+
+    results = []
+    for i, case in enumerate(cases):
+        name = case.get("name") or f"test #{i + 1}"
+        labels = case.get("labels") or {}
+        keys_set = sum(k in case for k in ("receiver", "receivers", "drop"))
+        if keys_set != 1:
+            results.append({
+                "name": name, "labels": labels, "passed": False,
+                "error": "test case must set exactly one of: receiver, receivers, drop",
+            })
+            continue
+
+        actual = [r for r, _ in simulate_route(route, labels)]
+
+        if case.get("drop"):
+            expected_desc = "(no receiver)"
+            passed = len(actual) == 0
+        elif "receiver" in case:
+            expected_desc = case["receiver"]
+            passed = actual == [case["receiver"]]
+        else:
+            expected_list = list(case["receivers"])
+            expected_desc = ", ".join(expected_list)
+            passed = actual == expected_list
+
+        results.append({
+            "name": name, "labels": labels, "passed": passed,
+            "expected": expected_desc,
+            "actual": ", ".join(actual) if actual else "(no receiver)",
+        })
+
+    if args.format == "json":
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+    else:
+        console.print()
+        for r in results:
+            if r["passed"]:
+                console.print(f"  [bold green]✓[/bold green]  {r['name']}")
+            else:
+                console.print(f"  [bold red]✗[/bold red]  {r['name']}")
+                if "error" in r:
+                    console.print(f"     [red]{r['error']}[/red]")
+                else:
+                    label_str = ", ".join(f"{k}={v}" for k, v in r["labels"].items())
+                    console.print(f"     expected: {r['expected']}")
+                    console.print(f"     actual:   {r['actual']}")
+                    if label_str:
+                        console.print(f"     labels:   {label_str}")
+                console.print()
+        passed_n = sum(1 for r in results if r["passed"])
+        failed_n = len(results) - passed_n
+        console.print(Rule(style="dim"))
+        if failed_n:
+            console.print(f"  [red]{failed_n} failed[/red]  ·  [green]{passed_n} passed[/green]\n")
+        else:
+            console.print(f"  [green]{passed_n} passed[/green]\n")
+
+    return 1 if any(not r["passed"] for r in results) else 0
+
+
 _INIT_TEMPLATE = """\
 global:
   resolve_timeout: 5m
@@ -338,7 +501,7 @@ def _cmd_diff(args):
 
 
 def _cmd_list():
-    from .explains import EXPLAINS
+    from .explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
     level_order = {ERROR: 0, WARN: 1, INFO: 2}
     sorted_items = sorted(
         EXPLAINS.items(),
@@ -347,22 +510,33 @@ def _cmd_list():
     table = Table(show_header=True, header_style="bold dim", box=None, padding=(0, 2))
     table.add_column("code", no_wrap=True)
     table.add_column("level", no_wrap=True)
+    table.add_column("amtool", no_wrap=True, justify="center")
     table.add_column("description")
     for code, e in sorted_items:
         level = e["level"].split()[0]
+        mark = Text("✓", style="dim") if code in ALSO_CAUGHT_BY_AMTOOL else Text("")
         table.add_row(
             Text(code, style="dim"),
             Text(level, style=STYLE[level]),
+            mark,
             e["summary"],
         )
     console.print()
     console.print(table)
     console.print()
+    n = len(ALSO_CAUGHT_BY_AMTOOL)
+    console.print(
+        f"  [dim]✓ in the amtool column = also caught by `amtool check-config` "
+        f"({n} of {len(EXPLAINS)} checks) — Alertmanager refuses to start on these, "
+        f"it doesn't silently misbehave. The rest are configs amtool accepts and "
+        f"Alertmanager runs fine, just not as intended.[/dim]"
+    )
+    console.print()
     return 0
 
 
 def _cmd_explain(args):
-    from .explains import EXPLAINS
+    from .explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
     code = args.code
     if code not in EXPLAINS:
         err_console.print(f"[red]Unknown check code:[/red] {code}\n")
@@ -376,6 +550,18 @@ def _cmd_explain(args):
     console.print(Rule(f"[bold]{code}[/bold]", style="dim"))
     console.print()
     console.print(f"  Level:  [{level_style}]{e['level'].upper()}[/{level_style}]")
+    if code in ALSO_CAUGHT_BY_AMTOOL:
+        console.print(
+            "  [dim]Also caught by `amtool check-config` — Alertmanager refuses to "
+            "start over this. Included here for unified JSON/SARIF/diff output "
+            "without needing the Go binary, not because amtool misses it.[/dim]"
+        )
+    else:
+        console.print(
+            "  [dim]Not caught by `amtool check-config` — this config loads and "
+            "Alertmanager runs fine with the bug in place. This is the gap amlint "
+            "exists for.[/dim]"
+        )
     console.print()
     console.print(f"  {e['summary']}")
     console.print()
@@ -424,6 +610,16 @@ def main(argv=None):
     pd.add_argument("--only", action="append", metavar="CODE",
                     help="consider only findings with these codes")
 
+    pt = sub.add_parser("tree", help="print route tree with matchers, receivers, and issues")
+    pt.add_argument("file", help="path to alertmanager.yml, or - for stdin")
+    pt.add_argument("--ignore", action="append", metavar="CODE",
+                    help="skip findings with these codes when annotating the tree")
+
+    ptst = sub.add_parser("test", help="run routing simulation tests against a config")
+    ptst.add_argument("config", help="path to alertmanager.yml")
+    ptst.add_argument("tests", help="path to a YAML file with a top-level 'tests:' list")
+    ptst.add_argument("--format", choices=["text", "json"], default="text")
+
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 
     sub.add_parser("list", help="list all check codes with level and description")
@@ -439,6 +635,10 @@ def main(argv=None):
         return _cmd_check(args)
     if args.cmd == "diff":
         return _cmd_diff(args)
+    if args.cmd == "tree":
+        return _cmd_tree(args)
+    if args.cmd == "test":
+        return _cmd_test(args)
     if args.cmd == "init":
         return _cmd_init()
     if args.cmd == "list":
