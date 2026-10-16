@@ -858,7 +858,91 @@ def check_global_resolve_timeout(cfg: dict) -> List[Finding]:
     return out
 
 
-# CHECK 24: root route breaks a rule Alertmanager enforces when loading the config
+# CHECK 24: telegram_configs without bot_token / bot_token_file
+def check_telegram_no_bot_token(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    for r in _receivers(cfg):
+        for i, tg in _dict_items(r.get("telegram_configs")):
+            if not tg.get("bot_token") and not tg.get("bot_token_file"):
+                out.append(Finding(
+                    ERROR, "telegram-no-bot-token",
+                    f"telegram_configs[{i}] in receiver '{r.get('name')}' has no 'bot_token' or "
+                    f"'bot_token_file'. Telegram messages cannot be sent.",
+                    f"receivers[{r.get('name')}].telegram_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 25: discord_configs without webhook_url / webhook_url_file
+def check_discord_no_webhook_url(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    for r in _receivers(cfg):
+        for i, dc in _dict_items(r.get("discord_configs")):
+            if not dc.get("webhook_url") and not dc.get("webhook_url_file"):
+                out.append(Finding(
+                    ERROR, "discord-no-webhook-url",
+                    f"discord_configs[{i}] in receiver '{r.get('name')}' has no 'webhook_url' or "
+                    f"'webhook_url_file'. Discord notifications cannot be sent.",
+                    f"receivers[{r.get('name')}].discord_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 26: victorops_configs without api_key (no global fallback either)
+def check_victorops_no_api_key(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    g = cfg.get("global") or {}
+    global_key = g.get("victorops_api_key") or g.get("victorops_api_key_file")
+    for r in _receivers(cfg):
+        for i, vo in _dict_items(r.get("victorops_configs")):
+            if not vo.get("api_key") and not vo.get("api_key_file") and not global_key:
+                out.append(Finding(
+                    ERROR, "victorops-no-api-key",
+                    f"victorops_configs[{i}] in receiver '{r.get('name')}' has no 'api_key' or "
+                    f"'api_key_file', and global.victorops_api_key is not set. "
+                    f"VictorOps alerts cannot be sent.",
+                    f"receivers[{r.get('name')}].victorops_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 27: wechat_configs without corp_id (no global fallback either)
+def check_wechat_no_corp_id(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    global_corp_id = (cfg.get("global") or {}).get("wechat_api_corp_id")
+    for r in _receivers(cfg):
+        for i, wc in _dict_items(r.get("wechat_configs")):
+            if not wc.get("corp_id") and not global_corp_id:
+                out.append(Finding(
+                    ERROR, "wechat-no-corp-id",
+                    f"wechat_configs[{i}] in receiver '{r.get('name')}' has no 'corp_id', and "
+                    f"global.wechat_api_corp_id is not set. WeChat messages cannot be sent.",
+                    f"receivers[{r.get('name')}].wechat_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 28: sns_configs missing all of topic_arn / phone_number / target_arn
+def check_sns_no_target(cfg: dict) -> List[Finding]:
+    """
+    SNS requires exactly one destination: a topic ARN, a phone number (SMS),
+    or a mobile platform endpoint ARN. None set means AWS rejects the publish call.
+    """
+    out: List[Finding] = []
+    for r in _receivers(cfg):
+        for i, sns in _dict_items(r.get("sns_configs")):
+            if not any(sns.get(k) for k in ("topic_arn", "phone_number", "target_arn")):
+                out.append(Finding(
+                    ERROR, "sns-no-target",
+                    f"sns_configs[{i}] in receiver '{r.get('name')}' has none of 'topic_arn', "
+                    f"'phone_number', or 'target_arn' set. Exactly one is required — "
+                    f"AWS will reject the publish call.",
+                    f"receivers[{r.get('name')}].sns_configs[{i}]",
+                ))
+    return out
+
+
+# CHECK 29: root route breaks a rule Alertmanager enforces when loading the config
 def check_root_route(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
     route = _root_route(cfg)
@@ -883,7 +967,7 @@ def check_root_route(cfg: dict) -> List[Finding]:
     return out
 
 
-# CHECK 25: sibling route that an earlier, broader sibling always matches first
+# CHECK 30: sibling route that an earlier, broader sibling always matches first
 def check_shadowed_routes(cfg: dict) -> List[Finding]:
     """
     If an earlier sibling without continue:true has a strict subset of this route's
@@ -943,6 +1027,11 @@ ALL_CHECKS = [
     check_msteams_no_webhook_url,
     check_route_match_collision,
     check_global_resolve_timeout,
+    check_telegram_no_bot_token,
+    check_discord_no_webhook_url,
+    check_victorops_no_api_key,
+    check_wechat_no_corp_id,
+    check_sns_no_target,
     check_root_route,
     check_shadowed_routes,
 ]

@@ -9,23 +9,27 @@
 
 Semantic linter for Prometheus Alertmanager configs.
 
-`amtool check-config` validates syntax. **amlint validates semantics:**
-will alerts actually reach a receiver, does the inhibition rule do anything,
-are there unreachable routing branches? These are the bugs that burn teams —
-config is valid, alerts silently vanish.
+Alertmanager's own `amtool check-config` already validates most schema-level mistakes —
+undefined receivers, missing integration fields, bad regex — and refuses to start over them.
+**amlint covers that same ground in one dependency-free CLI with JSON/SARIF/diff output,
+plus 13 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
+starts and runs, and just silently doesn't do what you meant.**
 
 ## Why
 
-Alertmanager configs are YAML routing trees with inhibition rules and receivers.
-The most painful mistakes are syntactically valid:
+Alertmanager configs are YAML routing trees with inhibition rules and receivers. The
+checks that actually earn their keep are the ones amtool can't do, because they're not
+schema violations — they're valid configs that behave wrong:
 
-- route references a receiver that doesn't exist → **alerts are dropped**
-- inhibition without `equal` → silences unrelated alerts, you think it's quiet, there's actually a fire
-- catch-all branch before specific ones → specific branches **are unreachable**
-- `match_re` that doesn't compile
-- `group_by` that doesn't behave the way you think
+- catch-all branch before specific ones → specific branches **are unreachable** (config loads fine)
+- inhibition without `equal` → silences unrelated alerts, config loads fine, you think it's quiet
+- two sibling routes with identical matchers → the second **never fires**, no error anywhere
+- `group_wait` longer than `group_interval`, or `repeat_interval` shorter than `group_interval` → timing that quietly doesn't do what the numbers suggest
+- receiver defined but never routed to, or routed to but has no integration configured
 
-`amtool` won't catch any of this. amlint will.
+None of this fails `amtool check-config` or stops Alertmanager from starting. Run
+`amlint list` to see which of the 31 checks are these vs. which duplicate amtool's own
+validation (included for convenience — one tool, one output format, no Go binary needed).
 
 ## Install
 
@@ -52,6 +56,8 @@ amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
 amlint diff old.yml new.yml                 # show what changed
+amlint tree alertmanager.yml                # visualize the route tree, issues inline
+amlint test alertmanager.yml tests.yml      # routing regression tests: label-set -> expected receiver
 amlint init > alertmanager.yml              # generate minimal valid config
 amlint list                                 # all check codes with level + description
 amlint explain undefined-receiver           # detailed explanation + examples
@@ -103,6 +109,19 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
   run: amlint check alertmanager.yml --strict
 ```
 
+### As a GitHub Action
+
+```yaml
+- uses: actions/checkout@v7
+- uses: danikdanik2013/amlint@v0.2.0
+  with:
+    config-path: alertmanager.yml
+    strict: true
+```
+
+No `pip install` step needed. Supports `--ignore`/`--only` via inputs and optional SARIF upload
+for PR annotations — see the [GitHub Action docs](https://danikdanik2013.github.io/amlint/github-action/).
+
 ## Checks
 
 | code | level | what it catches |
@@ -119,6 +138,11 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `slack-no-api-url` | error | `slack_configs` without `api_url` and no global |
 | `opsgenie-no-api-key` | error | `opsgenie_configs` without `api_key` and no global |
 | `msteams-no-webhook-url` | error | `msteams_configs` without `webhook_url` |
+| `telegram-no-bot-token` | error | `telegram_configs` without `bot_token` |
+| `discord-no-webhook-url` | error | `discord_configs` without `webhook_url` |
+| `victorops-no-api-key` | error | `victorops_configs` without `api_key` and no global |
+| `wechat-no-corp-id` | error | `wechat_configs` without `corp_id` and no global |
+| `sns-no-target` | error | `sns_configs` missing `topic_arn`/`phone_number`/`target_arn` |
 | `template-file-missing` | error/warn | `templates:` references a file that doesn't exist |
 | `inhibit-no-equal` | warn | inhibition without `equal` silences too broadly |
 | `unreachable-route` | warn | catch-all hides subsequent sibling routes |

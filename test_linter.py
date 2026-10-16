@@ -462,6 +462,21 @@ def test_cli_list():
     assert main(["list"]) == 0
 
 
+def test_cli_list_shows_amtool_overlap(capsys):
+    assert main(["list"]) == 0
+    out = capsys.readouterr().out
+    assert "amtool" in out
+    assert "also caught by" in out
+
+
+def test_amtool_classification_matches_known_codes():
+    """Sanity check: ALSO_CAUGHT_BY_AMTOOL must only reference real check codes."""
+    from amlint.explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
+    assert ALSO_CAUGHT_BY_AMTOOL <= set(EXPLAINS.keys())
+    assert len(ALSO_CAUGHT_BY_AMTOOL) > 0
+    assert len(ALSO_CAUGHT_BY_AMTOOL) < len(EXPLAINS)
+
+
 def test_msteams_with_webhook_url_ok():
     cfg = {
         "route": {"receiver": "a"},
@@ -479,10 +494,146 @@ def test_slack_global_api_url_ok():
     assert "slack-no-api-url" not in codes(cfg)
 
 
+def test_telegram_no_bot_token():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "telegram_configs": [{"chat_id": -100123}]}],
+    }
+    assert "telegram-no-bot-token" in codes(cfg)
+
+
+def test_telegram_with_bot_token_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "telegram_configs": [{"bot_token": "123:ABC", "chat_id": -100123}]}],
+    }
+    assert "telegram-no-bot-token" not in codes(cfg)
+
+
+def test_telegram_with_bot_token_file_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "telegram_configs": [{"bot_token_file": "/etc/secrets/bot_token"}]}],
+    }
+    assert "telegram-no-bot-token" not in codes(cfg)
+
+
+def test_discord_no_webhook_url():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "discord_configs": [{"title": "Alert"}]}],
+    }
+    assert "discord-no-webhook-url" in codes(cfg)
+
+
+def test_discord_with_webhook_url_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "discord_configs": [{"webhook_url": "https://discord.com/api/webhooks/..."}]}],
+    }
+    assert "discord-no-webhook-url" not in codes(cfg)
+
+
+def test_victorops_no_api_key():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "victorops_configs": [{"routing_key": "team-key"}]}],
+    }
+    assert "victorops-no-api-key" in codes(cfg)
+
+
+def test_victorops_with_api_key_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "victorops_configs": [{"api_key": "secret", "routing_key": "team-key"}]}],
+    }
+    assert "victorops-no-api-key" not in codes(cfg)
+
+
+def test_victorops_global_api_key_ok():
+    cfg = {
+        "global": {"victorops_api_key": "secret"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "victorops_configs": [{"routing_key": "team-key"}]}],
+    }
+    assert "victorops-no-api-key" not in codes(cfg)
+
+
+def test_wechat_no_corp_id():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "wechat_configs": [{"agent_id": "1000002"}]}],
+    }
+    assert "wechat-no-corp-id" in codes(cfg)
+
+
+def test_wechat_with_corp_id_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "wechat_configs": [{"corp_id": "abc123", "agent_id": "1000002"}]}],
+    }
+    assert "wechat-no-corp-id" not in codes(cfg)
+
+
+def test_wechat_global_corp_id_ok():
+    cfg = {
+        "global": {"wechat_api_corp_id": "abc123"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "wechat_configs": [{"agent_id": "1000002"}]}],
+    }
+    assert "wechat-no-corp-id" not in codes(cfg)
+
+
+def test_sns_no_target():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"subject": "Alert"}]}],
+    }
+    assert "sns-no-target" in codes(cfg)
+
+
+def test_sns_with_topic_arn_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"topic_arn": "arn:aws:sns:us-east-2:123:My-Topic"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
+def test_sns_with_phone_number_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"phone_number": "+17785522312"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
+def test_sns_with_target_arn_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "sns_configs": [{"target_arn": "arn:aws:sns:us-west-2:123:endpoint/x"}]}],
+    }
+    assert "sns-no-target" not in codes(cfg)
+
+
 # ── Severity overrides ────────────────────────────────────────────────
 
 def test_explain_known_code(capsys):
     assert main(["explain", "undefined-receiver"]) == 0
+
+
+def test_explain_shows_amtool_note_for_redundant_check(capsys):
+    assert main(["explain", "undefined-receiver"]) == 0
+    out = capsys.readouterr().out
+    assert "Also caught by" in out
+    assert "amtool check-config" in out
+
+
+def test_explain_shows_gap_note_for_differentiator_check(capsys):
+    assert main(["explain", "unreachable-route"]) == 0
+    out = capsys.readouterr().out
+    assert "Not caught by" in out
+    assert "gap amlint exists for" in out
 
 
 def test_explain_unknown_code():
@@ -723,6 +874,270 @@ def test_broken_yml_integration():
         "unused-receiver",
         "empty-receiver",
     }
+
+
+# ── tree command ──────────────────────────────────────────────────────
+
+def test_tree_clean_config(tmp_path, capsys):
+    cfg_path = tmp_path / "clean.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"receiver": "default", "routes": [
+            {"match": {"team": "infra"}, "receiver": "default"},
+        ]},
+        "receivers": [{"name": "default", "webhook_configs": [{"url": "http://x"}]}],
+        "global": {"resolve_timeout": "5m"},
+    }))
+    assert main(["tree", str(cfg_path)]) == 0
+    out = capsys.readouterr().out
+    assert "default" in out
+    assert "team=infra" in out
+
+
+def test_tree_flags_route_issues(capsys):
+    broken = os.path.join(os.path.dirname(__file__), "broken.yml")
+    assert main(["tree", broken]) == 0
+    out = capsys.readouterr().out
+    assert "undefined-receiver" in out
+    assert "bad-regex" in out
+    assert "unreachable-route" in out
+    assert "routing issues flagged above" in out
+    assert "more issues outside routing" in out
+
+
+def test_tree_no_root_route(tmp_path, capsys):
+    cfg_path = tmp_path / "noroute.yml"
+    cfg_path.write_text(yaml.dump({"receivers": [{"name": "a"}]}))
+    assert main(["tree", str(cfg_path)]) == 2
+    err = capsys.readouterr().err
+    assert "No root 'route' defined" in err
+
+
+def test_tree_stdin(capsys, monkeypatch):
+    import io
+    cfg = {"route": {"receiver": "default"}, "receivers": [{"name": "default"}]}
+    monkeypatch.setattr("sys.stdin", io.StringIO(yaml.dump(cfg)))
+    assert main(["tree", "-"]) == 0
+    out = capsys.readouterr().out
+    assert "default" in out
+
+
+def test_tree_ignore_flag(tmp_path, capsys):
+    cfg_path = tmp_path / "cfg.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"receiver": "default", "group_by": ["alertname", "..."], "routes": [
+            {"match": {"a": "b"}, "receiver": "default"},
+        ]},
+        "receivers": [{"name": "default", "webhook_configs": [{"url": "http://x"}]}],
+        "global": {"resolve_timeout": "5m"},
+    }))
+    assert main(["tree", str(cfg_path), "--ignore", "groupby-ellipsis"]) == 0
+    out = capsys.readouterr().out
+    assert "groupby-ellipsis" not in out
+
+
+# ── simulate_route (unit) ────────────────────────────────────────────
+
+def test_simulate_deepest_match_wins():
+    """A matched parent with a matched child does NOT also fire — only the
+    deepest match does. Verified against amtool config routes test."""
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{
+            "matchers": ['team="infra"'],
+            "receiver": "infra-slack",
+            "continue": True,
+            "routes": [{"match": {"severity": "critical"}, "receiver": "infra-pager"}],
+        }],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "critical"})]
+    assert result == ["infra-pager"]
+
+
+def test_simulate_parent_fires_when_no_child_matches():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{
+            "match": {"team": "infra"}, "receiver": "infra-slack",
+            "routes": [{"match": {"severity": "critical"}, "receiver": "infra-pager"}],
+        }],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "warning"})]
+    assert result == ["infra-slack"]
+
+
+def test_simulate_continue_fans_out_to_siblings():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [
+            {"match": {"team": "infra"}, "receiver": "infra-slack", "continue": True},
+            {"match": {"severity": "critical"}, "receiver": "pager"},
+        ],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "critical"})]
+    assert result == ["infra-slack", "pager"]
+
+
+def test_simulate_without_continue_stops_at_first_match():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [
+            {"match": {"team": "infra"}, "receiver": "infra-slack"},
+            {"match": {"severity": "critical"}, "receiver": "pager"},
+        ],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "critical"})]
+    assert result == ["infra-slack"]
+
+
+def test_simulate_receiver_inheritance():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{
+            "match": {"team": "infra"}, "receiver": "infra-slack",
+            "routes": [{"match": {"severity": "critical"}}],  # no receiver — inherits
+        }],
+    }
+    result = [r for r, _ in simulate_route(route, {"team": "infra", "severity": "critical"})]
+    assert result == ["infra-slack"]
+
+
+def test_simulate_match_re():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{"match_re": {"service": "^db-.*"}, "receiver": "db-team"}],
+    }
+    result = [r for r, _ in simulate_route(route, {"service": "db-payments"})]
+    assert result == ["db-team"]
+
+
+def test_simulate_new_style_matchers_operators():
+    from amlint.simulate import simulate_route
+    route = {
+        "receiver": "default",
+        "routes": [{"matchers": ['env!="prod"'], "receiver": "non-prod"}],
+    }
+    assert [r for r, _ in simulate_route(route, {"env": "staging"})] == ["non-prod"]
+    assert [r for r, _ in simulate_route(route, {"env": "prod"})] == ["default"]
+
+
+def test_simulate_unmatched_falls_to_root():
+    from amlint.simulate import simulate_route
+    route = {"receiver": "default", "routes": [{"match": {"team": "infra"}, "receiver": "x"}]}
+    result = [r for r, _ in simulate_route(route, {"foo": "bar"})]
+    assert result == ["default"]
+
+
+# ── amlint test (CLI) ────────────────────────────────────────────────
+
+def _write_test_config(tmp_path):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"receiver": "default", "routes": [
+            {"match": {"team": "infra"}, "receiver": "infra-slack"},
+        ]},
+        "receivers": [{"name": "default"}, {"name": "infra-slack"}],
+    }))
+    return cfg_path
+
+
+def test_cli_test_all_pass(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "infra routes to slack", "labels": {"team": "infra"}, "receiver": "infra-slack"},
+        {"name": "unmatched routes to default", "labels": {"foo": "bar"}, "receiver": "default"},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 0
+    out = capsys.readouterr().out
+    assert "2 passed" in out
+
+
+def test_cli_test_failure_exits_nonzero(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "wrong expectation", "labels": {"team": "infra"}, "receiver": "nonexistent"},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 1
+    out = capsys.readouterr().out
+    assert "expected:" in out
+    assert "nonexistent" in out
+    assert "infra-slack" in out
+
+
+def test_cli_test_drop_assertion(tmp_path, capsys):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"routes": [{"match": {"a": "b"}, "receiver": "x"}]},
+        "receivers": [{"name": "x"}],
+    }))
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "no root receiver, no match -> drop", "labels": {"foo": "bar"}, "drop": True},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 0
+
+
+def test_cli_test_malformed_case(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "bad case", "labels": {"a": "b"}},  # missing receiver/receivers/drop
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 1
+    out = capsys.readouterr().out
+    assert "must set exactly one of" in out
+
+
+def test_cli_test_no_root_route(tmp_path):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(yaml.dump({"receivers": [{"name": "x"}]}))
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": []}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 2
+
+
+def test_cli_test_invalid_tests_file(tmp_path):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"not_tests": []}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 2
+
+
+def test_cli_test_json_format(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "t1", "labels": {"team": "infra"}, "receiver": "infra-slack"},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path), "--format", "json"]) == 0
+    out = capsys.readouterr().out
+    data = json.loads(out)
+    assert data[0]["passed"] is True
+    assert data[0]["name"] == "t1"
+
+
+def test_cli_test_multi_receiver_assertion(tmp_path):
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(yaml.dump({
+        "route": {"receiver": "default", "routes": [
+            {"match": {"team": "infra"}, "receiver": "infra-slack", "continue": True},
+            {"match": {"severity": "critical"}, "receiver": "pager"},
+        ]},
+        "receivers": [{"name": "default"}, {"name": "infra-slack"}, {"name": "pager"}],
+    }))
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text(yaml.dump({"tests": [
+        {"name": "fan-out", "labels": {"team": "infra", "severity": "critical"},
+         "receivers": ["infra-slack", "pager"]},
+    ]}))
+    assert main(["test", str(cfg_path), str(tests_path)]) == 0
 
 
 # ── Matchers syntax: match / match_re / matchers normalized ──────────
@@ -1130,3 +1545,93 @@ def test_cli_diff_runs_template_check(tmp_path, capsys):
     assert main(["diff", str(old), str(new), "--format", "json"]) == 1
     added = json.loads(capsys.readouterr().out)["added"]
     assert [f["code"] for f in added] == ["template-file-missing"]
+
+
+def test_victorops_api_key_file_ok():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "victorops_configs": [
+            {"api_key_file": "/etc/am/victorops", "routing_key": "team"},
+        ]}],
+    }
+    assert "victorops-no-api-key" not in codes(cfg)
+
+
+def test_receiver_field_checks_tolerate_malformed_configs():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "telegram_configs": "oops", "discord_configs": ["oops"],
+                       "victorops_configs": [None], "wechat_configs": 1, "sns_configs": ["x"]}],
+    }
+    lint(cfg)  # must not raise
+
+
+def test_cli_test_non_mapping_tests_file(tmp_path, capsys):
+    cfg_path = _write_test_config(tmp_path)
+    tests_path = tmp_path / "tests.yml"
+    tests_path.write_text("- name: a bare list, no tests key\n")
+    assert main(["test", str(cfg_path), str(tests_path)]) == 2
+    err = capsys.readouterr().err
+    assert "Invalid test file" in err
+    assert "Not an Alertmanager config" not in err
+
+
+def test_cli_tree_unknown_ignore_code_warns(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n")
+    assert main(["tree", str(cfg), "--ignore", "unreachable-rout"]) == 0
+    assert "did you mean 'unreachable-route'" in capsys.readouterr().err
+
+
+# ── simulate_route: same matcher semantics as the linter ─────────────
+
+def _simulated(route_matchers, labels):
+    from amlint.simulate import simulate_route
+    route = {"receiver": "default", "routes": [dict(route_matchers, receiver="hit")]}
+    return [r for r, _ in simulate_route(route, labels)]
+
+
+def test_simulate_regex_is_anchored():
+    # Alertmanager anchors regexes: "crit" must not match "critical"
+    assert _simulated({"matchers": ['severity=~"crit"']}, {"severity": "critical"}) == ["default"]
+    assert _simulated({"matchers": ['severity=~"crit"']}, {"severity": "crit"}) == ["hit"]
+    assert _simulated({"match_re": {"service": "db"}}, {"service": "db-payments"}) == ["default"]
+    assert _simulated({"matchers": ['env!~"prod"']}, {"env": "prod-eu"}) == ["hit"]
+
+
+def test_simulate_multi_matcher_string():
+    m = {"matchers": ['{team="infra", severity="critical"}']}
+    assert _simulated(m, {"team": "infra"}) == ["default"]
+    assert _simulated(m, {"team": "infra", "severity": "critical"}) == ["hit"]
+
+
+def test_simulate_quoted_value_escapes():
+    m = {"matchers": [r'msg="say \"hi\""']}
+    assert _simulated(m, {"msg": 'say "hi"'}) == ["hit"]
+
+
+def test_simulate_missing_label_is_empty_string():
+    assert _simulated({"match": {"env": ""}}, {}) == ["hit"]
+    assert _simulated({"matchers": ['env!=""']}, {}) == ["default"]
+
+
+def test_simulate_non_string_values():
+    assert _simulated({"match": {"code": 500}}, {"code": "500"}) == ["hit"]
+    assert _simulated({"match": {"code": "500"}}, {"code": 500}) == ["hit"]
+
+
+def test_simulate_unparseable_matcher_is_not_catch_all():
+    assert _simulated({"matchers": ["this is not a matcher"]}, {"a": "b"}) == ["default"]
+
+
+def test_simulate_regex_flags_and_go_syntax():
+    assert _simulated({"matchers": ['sev=~"(?i)CRIT.*"']}, {"sev": "critical"}) == ["hit"]
+    assert _simulated({"matchers": [r'svc=~"\pL+"']}, {"svc": "payments"}) == ["hit"]
+    # RE2 rejects lookaheads, so such a route never matches in the simulation either
+    assert _simulated({"matchers": ['svc=~"(?!test).*"']}, {"svc": "prod"}) == ["default"]
+
+
+def test_simulate_skips_malformed_routes():
+    from amlint.simulate import simulate_route
+    route = {"receiver": "default", "routes": ["oops", {"match": {"a": "b"}, "receiver": "x"}]}
+    assert [r for r, _ in simulate_route(route, {"a": "b"})] == ["x"]
