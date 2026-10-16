@@ -723,3 +723,284 @@ def test_broken_yml_integration():
         "unused-receiver",
         "empty-receiver",
     }
+
+
+# ── Matchers syntax: match / match_re / matchers normalized ──────────
+
+def test_parse_matchers_quoting_and_braces():
+    from amlint.linter import _parse_matchers
+    assert _parse_matchers(['{team="infra", severity=~"crit|warn"}', 'env!=prod']) == [
+        ("team", "=", "infra"), ("severity", "=~", "crit|warn"), ("env", "!=", "prod"),
+    ]
+    # \. is a regex escape, not a string escape: Alertmanager keeps the backslash
+    assert _parse_matchers([r'svc=~"foo\.bar"']) == [("svc", "=~", r"foo\.bar")]
+    assert _parse_matchers(['msg="a, b"']) == [("msg", "=", "a, b")]
+
+
+def test_inhibit_no_equal_matchers_syntax():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_matchers": ['severity="critical"'],
+                           "target_matchers": ['severity="warning"']}],
+    }
+    assert "inhibit-no-equal" in codes(cfg)
+
+
+def test_inhibit_same_match_matchers_syntax():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_matchers": ['alertname="Down"', 'severity="critical"'],
+                           "target_matchers": ['alertname="Down"'],
+                           "equal": ["instance"]}],
+    }
+    assert "inhibit-same-match" in codes(cfg)
+
+
+def test_circular_inhibition_matchers_syntax():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical"], "target_matchers": ["severity=warning"],
+             "equal": ["alertname"]},
+            {"source_match": {"severity": "warning"}, "target_matchers": ['severity="critical"'],
+             "equal": ["alertname"]},
+        ],
+    }
+    assert "circular-inhibition" in codes(cfg)
+
+
+# ── bad-regex: Go RE2 semantics, inhibit rules ───────────────────────
+
+def _route_regex(pattern):
+    return {
+        "route": {"receiver": "a", "routes": [
+            {"matchers": [f'svc=~"{pattern}"'], "receiver": "a"},
+        ]},
+        "receivers": [{"name": "a"}],
+    }
+
+
+@pytest.mark.parametrize("pattern", ["(?!test).*", "(?<=a)b", r"(a)\\1", "a++", "(?>a)"])
+def test_bad_regex_rejected_by_re2(pattern):
+    assert "bad-regex" in codes(_route_regex(pattern))
+
+
+@pytest.mark.parametrize("pattern", [r"\\pL+", r"\\p{Greek}", "(?<name>x)", r"foo\\z",
+                                     "foo(?i)bar", "[[:alpha:]]+", r"\\x{1F600}"])
+def test_go_only_regex_syntax_ok(pattern):
+    assert "bad-regex" not in codes(_route_regex(pattern))
+
+
+def test_bad_regex_in_inhibit_rule():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_match_re": {"svc": "auth(["},
+                           "target_matchers": ['svc=~"(?=x)"'],
+                           "equal": ["svc"]}],
+    }
+    found = [f for f in lint(cfg) if f.code == "bad-regex"]
+    assert len(found) == 2
+    assert all(f.where == "inhibit_rules[0]" for f in found)
+
+
+# ── Timing: inheritance and Alertmanager defaults ────────────────────
+
+def test_parse_duration():
+    from amlint.linter import _parse_duration
+    assert _parse_duration("1h30m") == 5400
+    assert _parse_duration("1y") == 365 * 86400
+    assert _parse_duration("0") == 0
+    assert _parse_duration("500ms") == 0.5
+    assert _parse_duration("30sec") is None
+    assert _parse_duration("5 m") is None
+    assert _parse_duration(None) is None
+
+
+def test_repeat_before_group_inherited_from_parent():
+    cfg = {
+        "route": {"receiver": "a", "group_interval": "10m", "routes": [
+            {"matchers": ["team=x"], "receiver": "a", "repeat_interval": "1m"},
+        ]},
+        "receivers": [{"name": "a"}],
+    }
+    found = [f for f in lint(cfg) if f.code == "repeat-before-group"]
+    assert [f.where for f in found] == ["route.routes[0]"]
+    assert "inherited from route" in found[0].msg
+
+
+def test_repeat_before_group_against_default():
+    cfg = {
+        "route": {"receiver": "a", "repeat_interval": "1m"},  # default group_interval is 5m
+        "receivers": [{"name": "a"}],
+    }
+    found = [f for f in lint(cfg) if f.code == "repeat-before-group"]
+    assert len(found) == 1
+    assert "Alertmanager default" in found[0].msg
+
+
+def test_timing_reported_once_not_on_inheriting_children():
+    cfg = {
+        "route": {"receiver": "a", "group_interval": "1h", "repeat_interval": "5m", "routes": [
+            {"matchers": ["team=x"], "receiver": "a"},
+            {"matchers": ["team=y"], "receiver": "a"},
+        ]},
+        "receivers": [{"name": "a"}],
+    }
+    found = [f for f in lint(cfg) if f.code == "repeat-before-group"]
+    assert [f.where for f in found] == ["route"]
+
+
+def test_child_override_fixes_inherited_timing():
+    cfg = {
+        "route": {"receiver": "a", "group_interval": "1h", "repeat_interval": "5m", "routes": [
+            {"matchers": ["team=x"], "receiver": "a", "repeat_interval": "4h"},
+        ]},
+        "receivers": [{"name": "a"}],
+    }
+    found = [f for f in lint(cfg) if f.code == "repeat-before-group"]
+    assert [f.where for f in found] == ["route"]
+
+
+def test_wait_exceeds_interval_inherited():
+    cfg = {
+        "route": {"receiver": "a", "group_wait": "4m", "routes": [  # fine vs default 5m
+            {"matchers": ["team=x"], "receiver": "a", "group_interval": "2m"},
+        ]},
+        "receivers": [{"name": "a"}],
+    }
+    found = [f for f in lint(cfg) if f.code == "wait-exceeds-interval"]
+    assert [f.where for f in found] == ["route.routes[0]"]
+
+
+# ── Receivers and time intervals ─────────────────────────────────────
+
+@pytest.mark.parametrize("key", ["pushover_configs", "webex_configs", "jira_configs",
+                                 "rocketchat_configs", "msteamsv2_configs",
+                                 "incidentio_configs"])
+def test_empty_receiver_newer_integrations_ok(key):
+    cfg = {
+        "route": {"receiver": "a", "routes": [{"matchers": ["x=y"], "receiver": "b"}]},
+        "receivers": [{"name": "a"}, {"name": "b", key: [{"some": "setting"}]}],
+    }
+    assert not any(f.code == "empty-receiver" and "'b'" in f.msg for f in lint(cfg))
+
+
+def test_empty_receiver_empty_list():
+    cfg = {
+        "route": {"receiver": "a", "routes": [{"matchers": ["x=y"], "receiver": "b"}]},
+        "receivers": [{"name": "a"}, {"name": "b", "webhook_configs": []}],
+    }
+    assert any(f.code == "empty-receiver" and "'b'" in f.msg for f in lint(cfg))
+
+
+def test_slack_global_api_url_file_ok():
+    cfg = {
+        "global": {"slack_api_url_file": "/etc/am/slack"},
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a", "slack_configs": [{"channel": "#alerts"}]}],
+    }
+    assert "slack-no-api-url" not in codes(cfg)
+
+
+def test_legacy_top_level_mute_time_intervals_ok():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"matchers": ["x=y"], "receiver": "a", "mute_time_intervals": ["night"]},
+        ]},
+        "receivers": [{"name": "a"}],
+        "mute_time_intervals": [{"name": "night"}],
+    }
+    assert "undefined-time-interval" not in codes(cfg)
+
+
+# ── route-match-collision ────────────────────────────────────────────
+
+def test_route_match_collision_match_vs_matchers():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"match": {"severity": "critical"}, "receiver": "a"},
+            {"matchers": ['severity="critical"'], "receiver": "b"},
+        ]},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    assert "route-match-collision" in codes(cfg)
+
+
+def test_route_match_no_collision_after_continue():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"matchers": ["severity=critical"], "receiver": "a", "continue": True},
+            {"matchers": ["severity=critical"], "receiver": "b"},
+        ]},
+        "receivers": [{"name": "a"}, {"name": "b"}],
+    }
+    assert "route-match-collision" not in codes(cfg)
+
+
+# ── invalid-root-route ───────────────────────────────────────────────
+
+@pytest.mark.parametrize("route", [
+    {"group_by": ["alertname"]},
+    {"receiver": "a", "matchers": ["team=infra"]},
+    {"receiver": "a", "match": {"team": "infra"}},
+    {"receiver": "a", "continue": True},
+    {"receiver": "a", "mute_time_intervals": ["night"]},
+])
+def test_invalid_root_route(route):
+    cfg = {"route": route, "receivers": [{"name": "a"}], "time_intervals": [{"name": "night"}]}
+    assert "invalid-root-route" in codes(cfg)
+
+
+def test_valid_root_route_ok():
+    cfg = {"route": {"receiver": "a", "group_by": ["alertname"]}, "receivers": [{"name": "a"}]}
+    assert "invalid-root-route" not in codes(cfg)
+
+
+def test_invalid_root_route_has_explain():
+    from amlint.explains import EXPLAINS
+    assert "invalid-root-route" in EXPLAINS
+
+
+# ── Robustness and CLI ───────────────────────────────────────────────
+
+def test_lint_tolerates_malformed_entries():
+    cfg = {
+        "route": {"receiver": "a", "routes": ["oops", {"matchers": "x=y", "receiver": "a"}]},
+        "receivers": ["oops", {"name": "a", "webhook_configs": "oops"}],
+        "inhibit_rules": ["oops"],
+        "templates": [42],
+    }
+    lint(cfg, basedir=".")  # must not raise
+
+
+def test_cli_non_mapping_yaml(tmp_path):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("- a\n- b\n")
+    with pytest.raises(SystemExit) as exc:
+        main(["check", str(cfg)])
+    assert exc.value.code == 2
+
+
+def test_cli_unknown_ignore_code_warns(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n"
+                   "    webhook_configs: [{url: 'http://fake'}]\n")
+    main(["check", str(cfg), "--ignore", "unused-reciever"])
+    err = capsys.readouterr().err
+    assert "unknown check code 'unused-reciever'" in err
+    assert "unused-receiver" in err
+
+
+def test_cli_diff_runs_template_check(tmp_path, capsys):
+    base = "route:\n  receiver: a\nreceivers:\n  - name: a\n"
+    old = tmp_path / "old.yml"
+    new = tmp_path / "new.yml"
+    old.write_text(base)
+    new.write_text(base + "templates: ['missing.tmpl']\n")
+    assert main(["diff", str(old), str(new), "--format", "json"]) == 1
+    added = json.loads(capsys.readouterr().out)["added"]
+    assert [f["code"] for f in added] == ["template-file-missing"]

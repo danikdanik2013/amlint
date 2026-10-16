@@ -1,11 +1,12 @@
 # Checks overview
 
-amlint runs **25 checks** grouped into four categories.
+amlint runs **26 checks** grouped into four categories.
 
 | code | level | category |
 |------|-------|----------|
 | [`undefined-receiver`](routing.md#undefined-receiver) | error | Routing |
 | [`no-root-route`](routing.md#no-root-route) | error | Routing |
+| [`invalid-root-route`](routing.md#invalid-root-route) | error | Routing |
 | [`bad-regex`](routing.md#bad-regex) | error | Routing |
 | [`unreachable-route`](routing.md#unreachable-route) | warn | Routing |
 | [`route-match-collision`](routing.md#route-match-collision) | warn | Routing |

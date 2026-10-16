@@ -2,6 +2,7 @@
 """amlint CLI."""
 
 import argparse
+import difflib
 import json
 import os
 import sys
@@ -17,7 +18,7 @@ try:
     from importlib.metadata import version as _pkg_version
     _VERSION = _pkg_version("amlint")
 except Exception:
-    _VERSION = "0.1.2"
+    _VERSION = "unknown"  # running from a source checkout that isn't pip-installed
 
 try:
     import argcomplete
@@ -26,6 +27,7 @@ except ImportError:
     _ARGCOMPLETE = False
 
 from rich.console import Console
+from rich.markup import escape
 from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.table import Table
@@ -59,6 +61,33 @@ def _build_only(args_only) -> set:
     return codes
 
 
+def _warn_unknown_codes(codes, source: str) -> None:
+    """A typo in --ignore/--only/severity: would otherwise be silently ignored."""
+    from .explains import EXPLAINS
+    for code in sorted(set(codes) - set(EXPLAINS)):
+        hint = difflib.get_close_matches(code, list(EXPLAINS), n=1)
+        suffix = f" — did you mean '{hint[0]}'?" if hint else ""
+        err_console.print(
+            f"[yellow]warning:[/yellow] unknown check code '{escape(code)}' in {source}{suffix}"
+        )
+
+
+def _project_settings(args):
+    """Merge .amlint.yml / pyproject.toml with CLI flags; warn about unknown codes."""
+    proj = load_project_config()
+    ignore = _build_ignore(args.ignore, proj.get("ignore"))
+    only = _build_only(getattr(args, "only", None))
+    severity = proj.get("severity") or {}
+    _warn_unknown_codes(ignore, "ignore list")
+    _warn_unknown_codes(only, "--only")
+    _warn_unknown_codes(severity, "severity config")
+    return proj, ignore, only, severity
+
+
+def _basedir(path):
+    return os.path.dirname(os.path.abspath(path)) if path != "-" else None
+
+
 def load(path):
     try:
         if path == "-":
@@ -69,10 +98,19 @@ def load(path):
                 sys.exit(2)
             with open(path) as f:
                 content = f.read()
-        return yaml.safe_load(content) or {}
+        cfg = yaml.safe_load(content)
     except yaml.YAMLError as e:
         err_console.print(f"[red]Failed to parse YAML[/red] ({path}): {e}")
         sys.exit(2)
+    if cfg is None:
+        return {}
+    if not isinstance(cfg, dict):
+        err_console.print(
+            f"[red]Not an Alertmanager config[/red] ({path}): "
+            f"top level must be a mapping, got {type(cfg).__name__}"
+        )
+        sys.exit(2)
+    return cfg
 
 
 def _print_findings(findings, label=None):
@@ -176,19 +214,15 @@ def _to_sarif(all_findings, version: str) -> dict:
 
 
 def _cmd_check(args):
-    proj = load_project_config()
-    ignore = _build_ignore(args.ignore, proj.get("ignore"))
-    only = _build_only(args.only)
+    proj, ignore, only, severity = _project_settings(args)
     strict = args.strict or proj.get("strict", False)
-    severity = proj.get("severity") or {}
 
     multi = len(args.files) > 1
     all_findings = []
     for path in args.files:
         cfg = load(path)
-        basedir = os.path.dirname(os.path.abspath(path)) if path != "-" else None
         all_findings.append((path, lint(
-            cfg, ignore=ignore, severity=severity, only=only or None, basedir=basedir,
+            cfg, ignore=ignore, severity=severity, only=only or None, basedir=_basedir(path),
         )))
 
     if args.format == "json":
@@ -238,12 +272,11 @@ def _cmd_init() -> int:
 
 
 def _cmd_diff(args):
-    proj = load_project_config()
-    ignore = _build_ignore(args.ignore, proj.get("ignore"))
-    only = _build_only(getattr(args, "only", None))
-    severity = proj.get("severity") or {}
-    old_findings = lint(load(args.old), ignore=ignore, severity=severity, only=only or None)
-    new_findings = lint(load(args.new), ignore=ignore, severity=severity, only=only or None)
+    _, ignore, only, severity = _project_settings(args)
+    old_findings = lint(load(args.old), ignore=ignore, severity=severity, only=only or None,
+                        basedir=_basedir(args.old))
+    new_findings = lint(load(args.new), ignore=ignore, severity=severity, only=only or None,
+                        basedir=_basedir(args.new))
 
     def key(f):
         return (f.code, f.where)

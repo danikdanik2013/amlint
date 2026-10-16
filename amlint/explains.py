@@ -52,12 +52,38 @@ receivers:
       - api_url: 'https://hooks.slack.com/...'""",
     },
 
+    "invalid-root-route": {
+        "level": "error",
+        "summary": "The root route breaks a rule Alertmanager enforces at load time.",
+        "why": (
+            "The root route is the fallback for every alert: it must name a receiver and "
+            "must not have matchers, continue, mute_time_intervals or active_time_intervals. "
+            "Alertmanager refuses to load a config that breaks any of these rules."
+        ),
+        "bad": """\
+route:
+  matchers: [team="infra"]   # root route must match everything
+  routes:
+    - matchers: [severity="critical"]
+      receiver: pager""",
+        "good": """\
+route:
+  receiver: default          # required fallback receiver
+  routes:
+    - matchers: [team="infra"]
+      receiver: infra
+    - matchers: [severity="critical"]
+      receiver: pager""",
+    },
+
     "bad-regex": {
         "level": "error",
-        "summary": "A match_re or matchers entry contains a regex that fails to compile.",
+        "summary": "A regex matcher fails to compile or uses syntax Go RE2 does not support.",
         "why": (
-            "The route will never match anything. "
-            "Alerts that should go through this route will fall through to the catch-all."
+            "Alertmanager compiles regexes with Go RE2, which rejects lookarounds, "
+            "backreferences and possessive quantifiers. Routes and inhibit rules "
+            "(source_match_re / target_match_re / *_matchers) are all checked; "
+            "Alertmanager will refuse to load a config with a broken regex."
         ),
         "bad": """\
 routes:

@@ -6,6 +6,8 @@
 
 `repeat_interval` is shorter than `group_interval`. This means Alertmanager will send repeat notifications before the grouped batch has had a chance to fire again — generating more noise than expected.
 
+Values are resolved the way Alertmanager resolves them: a child route inherits unset timing from its parent, and the root falls back to the defaults (`group_wait: 30s`, `group_interval: 5m`, `repeat_interval: 4h`). The finding is reported on the route that sets one of the two values.
+
 === "Bad"
     ```yaml
     route:
@@ -37,6 +39,8 @@
 **Level:** warn
 
 `group_wait` is longer than `group_interval`. This means subsequent alerts in the group will be sent before the initial `group_wait` has expired.
+
+Inherited values and Alertmanager defaults are taken into account, as for `repeat-before-group`.
 
 === "Bad"
     ```yaml

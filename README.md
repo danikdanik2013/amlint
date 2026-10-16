@@ -108,7 +108,8 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | code | level | what it catches |
 |------|-------|-----------------|
 | `undefined-receiver` | error | route references a receiver that doesn't exist |
-| `bad-regex` | error | `match_re` pattern fails to compile |
+| `invalid-root-route` | error | root route has no `receiver`, or has matchers / `continue` / time intervals |
+| `bad-regex` | error | regex fails to compile or uses syntax Go RE2 rejects (lookarounds, backrefs) |
 | `no-root-route` | error | no root `route` defined |
 | `duplicate-receiver` | error | receiver name defined more than once |
 | `undefined-time-interval` | error | `mute_time_intervals` / `active_time_intervals` references unknown interval |
