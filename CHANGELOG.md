@@ -78,6 +78,28 @@
   "found 2 Alertmanager configs (lines 1, 3)" instead of a YAML error; it still exits 2.
   `--input-format alertmanager` keeps the old behaviour.
 
+### Fixed
+- `circular-inhibition` no longer reports two unrelated rules because one label value
+  matches. It took one shared label with the same value (say `namespace=x` on both sides
+  of both rules) as enough for each rule's source to be the other's target, even when
+  another shared label, such as `alertname`, contradicts it. Now every shared `=` label
+  must agree.
+- `circular-inhibition` now takes each rule's `equal` into account. A rule only mutes an
+  alert while its source fires when the two have the same value for every `equal` label,
+  so a pair isn't circular when an `equal` label has fixed, different values on the two
+  alerts. `severity=critical` → `severity=warning` with `equal: [alertname]` and
+  `alertname=ZoneDown` → `alertname=NodeDown` no longer warn: the critical alert that
+  mutes ZoneDown is a NodeDown, so the first rule never mutes ZoneDown while it fires.
+
+### Fixed
+- A route tree that contains itself through a YAML alias (`route: &r` with `routes: [*r]`,
+  or an anchor deeper in the tree aliased inside its own subtree) no longer crashes every
+  command with a `RecursionError` traceback. `check`, `tree`, `route`, `test` and `diff`
+  exit 2 with the path of the alias and the route it repeats, e.g. `route.routes[0] is a
+  YAML alias of route, which contains it`; Alertmanager can't load such a config either.
+  Routes shared through an alias under several parents keep working, and the playground's
+  route tree is left empty for such a config while its findings show the message.
+
 ## [0.4.1] - 2026-10-16
 
 ### Added

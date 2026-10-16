@@ -67,6 +67,34 @@ def _walk_routes(node: dict, path: str = "route") -> Generator[Tuple[dict, str],
         yield from _walk_routes(child, f"{path}.routes[{i}]")
 
 
+def route_cycle(route) -> Optional[Tuple[str, str]]:
+    """(path, ancestor) when the route at `path` is the route at `ancestor` again, which
+    contains it: a YAML alias of a route used inside that route. yaml.safe_load builds a
+    recursive dict for it, and every walk over the tree would recurse forever, so the CLI
+    rejects it before linting (Alertmanager can't load it either). A route reused in
+    several places without nesting in itself is fine, and is walked once here."""
+    if not isinstance(route, dict):
+        return None
+    walking: Dict[int, str] = {}  # id -> path of the routes from the root down to here
+    done: Set[int] = set()
+
+    def visit(node: dict, path: str) -> Optional[Tuple[str, str]]:
+        walking[id(node)] = path
+        for i, child in _dict_items(node.get("routes")):
+            cpath = f"{path}.routes[{i}]"
+            if id(child) in walking:
+                return cpath, walking[id(child)]
+            if id(child) not in done:
+                found = visit(child, cpath)
+                if found:
+                    return found
+        del walking[id(node)]
+        done.add(id(node))
+        return None
+
+    return visit(route, "route")
+
+
 # Matchers: match / match_re maps and matchers: lists all normalized to Matcher tuples,
 # so checks compare `match: {sev: crit}` and `matchers: [sev="crit"]` as the same thing.
 _MATCHER_RE = re.compile(r'^\s*("(?:[^"\\]|\\.)*"|[^=!~"\s]+)\s*(=~|!~|!=|=)\s*(.*?)\s*$', re.S)
@@ -667,17 +695,36 @@ def check_timing(cfg):
 
 
 # CHECK 11: two inhibition rules that silence each other
+def _same_alert(a: Dict[str, str], b: Dict[str, str]) -> bool:
+    """Whether two sides of inhibit rules can match the same alert: they share a label
+    and agree on every shared one. A shared namespace=x doesn't make alertname=NodeDown
+    and alertname=PodDown the same alert."""
+    shared = set(a) & set(b)
+    return bool(shared) and all(a[k] == b[k] for k in shared)
+
+
+def _can_agree(equal: List[str], a: Dict[str, str], b: Dict[str, str]) -> bool:
+    """Whether two alerts can have the same value for every label in a rule's 'equal':
+    no label there is fixed to different values on the two sides."""
+    return all(k not in a or k not in b or a[k] == b[k] for k in equal)
+
+
 def check_circular_inhibition(cfg):
     out = []
     rules = [
-        (i, _equality(_matchers(r, "source_")), _equality(_matchers(r, "target_")))
+        (i, _equality(_matchers(r, "source_")), _equality(_matchers(r, "target_")),
+         [_scalar(k) for k in r["equal"]] if isinstance(r.get("equal"), list) else [])
         for i, r in _dict_items(cfg.get("inhibit_rules"))
     ]
-    for pos, (i, src_a, tgt_a) in enumerate(rules):
-        for j, src_b, tgt_b in rules[pos + 1:]:
-            a_can_silence_b = any(src_a.get(k) == tgt_b.get(k) for k in set(src_a) & set(tgt_b))
-            b_can_silence_a = any(src_b.get(k) == tgt_a.get(k) for k in set(src_b) & set(tgt_a))
-            if a_can_silence_b and b_can_silence_a:
+    for pos, (i, src_a, tgt_a, equal_a) in enumerate(rules):
+        for j, src_b, tgt_b, equal_b in rules[pos + 1:]:
+            # each rule's source alert is the other rule's target
+            if not (_same_alert(src_a, tgt_b) and _same_alert(src_b, tgt_a)):
+                continue
+            # x fires for A and is muted by B, y the other way round; each rule mutes only
+            # when the two alerts agree on its 'equal' labels
+            x, y = {**src_a, **tgt_b}, {**src_b, **tgt_a}
+            if _can_agree(equal_a, x, y) and _can_agree(equal_b, x, y):
                 out.append(Finding(
                     WARN, "circular-inhibition",
                     f"inhibit_rules[{i}] and inhibit_rules[{j}] may silence each other — "

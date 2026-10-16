@@ -19,6 +19,7 @@ os.environ["COLUMNS"] = "1000"  # rich wraps stderr messages at the console widt
 from amlint import cli  # noqa: E402
 from amlint.explains import EXPLAINS  # noqa: E402
 from amlint.formats import FormatError, load_input  # noqa: E402
+from amlint.linter import route_cycle  # noqa: E402
 from amlint.rules import RulesError, load_rules, rule_files  # noqa: E402
 
 _DIR = "/tmp/amlint-playground"  # Pyodide's in-memory file system, never uploaded
@@ -163,16 +164,17 @@ def _matchers(node: dict) -> list:
 
 def tree(config: str) -> str:
     """The route tree with each route's line, matchers, receiver and own settings, or
-    {"tree": null} when the config has no route mapping to draw, with "error" when amlint
-    can't read it (worded as `amlint check` words it). The config is read as the CLI reads
-    it, so the lines are in the pasted text even when the route is merged from several
-    resources or held in a Secret's string."""
+    {"tree": null} when the config has no route mapping to draw, or one that contains
+    itself (check reports why), with "error" when amlint can't read it (worded as
+    `amlint check` words it). The config is read as the CLI reads it, so the lines are in
+    the pasted text even when the route is merged from several resources or held in a
+    Secret's string."""
     try:
         loaded = load_input(config)
     except FormatError as e:
         return json.dumps({"tree": None, "error": f"{e.title} (config): {e}"})
     root = loaded.cfg.get("route") if isinstance(loaded.cfg, dict) else None
-    if not isinstance(root, dict):
+    if not isinstance(root, dict) or route_cycle(root):
         return json.dumps({"tree": None})
 
     def walk(node: dict, path: str, inherited):
