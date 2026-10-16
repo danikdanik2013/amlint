@@ -1,0 +1,110 @@
+{#- The playground page (docs/playground/index.md). Its script and styles live in
+    docs/playground/; the generated files (wheel, editor bundle, examples) in
+    docs/playground/dist/, made by playground/build.py. -#}
+{% extends "main.html" %}
+
+{% block extrahead %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ 'playground/playground.css' | url }}">
+{% endblock %}
+
+{% block content %}
+  {{ super() }}
+  <div class="amp" id="amlint-playground" data-status="loading">
+    <div class="amp-bar">
+      <label class="amp-field amp-field--inline">
+        <span>Example</span>
+        <select id="amp-example">
+          <option value="">Choose…</option>
+        </select>
+      </label>
+      <button type="button" class="amp-button" id="amp-share">Share link</button>
+      <span class="amp-status" role="status" aria-live="polite">
+        <span class="amp-spinner" aria-hidden="true"></span>
+        <span id="amp-status-text">Loading the editor…</span>
+      </span>
+    </div>
+
+    <div class="amp-main">
+      <section class="amp-pane amp-pane--editor" aria-labelledby="amp-editor-title">
+        <div class="amp-pane__head">
+          <h2 class="amp-pane__title" id="amp-editor-title">alertmanager.yml</h2>
+          <span class="amp-summary" id="amp-summary"></span>
+        </div>
+        <div class="amp-editor" id="amp-editor"></div>
+      </section>
+
+      <section class="amp-pane amp-pane--results" aria-label="Results">
+        <div class="amp-tabs" role="tablist" aria-label="Results">
+          <button type="button" role="tab" id="amp-tab-findings" aria-controls="amp-panel-findings" aria-selected="true">Findings <span class="amp-count" id="amp-count-findings"></span></button>
+          <button type="button" role="tab" id="amp-tab-tree" aria-controls="amp-panel-tree" aria-selected="false" tabindex="-1">Route tree</button>
+          <button type="button" role="tab" id="amp-tab-route" aria-controls="amp-panel-route" aria-selected="false" tabindex="-1">Route an alert</button>
+          <button type="button" role="tab" id="amp-tab-diff" aria-controls="amp-panel-diff" aria-selected="false" tabindex="-1">Diff</button>
+          <button type="button" role="tab" id="amp-tab-rules" aria-controls="amp-panel-rules" aria-selected="false" tabindex="-1">Rules <span class="amp-count" id="amp-count-rules"></span></button>
+        </div>
+
+        <div class="amp-panel" role="tabpanel" id="amp-panel-findings" aria-labelledby="amp-tab-findings" tabindex="0">
+          <div id="amp-findings"><p class="amp-muted">Findings appear here once Python has loaded.</p></div>
+        </div>
+
+        <div class="amp-panel" role="tabpanel" id="amp-panel-tree" aria-labelledby="amp-tab-tree" tabindex="0" hidden>
+          <div id="amp-tree"><p class="amp-muted">The route tree appears once Python has loaded.</p></div>
+        </div>
+
+        <div class="amp-panel" role="tabpanel" id="amp-panel-route" aria-labelledby="amp-tab-route" tabindex="0" hidden>
+          <p class="amp-muted">Which receivers get an alert with these labels, through which routes, and with which grouping and timings. Like <code>amlint route</code>.</p>
+          <label class="amp-field" for="amp-labels">
+            <span>Alert labels</span>
+            <textarea id="amp-labels" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="alertname=NodeDown severity=critical team=infra"></textarea>
+          </label>
+          <label class="amp-field" for="amp-firing">
+            <span>Firing at the same time <small>(optional, one alert per line, to test inhibit rules)</small></span>
+            <textarea id="amp-firing" rows="2" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="alertname=NodeDown severity=critical instance=a"></textarea>
+          </label>
+          <div id="amp-route-result" aria-live="polite"></div>
+        </div>
+
+        <div class="amp-panel" role="tabpanel" id="amp-panel-diff" aria-labelledby="amp-tab-diff" tabindex="0" hidden>
+          <p class="amp-muted">Paste the config as it was before, e.g. from your main branch. The editor on the left is the new version. Like <code>amlint diff</code>: findings that are new or fixed, and the alerts that are now routed differently.</p>
+          <div class="amp-pane__head">
+            <h3 class="amp-pane__title" id="amp-before-title">before.yml</h3>
+            <button type="button" class="amp-button amp-button--small" id="amp-before-copy">Copy the config here</button>
+          </div>
+          <div class="amp-editor amp-editor--small" id="amp-before"></div>
+          <div id="amp-diff-result" aria-live="polite"></div>
+        </div>
+
+        <div class="amp-panel" role="tabpanel" id="amp-panel-rules" aria-labelledby="amp-tab-rules" tabindex="0" hidden>
+          <p class="amp-muted">Optional: paste Prometheus alerting rules (a rule file with <code>groups:</code>, or a <code>PrometheusRule</code> manifest). amlint then also checks that routes and inhibit rules match alert names the rules produce, and which alerts end up at the root receiver. Like <code>amlint check --rules</code>; the findings show up under Findings.</p>
+          <div class="amp-pane__head">
+            <h3 class="amp-pane__title" id="amp-rules-title">rules.yml</h3>
+          </div>
+          <div class="amp-editor amp-editor--small" id="amp-rules"></div>
+          <div id="amp-rules-status" aria-live="polite"></div>
+        </div>
+      </section>
+    </div>
+
+    <dialog class="amp-dialog" id="amp-share-dialog" aria-labelledby="amp-share-title">
+      <form method="dialog">
+        <h2 id="amp-share-title">Share link</h2>
+        <p>The link contains your config<span id="amp-share-extra"></span>, compressed into the part of the URL after <code>#</code>. Browsers don't send that part to any server, but <strong>anyone with the link can read it</strong>. Remove passwords, API keys, tokens and webhook URLs first.</p>
+        <div class="amp-secrets" id="amp-secrets" hidden></div>
+        <label class="amp-field" for="amp-share-url" id="amp-share-url-label" hidden>
+          <span>Link</span>
+          <input type="text" id="amp-share-url" readonly>
+        </label>
+        <p class="amp-muted" id="amp-share-note" aria-live="polite"></p>
+        <div class="amp-dialog__buttons">
+          <button type="submit" class="amp-button" value="close">Close</button>
+          <button type="button" class="amp-button amp-button--primary" id="amp-share-copy">Copy link</button>
+        </div>
+      </form>
+    </dialog>
+  </div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script type="module" src="{{ 'playground/app.js' | url }}"></script>
+{% endblock %}

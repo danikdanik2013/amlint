@@ -6,6 +6,7 @@ from typing import List, Optional
 from conftest import INHIBIT_EXAMPLES, PHASES, SEED
 from harness import (
     Alertmanager,
+    amlint_config,
     binary_version,
     dump,
     format_labels,
@@ -16,7 +17,6 @@ from hypothesis import assume, event, given, seed, settings
 from reduce import reduce
 from strategies import inhibition_scenarios
 
-from amlint.cli import load
 from amlint.routing import Inhibitor, Router, RoutingError, _matches
 
 
@@ -43,7 +43,7 @@ def disagreement(binary: str, workdir: str, cfg: dict, alerts: List[dict],
     """Report lines for the first alert amlint and Alertmanager treat differently, or None.
     Raises RoutingError if amlint cannot simulate the config."""
     path = write_config(cfg, workdir, name)
-    loaded = load(path)
+    loaded = amlint_config(path)
     router = Router(loaded.get("route"))
     inhibitor = Inhibitor(loaded.get("inhibit_rules"))
     with Alertmanager(binary, path) as am:

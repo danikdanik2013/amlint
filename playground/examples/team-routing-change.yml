@@ -1,0 +1,60 @@
+# testdata/real-world/team-routing.yml after a "small cleanup": the database route
+# lost `continue: true`, and team X's critical alerts got a longer repeat_interval.
+# The Diff tab shows which alerts are now routed differently.
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: smtp.example.org:587
+  smtp_from: alertmanager@example.org
+  slack_api_url_file: /etc/alertmanager/secrets/slack-url
+templates:
+  - templates/*.tmpl
+route:
+  receiver: team-ops-mail
+  group_by: [alertname, cluster, service]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 3h
+  routes:
+    - matchers: ['service =~ "foo1|foo2|baz"']
+      receiver: team-x-mail
+      routes:
+        - matchers: [severity="critical"]
+          receiver: team-x-pager
+          repeat_interval: 12h
+    - matchers: [service="files"]
+      receiver: team-y-mail
+      routes:
+        - matchers: [severity="critical"]
+          receiver: team-y-pager
+    - matchers: [service="database"]
+      receiver: team-db-pager
+      group_by: [alertname, cluster, database]
+    - matchers: [service="database", 'severity=~"warning|info"']
+      receiver: team-db-slack
+      mute_time_intervals: [out-of-hours]
+time_intervals:
+  - name: out-of-hours
+    time_intervals:
+      - weekdays: ["saturday", "sunday"]
+      - times:
+          - start_time: "00:00"
+            end_time: "08:00"
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname, cluster, service]
+receivers:
+  - name: team-ops-mail
+    email_configs: [{to: ops@example.org}]
+  - name: team-x-mail
+    email_configs: [{to: team-x@example.org}]
+  - name: team-x-pager
+    pagerduty_configs: [{routing_key_file: /etc/alertmanager/secrets/team-x}]
+  - name: team-y-mail
+    email_configs: [{to: team-y@example.org}]
+  - name: team-y-pager
+    pagerduty_configs: [{routing_key_file: /etc/alertmanager/secrets/team-y}]
+  - name: team-db-pager
+    pagerduty_configs: [{routing_key_file: /etc/alertmanager/secrets/team-db}]
+  - name: team-db-slack
+    slack_configs: [{channel: "#db-alerts"}]

@@ -13,8 +13,13 @@ Semantic linter for Prometheus Alertmanager configs.
 Alertmanager's own `amtool check-config` already validates most schema-level mistakes —
 undefined receivers, missing integration fields, bad regex — and refuses to start over them.
 **amlint covers that same ground in one dependency-free CLI with JSON/SARIF/diff output,
-plus 14 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
+plus 15 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
 starts and runs, and just silently doesn't do what you meant.**
+
+**[Try it in your browser](https://danikdanik2013.github.io/amlint/playground/)**: paste a
+config and see the findings, the route tree, where an alert goes and what a change does to
+routing. amlint runs inside the page (Python compiled to WebAssembly), so your config never
+leaves your browser. Nothing to install.
 
 **Verified against Alertmanager v0.32.2, v0.33.1 and v0.34.1.** amlint simulates routing and
 inhibition in Python, so a [CI job](.github/workflows/differential.yml) checks it against
@@ -31,11 +36,12 @@ schema violations — they're valid configs that behave wrong:
 - catch-all branch before specific ones → specific branches **are unreachable** (config loads fine)
 - inhibition without `equal` → silences unrelated alerts, config loads fine, you think it's quiet
 - two sibling routes with identical matchers → the second **never fires**, no error anywhere
+- a broader sibling first (`severity="critical"` before `severity="critical", team="infra"`) → the narrower route **never fires** either
 - `group_wait` longer than `group_interval`, or `repeat_interval` shorter than `group_interval` → timing that quietly doesn't do what the numbers suggest
 - receiver defined but never routed to, or routed to but has no integration configured
 
 None of this fails `amtool check-config` or stops Alertmanager from starting. Run
-`amlint list` to see which of the 34 checks are these vs. which duplicate amtool's own
+`amlint list` to see which of the 35 checks are these vs. which duplicate amtool's own
 validation (included for convenience — one tool, one output format, no Go binary needed).
 
 ## Install
@@ -44,7 +50,8 @@ validation (included for convenience — one tool, one output format, no Go bina
 pip install amlint
 ```
 
-Or with Docker (no Python required):
+Or with Docker (no Python required), or not at all with the
+[playground](https://danikdanik2013.github.io/amlint/playground/):
 
 ```bash
 docker run --rm -v $(pwd):/cfg ghcr.io/danikdanik2013/amlint check /cfg/alertmanager.yml
@@ -64,6 +71,8 @@ amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
 amlint check alertmanager.yml --rules 'rules/*.yml'  # also check against Prometheus alerting rules
+amlint check alertmanager-secret.yaml       # a Kubernetes Secret, Helm values, a Mimir config...
+kubectl kustomize deploy/ | amlint check -  # ...or AlertmanagerConfig resources, merged like the operator
 amlint diff old.yml new.yml                 # what changed: findings, and alerts routed differently
 amlint diff old.yml new.yml --format markdown  # the same as a compact PR comment
 amlint tree alertmanager.yml                # visualize the route tree, issues inline
@@ -184,6 +193,33 @@ runtime alerts also carry labels from their PromQL series and `external_labels`,
 goes by the rule's static labels only and skips anything that depends on a label it can't
 know. Details in [docs/checks/rules.md](docs/checks/rules.md).
 
+## Kubernetes, Helm and Mimir
+
+amlint reads the config in the shape you deploy it, detected from the content
+(`--input-format` overrides it):
+
+- a Kubernetes **Secret** or ConfigMap holding `alertmanager.yaml`, in `stringData` or
+  base64 `data`, with its other keys as template files;
+- **kube-prometheus-stack** values: `alertmanager.config`, merged over the chart's default
+  config the way Helm merges it, and `alertmanager.templateFiles`;
+- a **Mimir** or **Cortex** tenant config: the `alertmanager_config` string and
+  `template_files`;
+- prometheus-operator **AlertmanagerConfig** resources (v1alpha1 and v1beta1), merged into
+  the base config as the operator does it: receivers named `<namespace>/<name>/<receiver>`,
+  a `namespace` matcher on each resource's route and inhibit rules (per
+  `alertmanagerConfigMatcherStrategy`), and Secret references counted as set.
+
+`check`, `tree`, `route`, `test` and `diff` work on all of them, and findings point at the
+line in your file, inside a `stringData` block too:
+
+```
+  ✖  ERROR  [undefined-receiver]  ·  team-a.yaml:10:9  ·  route.routes[0].routes[0]
+     Route references receiver 'team-a/payments/pager' which is not defined in receivers.
+     Alerts matched here will be dropped.
+```
+
+Details, including what isn't modeled, in [docs/kubernetes.md](docs/kubernetes.md).
+
 ## CI example
 
 ```yaml
@@ -249,6 +285,7 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `deep-nesting` | info | route tree deeper than 5 levels |
 | `global-resolve-timeout-missing` | info | `global.resolve_timeout` not set; defaults to 5m |
 | `route-match-collision` | warn | two sibling routes with identical matchers |
+| `shadowed-route` | warn | earlier sibling catches every alert first (`=~"warning\|critical"` before `="critical"`) |
 | `route-unknown-alertname` | warn | with `--rules`: route matches an `alertname` no alerting rule produces |
 | `inhibit-unknown-alertname` | warn | with `--rules`: inhibit rule matches an `alertname` no alerting rule produces |
 | `alert-hits-default-receiver` | info | with `--rules`: by their static labels, alerts match no child route (grouped by routing labels) |
@@ -258,7 +295,7 @@ Run `amlint explain <code>` for detailed description and examples of any check.
 ## Tests
 
 ```bash
-python3 -m pytest test_linter.py -v
+python3 -m pytest test_linter.py test_formats.py -v
 ```
 
 ## License

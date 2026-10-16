@@ -11,6 +11,7 @@ on:
       - amlint/routing.py
       - amlint/linter.py
       - amlint/goyaml.py
+      - amlint/formats.py
       - amlint/explains.py
       - tests/differential/**
       - scripts/fetch_alertmanager.py
@@ -22,6 +23,7 @@ on:
       - amlint/routing.py
       - amlint/linter.py
       - amlint/goyaml.py
+      - amlint/formats.py
       - amlint/explains.py
       - tests/differential/**
       - scripts/fetch_alertmanager.py

@@ -9,6 +9,11 @@ fine, that Alertmanager runs without complaint, and that still silently don't do
 meant: unreachable routes behind a catch-all, timing that contradicts itself, inhibition
 rules that silence too broadly.
 
+Try it without installing anything: the [playground](playground/index.md) checks a config
+in your browser, and the config never leaves the page.
+
+[Open the playground](playground/index.md){ .md-button .md-button--primary }
+
 ## Quick example
 
 ```bash
@@ -40,6 +45,7 @@ Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure t
 | Bad regex in matchers | ✅ | ✅ |
 | Unreachable routes (catch-all swallows siblings) | ❌ | ✅ |
 | Route matcher collisions | ❌ | ✅ |
+| Shadowed routes (an earlier, broader sibling catches every alert) | ❌ | ✅ |
 | Inhibition rules that silence too broadly, or never fire | ❌ | ✅ |
 | Timing misconfig (`group_wait`/`group_interval`/`repeat_interval`) | ❌ | ✅ |
 | Unused or empty receivers | ❌ | ✅ |
@@ -48,7 +54,7 @@ Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure t
 
 amtool already covers the first four rows — amlint re-implements those so you get one
 tool with unified JSON/SARIF/diff/tree output instead of needing the Go binary too, not
-because amtool misses them. Run `amlint list` to see exactly which of the 34 checks
+because amtool misses them. Run `amlint list` to see exactly which of the 35 checks
 duplicate amtool and which don't; `amlint explain <code>` says so for any individual check.
 
 On the last row: `amtool config routes test` already lets you test one alert's routing
@@ -57,7 +63,7 @@ suite of these as regression tests from a file, in CI, without a live Alertmanag
 what `amlint test` adds; `amlint route` is the single-alert version, showing the matched
 routes and the `group_by` and timings each one inherits.
 
-## 34 checks — 14 of them amtool can't do
+## 35 checks — 15 of them amtool can't do
 
 See [all checks](checks/index.md) for the full list, and which column each falls in.
 
