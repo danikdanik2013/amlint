@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `amlint diff --format markdown` — a compact, deterministic report for a pull-request
+  comment: a one-line summary, a table of label sets whose receivers changed (labels |
+  before | after), changed `group_by` and timings, and new and fixed findings with
+  `file:line:col`. Each table stops after 50 rows with "…and N more". Names from the config
+  are escaped, so they can't add Markdown, HTML or @mentions to the comment.
+- GitHub Action: `diff-base` input (e.g. `${{ github.event.pull_request.base.sha }}`). On
+  `pull_request` events the action extracts the config at that ref, runs
+  `amlint diff --format markdown` and creates or updates one PR comment, found by the
+  `<!-- amlint-routing-diff -->` marker, through the REST API with `curl` (no third-party
+  actions). It also writes the report to the job summary. A config that doesn't exist at the
+  base is diffed as new. Needs `permissions: pull-requests: write` and the base commit in the
+  checkout (`fetch-depth: 0`). On other events it does nothing. New `github-token` input.
+- GitHub Action: `format` input for the check step, `github` (default) or `text`.
+
+### Changed
+- The GitHub Action reports findings as PR annotations (`--format github`) by default,
+  instead of the text report. `format: text` restores the old output; `sarif: true` still
+  uploads SARIF.
+- `amlint diff` treats an empty old file as no config: every finding in the new file is
+  new, none is fixed (the empty file's `no-root-route` used to show up as fixed), and the
+  routing section lists every label set's receivers as changed from `(none)`.
+
 ## [0.4.0] - 2026-10-16
 
 First PyPI release since 0.2.0: it also ships everything under 0.2.1 and 0.3.0 below, which

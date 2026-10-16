@@ -2288,3 +2288,133 @@ def test_cli_diff_routing_skipped_when_config_cannot_be_simulated(tmp_path, caps
     assert "Routing not compared" in capsys.readouterr().out
     main(["diff", str(old_path), str(new_path), "--format", "json"])
     assert "old config" in json.loads(capsys.readouterr().out)["routing"]["skipped"]
+
+
+# ── amlint diff --format markdown ────────────────────────────────────
+
+def _markdown_diff(*argv):
+    import io
+    from contextlib import redirect_stdout
+    out = io.StringIO()
+    with redirect_stdout(out):
+        rc = main(["diff", *argv, "--format", "markdown"])
+    return rc, out.getvalue()
+
+
+def test_cli_diff_markdown_changed_routes(tmp_path):
+    new = {**_DB_ROUTE, "routes": [
+        {**_DB_ROUTE["routes"][0], "routes": [
+            {"matchers": ['severity="critical"'], "receiver": "infra-slack"}]},
+        {"matchers": ['team="infra"'], "receiver": "infra-slack", "group_wait": "10s",
+         "group_by": ["alertname", "cluster"]},
+    ]}
+    old_path, new_path = _write_diff_pair(tmp_path, new)
+    rc, out = _markdown_diff(old_path, new_path, "--only", "undefined-receiver")
+    assert rc == 0  # routing changes alone don't fail diff
+    assert out.startswith("### amlint diff\n\n**2 routing changes** · no new findings · "
+                          "0 fixed · 0 unchanged · ")
+    assert "#### Receivers\n\n| labels | before | after |\n| --- | --- | --- |\n" \
+           "| `team=db, severity=critical` | `pagerduty-db` | `infra-slack` |\n" in out
+    assert "| labels | receiver | setting | before | after |" in out
+    assert "| `team=infra` (+1 similar) | `infra-slack` | `group_by` | `alertname` " \
+           "| `alertname, cluster` |" in out
+    assert "| `team=infra` (+1 similar) | `infra-slack` | `group_wait` | `30s` | `10s` |" in out
+    assert "findings" not in out.split("\n", 3)[3]  # no findings sections
+    assert out.endswith("|\n") and not out.endswith("\n\n")
+
+
+def test_cli_diff_markdown_no_changes_is_one_line(tmp_path):
+    old_path, _ = _write_diff_pair(tmp_path, _DB_ROUTE)
+    rc, out = _markdown_diff(old_path, old_path)
+    assert rc == 0
+    assert out == ("### amlint diff\n\n"
+                   "No routing changes · no new findings · 0 fixed · 5 unchanged · "
+                   "6 label sets checked\n")
+    assert _markdown_diff(old_path, old_path) == (rc, out)  # deterministic
+
+
+def test_cli_diff_markdown_caps_tables(tmp_path):
+    def config(suffix):
+        routes = [{"matchers": [f'team="t{i}"'], "receiver": f"r{i}{suffix}"}
+                  for i in range(60)]
+        receivers = [{"name": "default"}] + [{"name": r["receiver"]} for r in routes]
+        return yaml.dump({"route": {"receiver": "default", "routes": routes},
+                          "receivers": receivers})
+    old_path, new_path = tmp_path / "old.yml", tmp_path / "new.yml"
+    old_path.write_text(config(""))
+    new_path.write_text(config("-renamed"))
+    _, out = _markdown_diff(str(old_path), str(new_path), "--only", "undefined-receiver")
+    assert out.splitlines()[2].startswith("**60 routing changes**")
+    rows = [line for line in out.splitlines() if line.startswith("| `team=")]
+    assert len(rows) == 50
+    assert rows[0] == "| `team=t0` | `r0` | `r0-renamed` |"
+    assert out.endswith("-renamed` |\n\n…and 10 more label sets\n")
+
+
+def test_cli_diff_markdown_findings_with_locations(tmp_path):
+    old_path, new_path = tmp_path / "old.yml", tmp_path / "new.yml"
+    old_path.write_text("route:\n  receiver: default\n  routes:\n"
+                        "    - matchers: ['team=\"db\"']\n      receiver: ghost\n"
+                        "receivers:\n  - name: default\n")
+    new_path.write_text("route:\n  receiver: default\n  routes:\n"
+                        "    - matchers: ['team=\"db\"']\n      receiver: default\n"
+                        "    - matchers: ['team=\"infra\"']\n      receiver: phantom\n"
+                        "receivers:\n  - name: default\n")
+    rc, out = _markdown_diff(str(old_path), str(new_path), "--only", "undefined-receiver")
+    assert rc == 1
+    assert out.splitlines()[2] == ("**2 routing changes** · **1 new finding** · 1 fixed · "
+                                   "0 unchanged · 3 label sets checked")
+    new_section = out.split("#### New findings\n\n")[1].split("#### Fixed findings")[0]
+    assert new_section.splitlines()[0] == "| level | check | location | message |"
+    assert new_section.splitlines()[2] == (
+        f"| ✖ error | `undefined-receiver` | `{new_path}:6:7` (`route.routes[1]`) "
+        "| Route references receiver 'phantom' which is not defined in receivers. "
+        "Alerts matched here will be dropped. |")
+    fixed_section = out.split("#### Fixed findings\n\n")[1]
+    assert f"| ✖ error | `undefined-receiver` | `{old_path}:4:7` (`route.routes[0]`) " \
+           in fixed_section
+    assert out.index("#### Receivers") < out.index("#### New findings")
+
+
+def test_cli_diff_markdown_new_file_against_empty_config(tmp_path):
+    empty = tmp_path / "empty.yml"
+    empty.write_text("")
+    _, new_path = _write_diff_pair(tmp_path, _DB_ROUTE)
+    rc, out = _markdown_diff(str(empty), new_path)
+    assert "0 fixed" in out and "#### Fixed findings" not in out  # no-root-route isn't "fixed"
+    assert "| `team=db, severity=critical` | `(none)` | `pagerduty-db` |" in out
+    assert "| `(no labels)` (+1 similar) | `(none)` | `default` |" in out
+    assert rc == (1 if "#### New findings" in out else 0)
+
+
+def test_cli_diff_markdown_routing_skipped_or_disabled(tmp_path):
+    _, new_path = _write_diff_pair(tmp_path, _DB_ROUTE)
+    old_path = tmp_path / "unparseable.yml"
+    old_path.write_text(yaml.dump({"route": {"receiver": "x", "routes": [
+        {"matchers": ["oops"], "receiver": "x"}]}, "receivers": [{"name": "x"}]}))
+    _, out = _markdown_diff(str(old_path), new_path, "--only", "undefined-receiver")
+    assert out.splitlines()[2].startswith("Routing not compared · no new findings")
+    assert "Routing not compared: old config: route.routes\\[0\\]: cannot parse matcher" in out
+    _, out = _markdown_diff(str(old_path), new_path, "--no-routing", "--only", "undefined-receiver")
+    assert out == "### amlint diff\n\nNo new findings · 0 fixed · 0 unchanged\n"
+
+
+def test_markdown_escapes_config_text():
+    from amlint.markdown import code, text
+    assert code("a|b") == "`a\\|b`"
+    assert code("x`y") == "``x`y``"
+    assert code("`edge`") == "`` `edge` ``"
+    assert code("line\nbreak") == "`line break`"
+    assert code("<b>@team</b>") == "`<b>@team</b>`"  # literal inside a code span
+    assert text("<img src=x> *bold* [l](u) a|b") == \
+        "\\<img src=x\\> \\*bold\\* \\[l\\](u) a\\|b"
+    assert text("ping @org/team & co") == "ping @&#8203;org/team \\& co"
+
+
+def test_cli_diff_markdown_escapes_receiver_names(tmp_path):
+    new = {**_DB_ROUTE, "routes": [_DB_ROUTE["routes"][0],
+                                   {"matchers": ['team="infra"'], "receiver": "@ops|`x`"}]}
+    old_path, new_path = _write_diff_pair(tmp_path, new)
+    _, out = _markdown_diff(old_path, new_path, "--only", "undefined-receiver")
+    assert "| `team=infra` (+1 similar) | `infra-slack` | `` @ops\\|`x` `` |" in out
+    assert "receiver '@&#8203;ops\\|\\`x\\`' which is not defined" in out
