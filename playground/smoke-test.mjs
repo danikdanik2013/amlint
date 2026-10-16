@@ -88,6 +88,23 @@ try {
       .waitFor();
   });
 
+  await step("route tree of AlertmanagerConfig resources points into the pasted text", async () => {
+    await page.selectOption("#amp-example", "alertmanagerconfig");
+    await page.click("#amp-tab-tree");
+    // the payments team's route is merged in as route.routes[0], from its spec.route
+    const row = page.locator(".amp-node[data-path='route.routes[0]'] > .amp-node__row",
+                             contains("team-a/payments/slack"));
+    await row.locator(".amp-loc", contains("49")).waitFor({ timeout: 30_000 });
+    await row.locator(".amp-loc").click();
+    await page.locator(".cm-flash", contains("route:")).waitFor();
+  });
+
+  await step("route tree says why it can't read the config", async () => {
+    await page.evaluate(() => window.amlintPlayground.setConfig("route:\n  routes: [\n"));
+    await page.locator("#amp-tree .amp-error", contains("Failed to parse YAML (config)"))
+      .locator(".amp-loc", contains("line 3")).waitFor({ timeout: 30_000 });
+  });
+
   await step("rules feed the --rules checks", async () => {
     await page.selectOption("#amp-example", "kube-prometheus");
     await page.click("#amp-tab-rules");

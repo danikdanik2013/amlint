@@ -66,6 +66,12 @@
   API server drops for that API version.
 - `lint()` takes `template_files=` (an `amlint.formats.BundledTemplates`) to check
   `templates:` against template files that ship with the config.
+- The playground reads these formats too. Its route tree is drawn from the config as amlint
+  reads it, with each route at its line in the pasted text (a team's route at its
+  `AlertmanagerConfig`'s `spec.route`), and an input amlint can't read shows the same error
+  there as under Findings; before, the tree parsed the paste as a plain `alertmanager.yml`
+  and came out empty or wrong. New example: AlertmanagerConfig resources. Template files
+  that ship in the input are checked by `template-file-missing` there.
 
 ### Changed
 - A file with several YAML documents that are all plain Alertmanager configs now fails with

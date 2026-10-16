@@ -2,8 +2,9 @@
 
 check, route and diff call amlint's own CLI with --format json, so the page shows what
 `amlint check|route|diff` print. Only the route tree, which the CLI prints as text, is
-built here, from the config and amlint's SourceMap. Every function takes strings and
-returns a JSON string.
+built here, from the config as amlint.formats reads it (a plain alertmanager.yml, a
+Kubernetes Secret, Helm values, a Mimir config or AlertmanagerConfig resources). Every
+function takes strings and returns a JSON string.
 """
 
 import contextlib
@@ -15,13 +16,11 @@ import sys
 
 os.environ["COLUMNS"] = "1000"  # rich wraps stderr messages at the console width
 
-import yaml  # noqa: E402
-
 from amlint import cli  # noqa: E402
 from amlint.explains import EXPLAINS  # noqa: E402
+from amlint.formats import FormatError, load_input  # noqa: E402
 from amlint.linter import route_cycle  # noqa: E402
 from amlint.rules import RulesError, load_rules, rule_files  # noqa: E402
-from amlint.source import SourceMap  # noqa: E402
 
 _DIR = "/tmp/amlint-playground"  # Pyodide's in-memory file system, never uploaded
 _STDIN = {"(-)": "(config)", "<stdin>": "config"}  # how the CLI names stdin in messages
@@ -166,18 +165,20 @@ def _matchers(node: dict) -> list:
 def tree(config: str) -> str:
     """The route tree with each route's line, matchers, receiver and own settings, or
     {"tree": null} when the config has no route mapping to draw, or one that contains
-    itself (check reports why)."""
+    itself (check reports why), with "error" when amlint can't read it (worded as
+    `amlint check` words it). The config is read as the CLI reads it, so the lines are in
+    the pasted text even when the route is merged from several resources or held in a
+    Secret's string."""
     try:
-        cfg = yaml.safe_load(config)
-        smap = SourceMap(config)
-    except yaml.YAMLError:
-        return json.dumps({"tree": None})
-    root = cfg.get("route") if isinstance(cfg, dict) else None
+        loaded = load_input(config)
+    except FormatError as e:
+        return json.dumps({"tree": None, "error": f"{e.title} (config): {e}"})
+    root = loaded.cfg.get("route") if isinstance(loaded.cfg, dict) else None
     if not isinstance(root, dict) or route_cycle(root):
         return json.dumps({"tree": None})
 
     def walk(node: dict, path: str, inherited):
-        line, col = smap.locate(path)
+        line, col = loaded.locate(path)
         receiver = node.get("receiver")
         children = node.get("routes") if isinstance(node.get("routes"), list) else []
         return {

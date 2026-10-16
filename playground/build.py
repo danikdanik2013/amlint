@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 DIST = os.path.join(ROOT, "docs", "playground", "dist")
 REAL_WORLD = os.path.join(ROOT, "testdata", "real-world")
+FORMATS = os.path.join(ROOT, "testdata", "formats")
 
 # Shown in the Examples menu, in this order. The first one loads when the page opens.
 EXAMPLES = [
@@ -63,6 +64,15 @@ EXAMPLES = [
         "rules": os.path.join(REAL_WORLD, "rules", "kube-prometheus-style.yaml"),
         "labels": "alertname=KubePodCrashLooping namespace=shop severity=warning",
         "firing": "alertname=KubePodCrashLooping namespace=shop severity=critical",
+    },
+    {
+        "id": "alertmanagerconfig",
+        "title": "AlertmanagerConfig resources",
+        "description": "prometheus-operator: a config Secret and two teams' "
+                       "AlertmanagerConfigs, merged the way the operator merges them",
+        "config": os.path.join(FORMATS, "alertmanagerconfig.yaml"),
+        "labels": "alertname=PaymentsLatency namespace=team-a severity=warning",
+        "firing": "alertname=PaymentsLatency namespace=team-a severity=critical",
     },
 ]
 
