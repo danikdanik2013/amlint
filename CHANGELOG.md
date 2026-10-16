@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- Python 3.14 and 3.15 support: CI runs the test suite on both, and the package lists them
+  in its classifiers. No code changes were needed.
 - A browser playground at https://danikdanik2013.github.io/amlint/playground/, published
   with the docs. Paste or edit an `alertmanager.yml` and the page shows, as you type:
   - findings, with the offending lines marked in the editor; click one to jump to its line,
