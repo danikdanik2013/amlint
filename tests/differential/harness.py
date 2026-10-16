@@ -178,8 +178,8 @@ class Alertmanager:
         time.sleep(0.3)
         while True:
             alerts = self.alerts()
-            state = {a["fingerprint"]: tuple(sorted(a["status"]["inhibitedBy"] or []))
-                     for a in alerts}
+            # whether, not by whom: with several valid sources Alertmanager names any one
+            state = {a["fingerprint"]: bool(a["status"]["inhibitedBy"]) for a in alerts}
             if len(alerts) == expected and state == previous:
                 return alerts
             if time.monotonic() > deadline:

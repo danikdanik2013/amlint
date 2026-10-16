@@ -46,17 +46,22 @@ REGEX_POOL = (
     "(?U)a+", "a\\z", "\\Aa", "[\\d-]+", "\\pL+",
 )
 
+# Hypothesis favours "simple" choices: sampled_from the first and last items of a pool,
+# integers their bounds. That helps shrinking, which these tests do their own way (see
+# reduce.py), but it leaves the middle of a pool all but untried. A random.Random that
+# Hypothesis seeds picks evenly and is still reproducible from the seed.
+_random = st.randoms(use_true_random=True)
+
+
 def pick(pool):
-    """A uniform choice from `pool`. sampled_from favours the first and last items, which
-    helps shrinking (these tests reduce failures their own way, see reduce.py) but leaves
-    the middle of a pool all but untried."""
+    """A choice from `pool`, each item about as likely as the others."""
     pool = tuple(pool)
-    return st.integers(0, 2**32 - 1).map(lambda i: pool[i % len(pool)])
+    return _random.map(lambda r: r.choice(pool))
 
 
 def one_in(n: int):
-    """True with probability 1/n (small st.integers ranges favour their ends too)."""
-    return pick(range(n)).map(lambda i: i == 0)
+    """True with probability 1/n."""
+    return _random.map(lambda r: r.randrange(n) == 0)
 
 
 _ATOMS = ("a", "b", "p", "-", ".", "\\.", "[a-c]", "[^a]", "\\d", "\\w", "\\s", "é", " ",
@@ -401,18 +406,21 @@ def _integration(draw, kind: str, broken: bool = False) -> dict:
     return entry
 
 
-MISTAKES = (
-    "undefined-receiver", "undefined-time-interval", "bad-regex", "groupby-ellipsis",
-    "no-root-route", "root-receiver", "root-matchers", "root-match", "root-continue",
-    "root-time-intervals", "duplicate-receiver", "integration-key",
-)
+# Each mistake is made in 1 of N configs, independently. Integration fields and regexes
+# have many variants each (11 integrations with globals and _file forms, 16 regexes).
+MISTAKES = {
+    "undefined-receiver": 12, "undefined-time-interval": 12, "bad-regex": 4,
+    "groupby-ellipsis": 12, "no-root-route": 20, "root-receiver": 20, "root-matchers": 20,
+    "root-match": 20, "root-continue": 20, "root-time-intervals": 20,
+    "duplicate-receiver": 12, "integration-key": 3,
+}
 
 
 @st.composite
 def validation_configs(draw) -> dict:
-    """A valid config with up to two mistakes from ALSO_CAUGHT_BY_AMTOOL. A missing
+    """A valid config, with mistakes from ALSO_CAUGHT_BY_AMTOOL now and then. A missing
     integration key is a mistake only when no global default covers it."""
-    mistakes = set(draw(st.lists(pick(MISTAKES), max_size=2, unique=True)))
+    mistakes = {mistake for mistake, n in MISTAKES.items() if draw(one_in(n))}
     names = ["default", "team0", "team1"]
     receivers = []
     for name in names:
