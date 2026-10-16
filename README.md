@@ -15,6 +15,11 @@ undefined receivers, missing integration fields, bad regex — and refuses to st
 plus 13 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
 starts and runs, and just silently doesn't do what you meant.**
 
+**[Try it in your browser](https://danikdanik2013.github.io/amlint/playground/)**: paste a
+config and see the findings, the route tree, where an alert goes and what a change does to
+routing. amlint runs inside the page (Python compiled to WebAssembly), so your config never
+leaves your browser. Nothing to install.
+
 ## Why
 
 Alertmanager configs are YAML routing trees with inhibition rules and receivers. The
@@ -37,7 +42,8 @@ validation (included for convenience — one tool, one output format, no Go bina
 pip install amlint
 ```
 
-Or with Docker (no Python required):
+Or with Docker (no Python required), or not at all with the
+[playground](https://danikdanik2013.github.io/amlint/playground/):
 
 ```bash
 docker run --rm -v $(pwd):/cfg ghcr.io/danikdanik2013/amlint check /cfg/alertmanager.yml
