@@ -51,13 +51,16 @@
     a "did you mean" suggestion. Checks `=` and `!=`, each name of a plain `=~"A|B|C"` list,
     and any other regex that matches none of the alert names
   - `inhibit-unknown-alertname` (warn) — the same for inhibit rule source and target matchers
-  - `alert-hits-default-receiver` (info) — based on its static labels, an alert matches no
-    child route and goes to the root receiver. Alerts whose route depends on a templated
-    label, or on a label no rule sets (so it comes from the series or `external_labels`),
-    are skipped
+  - `alert-hits-default-receiver` (info) — based on their static labels, alerts match no
+    child route and go to the root receiver. One finding per combination of the labels the
+    routes match on (`severity=warning`, "no severity label"), so a deliberate fallback is
+    one line. Alerts whose route depends on a templated label, or on a label no rule sets
+    (so it comes from the series or `external_labels`), are skipped
 - A `--rules` glob that matches no files, or a rule file that isn't valid YAML, exits 2. A
   config to check that looks like a rule file (an unquoted `--rules` glob the shell
   expanded) gets a warning
+- `testdata/real-world/rules/`: alerting rules for the real-world configs; the test suite
+  fails if `--rules` adds a WARN on them
 
 ### Changed
 - The GitHub Action reports findings as PR annotations (`--format github`) by default,

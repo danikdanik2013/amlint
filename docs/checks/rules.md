@@ -136,6 +136,12 @@ Each alerting rule is routed with its static labels, using the same simulation a
 route and end up on the root route's receiver: typically a rule that forgot its
 `severity` or `team` label, or uses a value no route handles.
 
+Alerts are grouped by the labels the routes match on, one finding per combination, naming
+the first five. A setup that sends every warning to the default receiver on purpose, as
+kube-prometheus does, gets one finding for `severity=warning` however many warning alerts
+there are, and a rule that lacks a label the others set stands out in a group of its own
+("with no severity label").
+
 It's info, not warn, because the static labels aren't the whole story: an alert whose
 route depends on a label amlint can't know (see [above](#what-amlint-knows-about-an-alert))
 is skipped, but series labels and `external_labels` the routes don't mention can't be
@@ -171,9 +177,9 @@ by design and the check stays quiet.
 
 ```
   ℹ  INFO   [alert-hits-default-receiver]  ·  alertmanager.yml:1:1  ·  route
-     Based on static rule labels (alertname=QueueBacklog), alert 'QueueBacklog' from
-     rules/app.yml:7 matches no child route and goes to the root receiver 'default'. Labels
-     from the PromQL series or external_labels may still route it elsewhere at runtime.
+     Based on static rule labels, 1 alert with no severity label matches no child route and
+     goes to the root receiver 'default': QueueBacklog (rules/app.yml:7). Labels from the
+     PromQL series or external_labels may still route it elsewhere at runtime.
 ```
 
 All of these findings point at the root `route:`. When some alerts are meant to use the

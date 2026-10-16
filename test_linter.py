@@ -3187,10 +3187,27 @@ def test_alert_hits_default_receiver(tmp_path):
     route = _routes('severity="critical"', 'severity="warning"')
     [f] = _rules_lint(tmp_path, route, code="alert-hits-default-receiver")
     assert f.level == "info" and f.where == "route"
-    assert f.msg.startswith("Based on static rule labels (alertname=QueueBacklog), "
-                            "alert 'QueueBacklog' from ")
-    assert "rules.yml:14" in f.msg and "root receiver 'default'" in f.msg
-    assert "external_labels" in f.msg
+    assert f.msg.startswith("Based on static rule labels, 1 alert with no severity label "
+                            "matches no child route and goes to the root receiver 'default': "
+                            "QueueBacklog (")
+    assert "rules.yml:14)" in f.msg and "route it elsewhere" in f.msg
+
+
+def test_alert_hits_default_receiver_groups_by_routing_labels(tmp_path):
+    # warning has no route: one finding for all of them, another for the rule without severity
+    rules = NODE_RULES + "".join(
+        f"      - alert: Warn{i}\n        expr: x > {i}\n        labels: {{severity: warning}}\n"
+        for i in range(6))
+    found = _rules_lint(tmp_path, _routes('severity="critical"'), rules=rules,
+                        code="alert-hits-default-receiver")
+    assert [f.msg.split(": ")[0] for f in found] == [
+        "Based on static rule labels, 7 alerts with severity=warning match no child route and "
+        "go to the root receiver 'default'",
+        "Based on static rule labels, 1 alert with no severity label matches no child route and "
+        "goes to the root receiver 'default'",
+    ]
+    assert "HighCPUUsage (" in found[0].msg and "Warn3 (" in found[0].msg
+    assert "Warn4" not in found[0].msg and "and 2 more." in found[0].msg
 
 
 def test_alert_hits_default_receiver_skips_templated_labels(tmp_path):
@@ -3208,7 +3225,7 @@ groups:
 """
     found = _rules_lint(tmp_path, _routes('severity="critical"'), rules=rules,
                         code="alert-hits-default-receiver")
-    assert ["'QueueBacklog'" in f.msg for f in found] == [True]
+    assert [("QueueBacklog (" in f.msg, "DiskFull" in f.msg) for f in found] == [(True, False)]
 
 
 def test_alert_hits_default_receiver_skips_labels_no_rule_sets(tmp_path):
@@ -3354,6 +3371,16 @@ def test_cli_check_rules_hints_at_shell_expanded_glob(tmp_path, capsys):
     err = capsys.readouterr().err
     assert "node.yml looks like a Prometheus rule file" in err
     assert "Quote the --rules glob" in err
+
+
+@pytest.mark.parametrize("name, infos", [("kube-prometheus-style", 2), ("team-routing", 0)])
+def test_real_world_configs_with_their_rules(name, infos, capsys):
+    """--rules adds no WARN on these, and a deliberate fallback is one finding per severity."""
+    config = os.path.join(_REAL_WORLD, f"{name}.yml")
+    rules = os.path.join(_REAL_WORLD, "rules", f"{name}.y*ml")
+    assert main(["check", "--strict", "--format", "json", config, "--rules", rules]) == 0
+    found = [f for f in json.loads(capsys.readouterr().out) if f["code"] in RULE_CODES]
+    assert [f["level"] for f in found] == ["info"] * infos
 
 
 def test_rules_codes_listed_and_explained(capsys):

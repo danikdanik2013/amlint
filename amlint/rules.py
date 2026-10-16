@@ -250,23 +250,48 @@ def check_alert_hits_default_receiver(cfg: dict, alerts: List[AlertRule]) -> Lis
     # Labels the routes match on that no rule sets come from the PromQL series or
     # external_labels: their value is unknown for every alert, not absent.
     from_rules = {label for a in alerts for label in (*a.labels, *a.unknown)}
-    runtime = {
-        label for node, _ in _walk_routes(route) for label, _, _ in _matchers(node)
-    } - from_rules
+    matched = {label for node, _ in _walk_routes(route) for label, _, _ in _matchers(node)}
+    runtime = matched - from_rules
+    # One finding per combination of the labels the routes decide on: a deliberate
+    # fallback (every severity=warning alert) stays one finding, and a rule that lacks a
+    # label the others set stands out in a group of its own.
+    keys = sorted(matched - runtime - {"alertname"})
+    groups: Dict[Tuple[Optional[str], ...], List[AlertRule]] = {}
+    receiver = None
     for a in alerts:
         matches = router.match_partial(a.labels, a.unknown | runtime)
         if matches is None or [m.path for m in matches] != [("route",)]:
             continue  # depends on a label amlint can't know, or reaches a child route
-        labels = ", ".join(f"{k}={v}" for k, v in a.labels.items())
-        out.append(Finding(
-            INFO, "alert-hits-default-receiver",
-            f"Based on static rule labels ({labels}), alert '{a.name}' from {a.location} "
-            f"matches no child route and goes to the root receiver "
-            f"'{matches[0].receiver or '(none)'}'. Labels from the PromQL series or "
-            f"external_labels may still route it elsewhere at runtime.",
-            "route",
-        ))
+        receiver = matches[0].receiver
+        groups.setdefault(tuple(a.labels.get(k) for k in keys), []).append(a)
+    for values, members in groups.items():
+        out.append(Finding(INFO, "alert-hits-default-receiver",
+                           _default_receiver_message(keys, values, members, receiver), "route"))
     return out
+
+
+_MAX_LISTED = 5  # alerts named in one alert-hits-default-receiver finding
+
+
+def _default_receiver_message(keys: List[str], values: Tuple[Optional[str], ...],
+                              members: List[AlertRule], receiver: Optional[str]) -> str:
+    first: Dict[str, AlertRule] = {}
+    for a in members:
+        first.setdefault(a.name, a)  # a rule repeated with other thresholds is listed once
+    listed = [f"{a.name} ({a.location})" for a in list(first.values())[:_MAX_LISTED]]
+    more = len(first) - len(listed)
+    which = ", ".join(f"{k}={v}" if v is not None else f"no {k} label"
+                      for k, v in zip(keys, values))
+    one = len(first) == 1
+    return (
+        f"Based on static rule labels, {len(first)} alert{'' if one else 's'}"
+        + (f" with {which}" if which else "")
+        + f" {'matches' if one else 'match'} no child route and {'goes' if one else 'go'} to "
+        f"the root receiver '{receiver or '(none)'}': {', '.join(listed)}"
+        + (f" and {more} more" if more else "")
+        + f". Labels from the PromQL series or external_labels may still route "
+        f"{'it' if one else 'them'} elsewhere at runtime."
+    )
 
 
 RULES_CHECKS = [

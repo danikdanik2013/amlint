@@ -241,7 +241,7 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `route-match-collision` | warn | two sibling routes with identical matchers |
 | `route-unknown-alertname` | warn | with `--rules`: route matches an `alertname` no alerting rule produces |
 | `inhibit-unknown-alertname` | warn | with `--rules`: inhibit rule matches an `alertname` no alerting rule produces |
-| `alert-hits-default-receiver` | info | with `--rules`: by its static labels, an alert matches no child route |
+| `alert-hits-default-receiver` | info | with `--rules`: by their static labels, alerts match no child route (grouped by routing labels) |
 
 Run `amlint explain <code>` for detailed description and examples of any check.
 

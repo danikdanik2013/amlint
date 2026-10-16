@@ -124,7 +124,7 @@ checks:
 |------|-------|-----------------|
 | [`route-unknown-alertname`](checks/rules.md#route-unknown-alertname) | warn | route matches an `alertname` no rule produces (typo, renamed or removed rule), with a "did you mean" |
 | [`inhibit-unknown-alertname`](checks/rules.md#inhibit-unknown-alertname) | warn | the same for inhibit rule source and target matchers |
-| [`alert-hits-default-receiver`](checks/rules.md#alert-hits-default-receiver) | info | based on its static labels, an alert matches no child route and goes to the root receiver |
+| [`alert-hits-default-receiver`](checks/rules.md#alert-hits-default-receiver) | info | based on their static labels, alerts match no child route and go to the root receiver (one finding per `severity=…` etc.) |
 
 amlint knows only what the rule file says: `alertname` plus the rule's `labels:`. At
 runtime alerts also get the labels of their PromQL series and Prometheus'

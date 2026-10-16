@@ -813,8 +813,8 @@ inhibit_rules:
     "alert-hits-default-receiver": {
         "level": "info",
         "summary": (
-            "With --rules: based on its static labels, an alert matches no child route and"
-            " goes to the root route's receiver."
+            "With --rules: based on their static labels, alerts match no child route and"
+            " go to the root route's receiver."
         ),
         "why": (
             "Each alerting rule is routed with alertname plus its own labels: — typically a "
@@ -822,9 +822,11 @@ inhibit_rules:
             "nobody watches. At runtime an alert also has the labels of its PromQL series and "
             "Prometheus' external_labels, so amlint doesn't guess about those: when the route "
             "taken depends on a label that no rule sets, or on a label whose value is a "
-            "template, the alert is skipped. Info only, since static labels are not the whole "
-            "story. To make a fallback intentional, give those alerts their own route to the "
-            "default receiver."
+            "template, the alert is skipped. Alerts are grouped by the labels the routes match "
+            "on, so sending every severity=warning alert to the default receiver on purpose is "
+            "one finding, and a rule missing a label the others set stands out on its own. "
+            "Info only, since static labels are not the whole story. To make a fallback "
+            "explicit, give those alerts their own route to the default receiver."
         ),
         "bad": """\
 # rules/app.yml
