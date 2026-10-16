@@ -10,6 +10,11 @@
   "did you mean" suggestion
 
 ### Fixed
+- `amlint test` (simulate.py) now matches the way Alertmanager does: regexes are anchored
+  (`severity=~"crit"` no longer matches `critical`), quoted values with escapes and
+  multi-matcher strings (`{a="1", b="2"}`) go through the linter's matcher parser, an
+  unparseable matcher no longer turns a route into a catch-all, and a missing label
+  compares as the empty string
 - Inhibition checks (`inhibit-no-equal`, `inhibit-same-match`, `circular-inhibition`) now read
   `source_matchers` / `target_matchers`; previously only `source_match` / `target_match` were seen
 - `bad-regex` follows Go RE2 instead of Python `re`: lookarounds, backreferences, possessive

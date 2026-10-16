@@ -1455,3 +1455,57 @@ def test_cli_tree_unknown_ignore_code_warns(tmp_path, capsys):
     cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n")
     assert main(["tree", str(cfg), "--ignore", "unreachable-rout"]) == 0
     assert "did you mean 'unreachable-route'" in capsys.readouterr().err
+
+
+# ── simulate_route: same matcher semantics as the linter ─────────────
+
+def _simulated(route_matchers, labels):
+    from amlint.simulate import simulate_route
+    route = {"receiver": "default", "routes": [dict(route_matchers, receiver="hit")]}
+    return [r for r, _ in simulate_route(route, labels)]
+
+
+def test_simulate_regex_is_anchored():
+    # Alertmanager anchors regexes: "crit" must not match "critical"
+    assert _simulated({"matchers": ['severity=~"crit"']}, {"severity": "critical"}) == ["default"]
+    assert _simulated({"matchers": ['severity=~"crit"']}, {"severity": "crit"}) == ["hit"]
+    assert _simulated({"match_re": {"service": "db"}}, {"service": "db-payments"}) == ["default"]
+    assert _simulated({"matchers": ['env!~"prod"']}, {"env": "prod-eu"}) == ["hit"]
+
+
+def test_simulate_multi_matcher_string():
+    m = {"matchers": ['{team="infra", severity="critical"}']}
+    assert _simulated(m, {"team": "infra"}) == ["default"]
+    assert _simulated(m, {"team": "infra", "severity": "critical"}) == ["hit"]
+
+
+def test_simulate_quoted_value_escapes():
+    m = {"matchers": [r'msg="say \"hi\""']}
+    assert _simulated(m, {"msg": 'say "hi"'}) == ["hit"]
+
+
+def test_simulate_missing_label_is_empty_string():
+    assert _simulated({"match": {"env": ""}}, {}) == ["hit"]
+    assert _simulated({"matchers": ['env!=""']}, {}) == ["default"]
+
+
+def test_simulate_non_string_values():
+    assert _simulated({"match": {"code": 500}}, {"code": "500"}) == ["hit"]
+    assert _simulated({"match": {"code": "500"}}, {"code": 500}) == ["hit"]
+
+
+def test_simulate_unparseable_matcher_is_not_catch_all():
+    assert _simulated({"matchers": ["this is not a matcher"]}, {"a": "b"}) == ["default"]
+
+
+def test_simulate_regex_flags_and_go_syntax():
+    assert _simulated({"matchers": ['sev=~"(?i)CRIT.*"']}, {"sev": "critical"}) == ["hit"]
+    assert _simulated({"matchers": [r'svc=~"\pL+"']}, {"svc": "payments"}) == ["hit"]
+    # RE2 rejects lookaheads, so such a route never matches in the simulation either
+    assert _simulated({"matchers": ['svc=~"(?!test).*"']}, {"svc": "prod"}) == ["default"]
+
+
+def test_simulate_skips_malformed_routes():
+    from amlint.simulate import simulate_route
+    route = {"receiver": "default", "routes": ["oops", {"match": {"a": "b"}, "receiver": "x"}]}
+    assert [r for r, _ in simulate_route(route, {"a": "b"})] == ["x"]
