@@ -73,9 +73,15 @@
   and came out empty or wrong. New example: AlertmanagerConfig resources. Template files
   that ship in the input are checked by `template-file-missing` there.
 - `shadowed-route` (warn) — a route never receives alerts because an earlier sibling without
-  `continue: true` has a strict subset of its matchers (`severity="critical"` before
-  `severity="critical", team="infra"`). Identical matchers stay `route-match-collision` and
-  catch-alls stay `unreachable-route`, so each dead route is reported once
+  `continue: true` matches every alert it would: `severity=~"warning|critical"` before
+  `severity="critical"`, `team!="db"` before `team="infra"`, `alertname=~"Kube.*"` before
+  `alertname=~"KubePod.*"`, or `severity="critical"` before `severity="critical", team="infra"`.
+  Regex and negative matchers are compared by the values they allow (a missing label is the
+  empty string, as in Alertmanager), and the parent routes' matchers count too. Only what
+  amlint can prove is reported: a regex with case folding (`(?i)`), word boundaries or
+  anchors mid-pattern, or one too large to compare, keeps the check silent. Identical
+  matchers stay `route-match-collision` and catch-alls stay `unreachable-route`, so each dead
+  route is reported once
 
 ### Changed
 - A file with several YAML documents that are all plain Alertmanager configs now fails with

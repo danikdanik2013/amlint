@@ -2320,21 +2320,102 @@ def test_shadowed_route_nested_siblings():
     assert _where(cfg, "shadowed-route") == ["route.routes[0].routes[1]"]
 
 
-@pytest.mark.parametrize("first, second", [
-    ({"matchers": ['severity="critical"'], "continue": True},
-     {"matchers": ['severity="critical"', 'team="infra"']}),
-    ({"matchers": ['severity="critical"', 'team="infra"']},
-     {"matchers": ['severity="critical"']}),
-    ({"matchers": ['severity="critical"']},
-     {"matchers": ['severity="warning"', 'team="infra"']}),
-    ({"matchers": ['severity=~"critical"']},
-     {"matchers": ['severity="critical"', 'team="infra"']}),
-    ({"matchers": ['severity="critical"']},
-     {"matchers": ['severity=~"critical"', 'team="infra"']}),
-], ids=["continue-true", "earlier-more-specific", "different-value",
-        "regex-before-equality", "equality-before-regex"])
+# (earlier, later) siblings where every alert the later one matches stops at the earlier one
+SHADOWED_BY_IMPLICATION = {
+    "equality-in-alternation": (
+        ['severity=~"warning|critical"'], ['severity="critical"']),
+    "equality-implies-not-equal": (
+        ['team!="db"'], ['team="infra"', 'severity="critical"']),
+    "equality-implies-negative-regex": (
+        ['team!~"db|storage"'], ['team="infra"']),
+    "regex-implies-shorter-prefix": (
+        ['alertname=~"Kube.*"'], ['alertname=~"KubePod.*"', 'namespace="monitoring"']),
+    "alternation-in-wider-alternation": (
+        ['severity=~"critical|warning|info"'], ['severity=~"(warning|critical)"']),
+    "regex-implies-equality": (
+        ['severity="critical"'], ['severity=~"^critical$"', 'team="infra"']),
+    "equality-implies-equal-regex": (
+        ['severity=~"critical"'], ['severity="critical"', 'team="infra"']),
+    "regex-disjoint-from-negative-regex": (
+        ['service!~"db-.*"'], ['service=~"api-[0-9]+"']),
+    "negative-implies-wider-negative": (
+        ['env!="dev"'], ['env!~"dev|test"']),
+    "missing-label-is-empty": (
+        ['team=~"|infra"'], ['team=""', 'severity="critical"']),
+    "several-matchers-on-one-label": (
+        ['severity="critical"'], ['severity=~"critical|warning"', 'severity!="warning"']),
+    "case-folding-on-a-known-value": (
+        ['severity=~"(?i)crit.*"'], ['severity="Critical"']),
+}
+
+
+@pytest.mark.parametrize("earlier, later", SHADOWED_BY_IMPLICATION.values(),
+                         ids=SHADOWED_BY_IMPLICATION.keys())
+def test_shadowed_route_by_implication(earlier, later):
+    cfg = _sibling_routes({"matchers": earlier}, {"matchers": later})
+    found = [f for f in lint(cfg) if f.code == "shadowed-route"]
+    assert [f.where for f in found] == ["route.routes[1]"]
+    assert "route.routes[0] matches every alert this route matches" in found[0].msg
+
+
+def test_shadowed_route_counts_parent_matchers():
+    # every alert reaching these siblings has env="prod", which env=~"prod|staging" allows
+    cfg = _sibling_routes({"matchers": ['env="prod"'], "routes": [
+        {"matchers": ['env=~"prod|staging"', 'severity="critical"'], "receiver": "a"},
+        {"matchers": ['severity="critical"', 'team="db"'], "receiver": "a"},
+    ]})
+    assert _where(cfg, "shadowed-route") == ["route.routes[0].routes[1]"]
+
+
+# (earlier, later) siblings where some alert reaches the later one
+REACHABLE_AFTER = {
+    "continue-true": (
+        {"matchers": ['severity="critical"'], "continue": True},
+        {"matchers": ['severity="critical"', 'team="infra"']}),
+    "earlier-more-specific": (
+        {"matchers": ['severity="critical"', 'team="infra"']},
+        {"matchers": ['severity="critical"']}),
+    "different-value": (
+        {"matchers": ['severity="critical"']},
+        {"matchers": ['severity="warning"', 'team="infra"']}),
+    "alternation-before-wider-alternation": (
+        {"matchers": ['severity=~"warning|critical"']},
+        {"matchers": ['severity=~"warning|critical|info"']}),
+    "not-equal-before-that-value": (
+        {"matchers": ['team!="db"']},
+        {"matchers": ['team="db"']}),
+    "longer-prefix-first": (
+        {"matchers": ['alertname=~"KubePod.*"']},
+        {"matchers": ['alertname=~"Kube.*"']}),
+    "label-the-later-route-leaves-open": (
+        {"matchers": ['team!="db"']},
+        {"matchers": ['severity="critical"']}),
+    "earlier-needs-the-label": (
+        {"matchers": ['team=~".+"']},
+        {"matchers": ['team=""', 'severity="critical"']}),
+    "negative-regex-overlaps": (
+        {"matchers": ['service!~"db-.*"']},
+        {"matchers": ['service=~"db.*"']}),
+    "earlier-regex-narrower": (
+        {"matchers": ['env=~"prod"']},
+        {"matchers": ['env=~"prod|staging"']}),
+}
+
+
+@pytest.mark.parametrize("first, second", REACHABLE_AFTER.values(), ids=REACHABLE_AFTER.keys())
 def test_shadowed_route_not_reported(first, second):
     assert "shadowed-route" not in codes(_sibling_routes(first, second))
+
+
+@pytest.mark.parametrize("earlier, later", [
+    (['severity=~"(?i)crit.*"'], ['severity=~"(?i)critical"']),  # no case folding
+    (['host=~"a{0,1000}"'], ['host=~"a{0,10}"']),  # automaton too large
+    (['host=~"(a|b)*"'], ['host=~"a^b"']),  # anchor mid-pattern: matches nothing
+], ids=["case-insensitive", "too-large", "anchor-mid-pattern"])
+def test_shadowed_route_stays_silent_when_unproven(earlier, later):
+    # each later route is dead, but amlint can't prove it, so it says nothing
+    cfg = _sibling_routes({"matchers": earlier}, {"matchers": later})
+    assert "shadowed-route" not in codes(cfg)
 
 
 def test_shadowed_route_leaves_identical_to_route_match_collision():
@@ -2371,18 +2452,165 @@ def test_dead_routes_reported_once():
     ]
 
 
+def test_dead_routes_reported_once_with_regex():
+    cfg = _sibling_routes(
+        {"matchers": ['severity=~"warning|critical"']},
+        {"matchers": ['severity="critical"']},          # shadowed by [0]
+        {"match": {"severity": "critical"}},            # identical to [1]
+        {"matchers": ['severity=~"critical"']},         # same alerts as [1], other spelling
+        {"matchers": ['team=~".*"']},                   # catch-all
+        {"matchers": ['severity="info"']},              # behind the catch-all
+    )
+    found = sorted((f.code, f.where) for f in lint(cfg)
+                   if f.code in ("shadowed-route", "route-match-collision", "unreachable-route"))
+    assert found == [
+        ("route-match-collision", "route.routes[2]"),
+        ("shadowed-route", "route.routes[1]"),
+        ("shadowed-route", "route.routes[3]"),
+        ("unreachable-route", "route.routes[4]"),
+    ]
+
+
+def _probe(cfg):
+    """The Router, and the label sets `amlint diff` would try on it."""
+    from amlint.routing import Router, probe_label_sets
+    router = Router(cfg["route"])
+    return router, probe_label_sets([router])[0]
+
+
 @pytest.mark.parametrize("first, second", [
     ({"matchers": ['severity="critical"']},
      {"matchers": ['severity="critical"', 'team="infra"']}),
     ({"match": {"severity": "critical"}},
      {"matchers": ['{severity="critical", team="infra"}']}),
+    *(({"matchers": earlier}, {"matchers": later})
+      for earlier, later in SHADOWED_BY_IMPLICATION.values()),
 ])
 def test_shadowed_route_agrees_with_routing(first, second):
-    from amlint.routing import Router
+    from amlint.routing import _compile_matchers, _matches
     cfg = _sibling_routes(first, second)
     assert _where(cfg, "shadowed-route") == ["route.routes[1]"]
-    alert = {"severity": "critical", "team": "infra"}
-    assert [m.path[-1] for m in Router(cfg["route"]).match(alert)] == ["route.routes[0]"]
+    router, label_sets = _probe(cfg)
+    later = _compile_matchers(second, "route.routes[1]")
+    would_match = [labels for labels in label_sets if _matches(later, labels)]
+    assert would_match  # the probes include alerts the later route's matchers accept ...
+    for labels in would_match:  # ... and the Router sends each to the earlier sibling
+        assert [m.path[-1] for m in router.match(labels)] == ["route.routes[0]"]
+
+
+@pytest.mark.parametrize("first, second", REACHABLE_AFTER.values(), ids=REACHABLE_AFTER.keys())
+def test_route_not_reported_as_shadowed_is_reachable(first, second):
+    router, label_sets = _probe(_sibling_routes(first, second))
+    assert any(m.path[-1] == "route.routes[1]"
+               for labels in label_sets for m in router.match(labels))
+
+
+# ── matcher implication (amlint/implication.py) ─────────────────────
+
+def _m(*items):
+    from amlint.linter import _parse_matchers
+    return _parse_matchers(list(items))
+
+
+@pytest.mark.parametrize("later, earlier, expected", [
+    # = against =~ / != / !~: the one allowed value decides
+    (['sev="critical"'], ['sev=~"warning|critical"'], True),
+    (['sev="info"'], ['sev=~"warning|critical"'], False),
+    (['team="a"'], ['team!="b"'], True),
+    (['team="b"'], ['team!="b"'], False),
+    (['team="a"'], ['team!~"b.*"'], True),
+    (['team="bx"'], ['team!~"b.*"'], False),
+    # =~ against =~: language inclusion
+    (['sev=~"crit.*"'], ['sev=~".*"'], True),
+    (['sev=~"crit.*"'], ['sev=~"cr.*"'], True),
+    (['sev=~"cr.*"'], ['sev=~"crit.*"'], False),
+    (['sev=~"warning|critical"'], ['sev="critical"'], False),
+    (['sev=~"critical|warning"'], ['sev=~"(critical|warning|info)"'], True),
+    (['id=~"[0-9]{2,3}"'], ['id=~"[0-9]+"'], True),
+    (['id=~"[0-9]+"'], ['id=~"[0-9]{2,3}"'], False),
+    (['id=~"a+?"'], ['id=~"a*"'], True),
+    (['x=~"(ab)*"'], ['x=~"(a|b)*"'], True),
+    (['x=~"(a|b)*"'], ['x=~"(ab)*"'], False),
+    (['x=~"^a$|^b$"'], ['x=~"[ab]"'], True),
+    (['x=~"[^a]"'], ['x=~"."'], False),  # [^a] matches a newline, . doesn't
+    (['x=~"(?s:.)"'], ['x=~"."'], False),
+    (['x=~"."'], ['x=~"(?s:.)"'], True),
+    # negations
+    (['x!~"a|b"'], ['x!="a"'], True),
+    (['x!="a"'], ['x!~"a|b"'], False),
+    (['x=~"api-[0-9]+"'], ['x!~"db-.*"'], True),
+    (['x=~"db.*"'], ['x!~"db-.*"'], False),
+    # a missing label is the empty string
+    (['team=""'], ['team!~".+"'], True),
+    (['team=""'], ['team=~".+"'], False),
+    ([], ['team!="infra"'], False),
+    ([], ['team=~"(?s:.*)"'], True),
+    ([], ['team=~".*"'], True),  # as in unreachable-route
+    ([], ['team=~".+"'], False),
+    # several matchers on a label narrow it together
+    (['x=~"a|b"', 'x!="b"'], ['x="a"'], True),
+    (['x=~"a.*"', 'x!~"ab.*"'], ['x!~"abc"'], True),
+    (['x=~"a.*"'], ['x!~"abc"'], False),
+    # every label of the earlier route has to be implied
+    (['a="1"', 'b="2"'], ['a="1"'], True),
+    (['a="1"'], ['a="1"', 'b="2"'], False),
+    # not modelled: never proven, even when true
+    (['x=~"(?i)abc"'], ['x=~"(?i)abc|d"'], False),
+    (['x=~"a"'], ['x=~"a\\b"'], False),
+    (['x="a"'], ['x=~"[a"'], False),  # regex amlint cannot compile
+    (['x="a"'], ['x=a=b'], False),  # matcher amlint cannot parse
+])
+def test_implies(later, earlier, expected):
+    from amlint.implication import implies
+    assert implies(_m(*later), _m(*earlier)) is expected
+
+
+def test_implication_is_sound_on_random_regexes():
+    # Whenever implication is proven, no short string over a, b and newline breaks it.
+    import itertools
+    import random
+
+    from amlint.implication import _label_implies
+    from amlint.routing import RoutingError, _matcher_ok, compile_regex
+
+    rng = random.Random(20261016)
+    atoms = ["a", "b", ".", "[ab]", "[^a]", "\\n", "(?s:.)", "", "^", "$"]
+
+    def regex(depth=0):
+        r = rng.random()
+        if depth > 2 or r < 0.3:
+            return rng.choice(atoms)
+        if r < 0.55:
+            return regex(depth + 1) + regex(depth + 1)
+        if r < 0.75:
+            return f"(?:{regex(depth + 1)}|{regex(depth + 1)})"
+        return f"(?:{regex(depth + 1)}){rng.choice(['*', '+', '?', '{1,2}', '{0,2}', '*?'])}"
+
+    def matcher():
+        op = rng.choice(["=", "!=", "=~", "!~", "=~", "!~"])
+        if op in ("=", "!="):
+            return op, "".join(rng.choice("ab\n") for _ in range(rng.randint(0, 3)))
+        return op, regex()
+
+    def allows(op, value, s):
+        return _matcher_ok(op, compile_regex(value) if "~" in op else value, s)
+
+    strings = ["".join(t) for n in range(6) for t in itertools.product("ab\nc", repeat=n)]
+    proven = 0
+    for _ in range(1500):
+        premises = frozenset(matcher() for _ in range(rng.randint(0, 2)))
+        op, value = matcher()
+        try:
+            for p_op, p_value in [*premises, (op, value)]:
+                allows(p_op, p_value, "")
+        except RoutingError:
+            continue
+        if _label_implies(premises, op, value):
+            proven += 1
+            for s in strings:
+                if all(allows(p_op, p_value, s) for p_op, p_value in premises):
+                    assert allows(op, value, s), (sorted(premises), op, value, s)
+    assert proven > 150
 
 
 def test_shadowed_route_has_explain():
