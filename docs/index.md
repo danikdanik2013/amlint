@@ -9,6 +9,11 @@ fine, that Alertmanager runs without complaint, and that still silently don't do
 meant: unreachable routes behind a catch-all, timing that contradicts itself, inhibition
 rules that silence too broadly.
 
+Try it without installing anything: the [playground](playground/index.md) checks a config
+in your browser, and the config never leaves the page.
+
+[Open the playground](playground/index.md){ .md-button .md-button--primary }
+
 ## Quick example
 
 ```bash

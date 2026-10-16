@@ -1,0 +1,38 @@
+# Mistakes that amtool check-config lets through (the YAML is valid) or that are
+# easy to make. Edit the config and the findings update as you type.
+global:
+  resolve_timeout: 5m
+  slack_api_url_file: /etc/alertmanager/secrets/slack-url
+
+route:
+  receiver: default
+  group_by: [alertname, '...']     # '...' already groups by every label
+  group_wait: 10m                  # longer than group_interval
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - receiver: catch-all          # no matchers and no continue: nothing below is reached
+    - matchers: [severity="critical"]
+      receiver: pager              # not defined under receivers
+    - matchers: ['service=~"auth(["']
+      receiver: default            # the regex doesn't compile
+    - matchers: [team="db"]
+      receiver: db-slack
+      mute_time_intervals: [weekends]   # not defined under time_intervals
+
+receivers:
+  - name: default
+    slack_configs:
+      - channel: "#alerts"
+  - name: catch-all                # no integration: alerts sent here go nowhere
+  - name: db-slack
+    slack_configs:
+      - channel: "#db"
+  - name: old-oncall               # never used by a route
+    webhook_configs:
+      - url: http://oncall.example.org/hook
+
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    # no equal: a critical alert anywhere mutes every warning everywhere
