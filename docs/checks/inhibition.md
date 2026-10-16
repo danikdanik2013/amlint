@@ -6,6 +6,8 @@
 
 An inhibition rule has no `equal` field. Without `equal`, the rule silences **any** target alert whenever **any** source alert fires — regardless of whether they are related. This almost always silences more than intended.
 
+Rules with target matchers but **no source matchers** are not flagged: every alert counts as their source, so they mute their targets whenever anything else fires. That is a deliberate "always mute" pattern — kube-prometheus uses it to keep the `InfoInhibitor` alert quiet.
+
 All inhibition checks understand both matcher syntaxes: `source_match` / `source_match_re` / `target_match` / `target_match_re` and the newer `source_matchers` / `target_matchers` lists.
 
 === "Bad"

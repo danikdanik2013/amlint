@@ -160,15 +160,16 @@ receivers:
     },
 
     "empty-receiver": {
-        "level": "warn (info if it is the default receiver)",
+        "level": "warn (info for the default receiver or one named like null)",
         "summary": (
             "A receiver has no integration configured"
             " — no slack_configs, pagerduty_configs, etc."
         ),
         "why": (
             "Alerts routed here will be silently dropped. "
-            "An empty default receiver is sometimes intentional (blackhole)"
-            " — that case triggers info, not warn."
+            "An empty default receiver is sometimes intentional (blackhole), and so is"
+            " one named null, blackhole, devnull, dev-null, discard or drop"
+            " (kube-prometheus routes Watchdog there) — those trigger info, not warn."
         ),
         "bad": """\
 receivers:
@@ -238,7 +239,9 @@ routes:
             "Without equal:, the rule silences target alerts"
             " regardless of which instance fired the source. "
             "A critical alert on host-A will silence warnings on host-B,"
-            " which is almost never intended."
+            " which is almost never intended. Rules with target matchers but no source"
+            " matchers are skipped: they mute their targets whenever anything else"
+            " fires, a deliberate pattern (kube-prometheus's InfoInhibitor)."
         ),
         "bad": """\
 inhibit_rules:
@@ -582,21 +585,23 @@ routes:
 
     "template-file-missing": {
         "level": "error (warn for globs)",
-        "summary": "templates: references a file path that does not exist on disk.",
+        "summary": "A relative templates: path matches no file next to the config.",
         "why": (
-            "Alertmanager loads template files at startup. "
-            "A missing literal path causes startup failure. "
-            "A glob that matches no files silently loads no templates."
+            "Alertmanager resolves relative template paths against the config file's "
+            "directory and starts even when one matches nothing — it just loads no "
+            "templates from it, so notifications that use them fail to render. Absolute "
+            "paths point into the Alertmanager host or container rather than wherever "
+            "amlint runs, so they aren't checked."
         ),
         "bad": """\
 templates:
-  - /etc/alertmanager/templates/custom.tmpl   # file does not exist""",
+  - templates/custom.tmpl   # no such file next to alertmanager.yml""",
         "good": """\
 templates:
-  - /etc/alertmanager/templates/custom.tmpl   # ensure the file exists before deploying
+  - templates/custom.tmpl   # file exists in the repo alongside the config
 # or use a glob that matches existing files:
 templates:
-  - /etc/alertmanager/templates/*.tmpl""",
+  - templates/*.tmpl""",
     },
 
     "msteams-no-webhook-url": {

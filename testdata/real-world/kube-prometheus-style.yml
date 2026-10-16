@@ -1,0 +1,41 @@
+# Modeled on the kube-prometheus / kube-prometheus-stack defaults: severity inhibition
+# scoped with `equal`, the target-only InfoInhibitor rule (an "always mute" idiom),
+# a "null" blackhole receiver for Watchdog and InfoInhibitor, matchers written with
+# spaces around the operator, and templates at a path that only exists inside the
+# Alertmanager container.
+global:
+  resolve_timeout: 5m
+route:
+  receiver: default
+  group_by: [namespace]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+    - matchers: ['alertname = "Watchdog"']
+      receiver: "null"
+    - matchers: ["alertname = InfoInhibitor"]
+      receiver: "null"
+    - matchers: ["severity = critical"]
+      receiver: oncall
+inhibit_rules:
+  - source_matchers: ["severity = critical"]
+    target_matchers: ["severity =~ warning|info"]
+    equal: [namespace, alertname]
+  - source_matchers: ["severity = warning"]
+    target_matchers: ["severity = info"]
+    equal: [namespace, alertname]
+  - source_matchers: ["alertname = InfoInhibitor"]
+    target_matchers: ["severity = info"]
+    equal: [namespace]
+  - target_matchers: ["alertname = InfoInhibitor"]
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://alert-gateway.monitoring.svc:8080/alerts
+  - name: "null"
+  - name: oncall
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-key
+templates:
+  - /etc/alertmanager/config/*.tmpl

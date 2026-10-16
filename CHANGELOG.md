@@ -40,6 +40,8 @@
   alerts inhibit the one being routed, and which rule does it (`inhibit_rules[1]` and
   `file:line:col`). JSON output adds `firing`, `inhibited` and `inhibited_by`. An inhibit rule
   amlint can't evaluate exits 2, but only when `--firing` or `firing:` needs the rules.
+- `testdata/real-world/`: configs modeled on kube-prometheus and Alertmanager's docs example;
+  the test suite fails if any of them gets a WARN or ERROR
 - `amlint check --rules GLOB` (repeatable) checks the config against Prometheus alerting
   rules: rule files (`groups:`) and prometheus-operator `PrometheusRule` manifests
   (`spec.groups:`, also several per file or in a `kind: List`). Recording rules are skipped.
@@ -64,6 +66,17 @@
 - `amlint diff` treats an empty old file as no config: every finding in the new file is
   new, none is fixed (the empty file's `no-root-route` used to show up as fixed), and the
   routing section lists every label set's receivers as changed from `(none)`.
+
+### Fixed
+- The kube-prometheus-stack default config no longer fails `--strict` out of the box:
+  - `inhibit-no-equal` skips rules with target matchers but no source matchers, the
+    deliberate "always mute" idiom kube-prometheus uses for `InfoInhibitor`
+  - `template-file-missing` no longer checks absolute paths, which point into the
+    Alertmanager host or container rather than wherever amlint runs, and no longer claims
+    Alertmanager fails to start: it starts and loads no templates from a path that matches
+    nothing
+- `empty-receiver` reports receivers named `null`, `blackhole`, `devnull`, `dev-null`,
+  `discard` or `drop` as info, like the default receiver: they are deliberate drops
 
 ## [0.4.0] - 2026-10-16
 

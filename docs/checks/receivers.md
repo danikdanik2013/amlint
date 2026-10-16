@@ -32,11 +32,11 @@ Two receivers share the same name. Alertmanager uses the first definition and si
 
 ## empty-receiver
 
-**Level:** warn (info if it's the default receiver)
+**Level:** warn (info for the default receiver or one named like `null`)
 
 A receiver has no integration configured — no `slack_configs`, `pagerduty_configs`, `webhook_configs`, etc. Alerts routed here will be silently dropped.
 
-Using an empty receiver as the **default** (to blackhole low-priority alerts) is intentional and triggers `info` instead of `warn`.
+Using an empty receiver as the **default** (to blackhole low-priority alerts) is intentional and triggers `info` instead of `warn`. So does a receiver named `null`, `blackhole`, `devnull`, `dev-null`, `discard` or `drop` — the conventional names for a deliberate drop (kube-prometheus sends `Watchdog` and `InfoInhibitor` to `null`).
 
 === "Bad"
     ```yaml
@@ -390,17 +390,14 @@ An `sns_configs` entry has none of `topic_arn`, `phone_number`, or `target_arn` 
 
 **Level:** error (warn for globs)
 
-A path in `templates:` does not exist on disk. Alertmanager loads template files at startup — a missing literal path causes startup failure; a glob that matches no files silently loads no templates.
+A relative path in `templates:` matches no file. Alertmanager resolves relative template paths against the config file's directory and starts even when one matches nothing — it just loads no templates from it, so notifications that use them fail to render.
 
-This check only runs when linting a file (not stdin) and resolves paths relative to the config file's directory.
-
-!!! tip
-    If your templates live at a runtime path (e.g. `/etc/alertmanager/templates/`) that isn't present in CI, add `template-file-missing` to your `.amlint.yml` ignore list.
+This check only runs when linting a file (not stdin). Absolute paths (e.g. `/etc/alertmanager/templates/*.tmpl`) point into the Alertmanager host or container rather than wherever amlint runs, so they aren't checked.
 
 === "Bad — literal path"
     ```yaml
     templates:
-      - /etc/alertmanager/templates/custom.tmpl   # file does not exist
+      - templates/custom.tmpl   # no such file next to alertmanager.yml
     ```
 
 === "Bad — glob no match"
