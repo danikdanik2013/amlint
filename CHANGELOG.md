@@ -72,6 +72,13 @@
   "found 2 Alertmanager configs (lines 1, 3)" instead of a YAML error; it still exits 2.
   `--input-format alertmanager` keeps the old behaviour.
 
+### Fixed
+- `circular-inhibition` no longer reports two unrelated rules because one label value
+  matches. It took one shared label with the same value (say `namespace=x` on both sides
+  of both rules) as enough for each rule's source to be the other's target, even when
+  another shared label, such as `alertname`, contradicts it. Now every shared `=` label
+  must agree.
+
 ## [0.4.1] - 2026-10-16
 
 ### Added

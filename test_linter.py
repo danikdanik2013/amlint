@@ -2006,6 +2006,37 @@ def test_circular_inhibition_matchers_syntax():
     assert "circular-inhibition" in codes(cfg)
 
 
+def test_circular_inhibition_one_shared_label_is_not_enough():
+    # B's source (ZoneDown) is never A's target (PodDown); the shared namespace=x doesn't
+    # change that
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["alertname=NodeDown", "namespace=x"],
+             "target_matchers": ["alertname=PodDown", "namespace=x"], "equal": ["node"]},
+            {"source_matchers": ["alertname=ZoneDown", "namespace=x"],
+             "target_matchers": ["alertname=NodeDown", "namespace=x"], "equal": ["zone"]},
+        ],
+    }
+    assert "circular-inhibition" not in codes(cfg)
+
+
+def test_circular_inhibition_with_a_shared_extra_label():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [
+            {"source_matchers": ["severity=critical", "namespace=x"],
+             "target_matchers": ["severity=warning", "namespace=x"], "equal": ["alertname"]},
+            {"source_matchers": ["severity=warning", "namespace=x"],
+             "target_matchers": ["severity=critical", "namespace=x"], "equal": ["alertname"]},
+        ],
+    }
+    found = [f for f in lint(cfg) if f.code == "circular-inhibition"]
+    assert [f.where for f in found] == ["inhibit_rules[0]"]
+
+
 # ── bad-regex: Go RE2 semantics, inhibit rules ───────────────────────
 
 def _route_regex(pattern):
