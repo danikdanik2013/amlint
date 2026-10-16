@@ -1287,6 +1287,7 @@ def test_route_unicode_escape_falls_back_to_the_utf8_parser():
     ({"matchers": ['a=b"c']}, "cannot parse matcher"),
     ({"match": {"k8s.ns": "x"}}, "label name 'k8s.ns' is invalid"),
     ({"match_re": {"1a": "x"}}, "label name '1a' is invalid"),
+    ({"match": {None: "x"}}, "label name '' is invalid"),  # ~ is "" to Alertmanager
 ])
 def test_router_rejects_matchers_alertmanager_rejects(route, message):
     from amlint.routing import Router, RoutingError
@@ -1398,6 +1399,104 @@ def test_stripped_brace_in_inhibit_rule():
     }
     [f] = [f for f in lint(cfg) if f.code == "stripped-brace"]
     assert f.where == "inhibit_rules[0]" and "source_matchers entry" in f.msg
+
+
+# ── match: / match_re: label names Alertmanager rejects ─────────────
+
+def _route_match(key, labels):
+    return {"route": {"receiver": "d", "routes": [{"receiver": "d", key: labels}]},
+            "receivers": [{"name": "d"}]}
+
+
+def _suggestion(finding):
+    """(key, entries) of the `Use <key>: [...] instead` part of a bad-match-label message."""
+    m = re.search(r"Use (\w+): (\[.*\]) instead", finding.msg)
+    return m.group(1), yaml.safe_load(m.group(2))
+
+
+@pytest.mark.parametrize("key", ["match", "match_re"])
+@pytest.mark.parametrize("name, shown", [
+    ("k8s.ns", "k8s.ns"), ("1a", "1a"), ("a-b", "a-b"), ("a:b", "a:b"), ("a b", "a b"),
+    ("ä", "ä"), ("", ""), (None, ""), (1, "1"),
+])
+def test_bad_match_label(key, name, shown):
+    """`amtool check-config` rejects each of these: 'invalid label name'. A null key is ""
+    to Alertmanager."""
+    [f] = [f for f in lint(_route_match(key, {name: "x"})) if f.code == "bad-match-label"]
+    assert (f.level, f.where) == (ERROR, "route.routes[0]")
+    assert f"{key} label name '{shown}' is not a classic label name" in f.msg
+    op = "=~" if key == "match_re" else "="
+    assert _suggestion(f) == ("matchers", [f'"{shown}"{op}"x"'])
+
+
+@pytest.mark.parametrize("name", ["a", "_a1", "A_b", "__name__", "true", True])
+def test_bad_match_label_not_for_classic_names(name):
+    for key in ("match", "match_re"):
+        assert "bad-match-label" not in codes(_route_match(key, {name: "x"}))
+
+
+@pytest.mark.parametrize("name, value", [
+    ("k8s.ns", r"a\.b"), ("it's", "it's"), ('q"uote', 'say "hi"'), ("back\\slash", "a\\b"),
+    ("a\tb", "a\tb"), ("ü", "ü|x"), ("a,b", "x{3}"),
+])
+@pytest.mark.parametrize("key, op", [("match", "="), ("match_re", "=~")])
+def test_bad_match_label_suggestion_means_the_same(name, value, key, op):
+    """The matchers: entry the message suggests reads back as the same matcher, and fixes
+    the config. Checked against amtool 0.34.1 check-config for these names and values."""
+    from amlint.linter import _parse_matcher_entry
+    [f] = [f for f in lint(_route_match(key, {name: value})) if f.code == "bad-match-label"]
+    new_key, entries = _suggestion(f)
+    assert new_key == "matchers"
+    assert _parse_matcher_entry(entries[0]) == ((name, op, value),)
+    fixed = codes(_route_match("matchers", entries))
+    assert not fixed & {"bad-match-label", "bad-matcher", "stripped-brace"}
+
+
+def test_bad_match_label_in_inhibit_rule():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{
+            "source_match": {"k8s.ns": "x", "ok": "y"}, "source_match_re": {"1a": "x"},
+            "target_match": {"a.b": "x"}, "target_match_re": {"c-d": "x|y"},
+            "equal": ["ok"],
+        }],
+    }
+    found = [f for f in lint(cfg) if f.code == "bad-match-label"]
+    assert [f.where for f in found] == ["inhibit_rules[0]"] * 4
+    assert [_suggestion(f) for f in found] == [
+        ("source_matchers", ['"k8s.ns"="x"']), ("source_matchers", ['"1a"=~"x"']),
+        ("target_matchers", ['"a.b"="x"']), ("target_matchers", ['"c-d"=~"x|y"']),
+    ]
+    assert "source_match label name 'k8s.ns'" in found[0].msg
+    assert "target_match_re label name 'c-d'" in found[3].msg
+
+
+def test_bad_match_label_on_root_route_suggests_no_matchers():
+    """The root route takes no matchers at all, which invalid-root-route reports."""
+    cfg = {"route": {"receiver": "d", "match": {"k8s.ns": "x"}}, "receivers": [{"name": "d"}]}
+    [f] = [f for f in lint(cfg) if f.code == "bad-match-label"]
+    assert f.where == "route" and "matchers:" not in f.msg
+    assert "invalid-root-route" in codes(cfg)
+
+
+def test_bad_match_label_also_caught_by_amtool():
+    from amlint.explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
+    assert "bad-match-label" in ALSO_CAUGHT_BY_AMTOOL
+    assert EXPLAINS["bad-match-label"]["level"] == "error"
+
+
+def test_bad_match_label_in_file(tmp_path):
+    """Keys as amlint check loads them: Alertmanager's YAML reading, where ~ is ""."""
+    from amlint.cli import load
+    path = tmp_path / "am.yml"
+    path.write_text(
+        "route:\n  receiver: d\n  routes:\n    - receiver: d\n"
+        "      match: {~: x, 1: y, 0x1F: z, yes: w, k8s.ns: v}\n"
+        "receivers: [{name: d}]\n")
+    found = [f for f in lint(load(str(path))) if f.code == "bad-match-label"]
+    assert [re.search("label name '(.*?)'", f.msg).group(1) for f in found] == [
+        "", "1", "0x1F", "k8s.ns"]
 
 
 @pytest.mark.parametrize("route, message", [

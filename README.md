@@ -35,7 +35,7 @@ schema violations — they're valid configs that behave wrong:
 - receiver defined but never routed to, or routed to but has no integration configured
 
 None of this fails `amtool check-config` or stops Alertmanager from starting. Run
-`amlint list` to see which of the 33 checks are these vs. which duplicate amtool's own
+`amlint list` to see which of the 34 checks are these vs. which duplicate amtool's own
 validation (included for convenience — one tool, one output format, no Go binary needed).
 
 ## Install
@@ -219,6 +219,7 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `invalid-root-route` | error | root route has no `receiver`, or has matchers / `continue` / time intervals |
 | `bad-regex` | error | regex fails to compile or uses syntax Go RE2 rejects (lookarounds, backrefs) |
 | `bad-matcher` | error | `matchers:` entry Alertmanager can't parse (`a=b,,c=d`, a stray `"`, `"x.y"="a\.b"`) |
+| `bad-match-label` | error | `match:` / `match_re:` key that isn't a classic label name (`k8s.ns`); use `matchers: ['"k8s.ns"=...']` |
 | `groupby-ellipsis` | error | `...` mixed with explicit labels in `group_by` |
 | `no-root-route` | error | no root `route` defined |
 | `duplicate-receiver` | error | receiver name defined more than once |

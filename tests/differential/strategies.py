@@ -404,6 +404,10 @@ BAD_MATCHERS = (
     "=crit", "sev", "sev crit", "team name=a",
 )
 
+# match: / match_re: keys that aren't classic label names ("invalid label name"), and so
+# amlint's bad-match-label. A null key is "" to Alertmanager.
+BAD_LABEL_NAMES = ("k8s.ns", "1a", "a-b", "a:b", "a b", "ä", "", None)
+
 
 @st.composite
 def _integration(draw, kind: str, broken: bool = False) -> dict:
@@ -421,11 +425,12 @@ def _integration(draw, kind: str, broken: bool = False) -> dict:
     return entry
 
 
-# Each mistake is made in 1 of N configs, independently. Integration fields, regexes and
-# matchers have many variants each (11 integrations with globals and _file forms, 16
-# regexes, 13 matchers in a route or an inhibit rule).
+# Each mistake is made in 1 of N configs, independently. Integration fields, regexes,
+# matchers and label names have many variants each (11 integrations with globals and _file
+# forms, 16 regexes, 13 matchers in a route or an inhibit rule, 8 label names under 6 keys).
 MISTAKES = {
     "undefined-receiver": 12, "undefined-time-interval": 12, "bad-regex": 4, "bad-matcher": 4,
+    "bad-match-label": 6,
     "groupby-ellipsis": 12, "no-root-route": 20, "root-receiver": 20, "root-matchers": 20,
     "root-match": 20, "root-continue": 20, "root-time-intervals": 20,
     "duplicate-receiver": 12, "integration-key": 3,
@@ -490,6 +495,10 @@ def validation_configs(draw) -> dict:
         entries = list(node[key])
         entries.insert(draw(pick(range(len(entries) + 1))), draw(pick(BAD_MATCHERS)))
         node[key] = entries
+    if "bad-match-label" in mistakes:
+        node, prefix = draw(pick([(child, "") for child in children]
+                                 + [(rule, "source_"), (rule, "target_")]))
+        node[prefix + draw(pick(("match", "match_re")))] = {draw(pick(BAD_LABEL_NAMES)): "crit"}
     if "groupby-ellipsis" in mistakes:
         some_route()["group_by"] = ["...", "alertname"]
     if "root-receiver" in mistakes:

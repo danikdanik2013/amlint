@@ -12,6 +12,7 @@ Usage:
 """
 
 import glob as _glob
+import json
 import os
 import re
 import warnings
@@ -318,6 +319,24 @@ def _matchers(node: dict, prefix: str = "") -> List[Matcher]:
         if isinstance(value, dict):
             out.extend((str(k), op, _scalar(v)) for k, v in value.items())
     out.extend(_parse_matchers(node.get(prefix + "matchers")))
+    return out
+
+
+# Keys of match / match_re maps: Alertmanager checks them against the classic label name
+# syntax (a quoted "service.name" works in matchers: only).
+_LEGACY_LABEL_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+
+
+def _bad_match_labels(node: dict, prefix: str = "") -> List[Tuple[str, str, str]]:
+    """(key, label name, value) for each match / match_re key of a route, or of one side of
+    an inhibit rule, that isn't a classic label name. Alertmanager rejects all of them."""
+    out = []
+    for key in (prefix + "match", prefix + "match_re"):
+        names = node.get(key)
+        for name, value in names.items() if isinstance(names, dict) else ():
+            name = _scalar(name)  # a null key is "" to Alertmanager
+            if not _LEGACY_LABEL_NAME.fullmatch(name):
+                out.append((key, name, _scalar(value)))
     return out
 
 
@@ -648,16 +667,21 @@ def _regex_patterns(node: dict, prefix: str = ""):
             yield label, value
 
 
-def check_bad_regex(cfg):
-    out = []
-    targets = []
+def _matcher_nodes(cfg: dict) -> Generator[Tuple[dict, str, str], None, None]:
+    """(node, where, prefix) for each route (prefix "") and for each side of an inhibit
+    rule (prefix "source_" / "target_"), the nodes `_matchers` reads."""
     route = _root_route(cfg)
     if route:
-        targets += [(node, path, "") for node, path in _walk_routes(route)]
+        for node, path in _walk_routes(route):
+            yield node, path, ""
     for i, rule in _dict_items(cfg.get("inhibit_rules")):
         for prefix in ("source_", "target_"):
-            targets.append((rule, f"inhibit_rules[{i}]", prefix))
-    for node, path, prefix in targets:
+            yield rule, f"inhibit_rules[{i}]", prefix
+
+
+def check_bad_regex(cfg):
+    out = []
+    for node, path, prefix in _matcher_nodes(cfg):
         for label, pattern in _regex_patterns(node, prefix):
             problem = _regex_problem(pattern)
             if problem:
@@ -669,20 +693,44 @@ def check_bad_regex(cfg):
     return out
 
 
+def _go_quote(text: str) -> str:
+    """`text` as a double-quoted Go string literal, as the UTF-8 matcher parser reads it:
+    json.dumps only writes escapes that Go has too (\\", \\\\, \\n, \\u0001, ...)."""
+    return json.dumps(text, ensure_ascii=False)
+
+
+# CHECK 33: a match: / match_re: label name that isn't a classic one
+def check_bad_match_label(cfg: dict) -> List[Finding]:
+    """match: and match_re: (and the source_ / target_ ones of inhibit rules) take classic
+    label names only, so Alertmanager refuses `match: {k8s.ns: x}` ("invalid label name").
+    In a matchers: entry a quoted label name can be any UTF-8 text."""
+    out: List[Finding] = []
+    for node, where, prefix in _matcher_nodes(cfg):
+        for key, name, value in _bad_match_labels(node, prefix):
+            msg = (
+                f"{key} label name '{name}' is not a classic label name "
+                f"([a-zA-Z_][a-zA-Z0-9_]*), the only kind {key}: takes, so Alertmanager "
+                f"will reject this config."
+            )
+            if where != "route":  # the root route takes no matchers at all
+                op = "=~" if key.endswith("_re") else "="
+                entry = _go_quote(name) + op + _go_quote(value)
+                entry = entry.replace("'", "''")  # in a single-quoted YAML scalar
+                msg += (
+                    f" Use {prefix}matchers: ['{entry}'] instead, where a quoted label name "
+                    f"can be any UTF-8 text."
+                )
+            out.append(Finding(ERROR, "bad-match-label", msg, where))
+    return out
+
+
 def _matcher_entries(cfg: dict) -> Generator[Tuple[str, str, str], None, None]:
     """(where, key, entry) for each `matchers:` entry of a route and each
     `source_matchers:` / `target_matchers:` entry of an inhibit rule."""
-    targets = []
-    route = _root_route(cfg)
-    if route:
-        targets += [(node, path, "matchers") for node, path in _walk_routes(route)]
-    for i, rule in _dict_items(cfg.get("inhibit_rules")):
-        for key in ("source_matchers", "target_matchers"):
-            targets.append((rule, f"inhibit_rules[{i}]", key))
-    for node, where, key in targets:
-        items = node.get(key)
+    for node, where, prefix in _matcher_nodes(cfg):
+        items = node.get(prefix + "matchers")
         for item in items if isinstance(items, list) else ():
-            yield where, key, _scalar(item)
+            yield where, prefix + "matchers", _scalar(item)
 
 
 # CHECK 31: a matchers: entry neither of Alertmanager's matcher parsers can read
@@ -1352,6 +1400,7 @@ ALL_CHECKS = [
     check_unused_receivers,
     check_dead_inhibitions,
     check_bad_regex,
+    check_bad_match_label,
     check_bad_matcher,
     check_stripped_brace,
     check_unreachable_routes,

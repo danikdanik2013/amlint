@@ -13,6 +13,7 @@ ALSO_CAUGHT_BY_AMTOOL = {
     "undefined-receiver",
     "undefined-time-interval",
     "bad-regex",
+    "bad-match-label",
     "bad-matcher",
     "groupby-ellipsis",
     "no-root-route",
@@ -133,6 +134,31 @@ routes:
   - match_re:
       service: "auth(.*)"  # valid regex
     receiver: team""",
+    },
+
+    "bad-match-label": {
+        "level": "error",
+        "summary": "A match: or match_re: label name that isn't a classic one, like k8s.ns.",
+        "why": (
+            "match: and match_re: (and source_match / target_match and their _re forms in "
+            "inhibit rules) only take classic label names: a letter or underscore, then "
+            "letters, digits and underscores. Alertmanager refuses to load a config with any "
+            "other key there ('invalid label name'), so no route in the file works, even "
+            "though matchers: takes dotted and other UTF-8 names just fine. Move the matcher "
+            "to matchers: (or source_matchers / target_matchers) and quote the name. amtool "
+            "catches it too; amlint names the route or rule and writes the matchers: entry "
+            "for you."
+        ),
+        "bad": """\
+routes:
+  - match:
+      k8s.namespace: payments   # not a classic label name
+    receiver: payments""",
+        "good": """\
+routes:
+  - matchers:
+      - '"k8s.namespace"="payments"'   # quoted: any UTF-8 name
+    receiver: payments""",
     },
 
     "bad-matcher": {

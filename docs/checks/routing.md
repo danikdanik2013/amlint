@@ -155,6 +155,37 @@ inhibit rules (`source_matchers`, `target_matchers`) are all checked. Common cau
 
 ---
 
+## bad-match-label
+
+**Level:** error
+
+A `match:` or `match_re:` key that isn't a classic label name: a letter or underscore, then
+letters, digits and underscores (`[a-zA-Z_][a-zA-Z0-9_]*`). Alertmanager refuses to load
+the config (`invalid label name "k8s.ns"`), even though `matchers:` takes dotted and other
+UTF-8 names when they're quoted. Inhibit rules' `source_match`, `source_match_re`,
+`target_match` and `target_match_re` are checked too. The finding writes the `matchers:`
+(or `source_matchers:` / `target_matchers:`) entry to use instead, with the name and value
+quoted as Alertmanager reads them.
+
+=== "Bad"
+    ```yaml
+    route:
+      receiver: default
+      routes:
+        - match:
+            k8s.namespace: payments   # not a classic label name
+          receiver: payments
+    ```
+
+=== "Fixed"
+    ```yaml
+        - matchers:
+            - '"k8s.namespace"="payments"'   # quoted: any UTF-8 name
+          receiver: payments
+    ```
+
+---
+
 ## stripped-brace
 
 **Level:** warn

@@ -40,8 +40,9 @@ from a fixed seed, so every run of a given seed tests the same cases:
   types (`NO`, `1.10`, `0x1F`)
 - label sets with labels missing, empty, or set to values the matchers look for
 - configs with up to two of the mistakes `amtool check-config` rejects, including integration
-  fields covered (or not) by a `_file` variant or a `global:` default, and `matchers:`
-  entries in routes and inhibit rules that neither matcher parser reads
+  fields covered (or not) by a `_file` variant or a `global:` default, `matchers:`
+  entries in routes and inhibit rules that neither matcher parser reads, and `match:` /
+  `match_re:` keys that aren't classic label names (`k8s.ns`, `1a`, a null key)
 - inhibit rules with `equal:`, rules matching both sides, and alerts that match several rules
 
 When amlint and Alertmanager disagree, the test reduces the case to a minimal config and

@@ -48,7 +48,7 @@ Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure t
 
 amtool already covers the first four rows — amlint re-implements those so you get one
 tool with unified JSON/SARIF/diff/tree output instead of needing the Go binary too, not
-because amtool misses them. Run `amlint list` to see exactly which of the 33 checks
+because amtool misses them. Run `amlint list` to see exactly which of the 34 checks
 duplicate amtool and which don't; `amlint explain <code>` says so for any individual check.
 
 On the last row: `amtool config routes test` already lets you test one alert's routing
@@ -57,7 +57,7 @@ suite of these as regression tests from a file, in CI, without a live Alertmanag
 what `amlint test` adds; `amlint route` is the single-alert version, showing the matched
 routes and the `group_by` and timings each one inherits.
 
-## 33 checks — 14 of them amtool can't do
+## 34 checks — 14 of them amtool can't do
 
 See [all checks](checks/index.md) for the full list, and which column each falls in.
 

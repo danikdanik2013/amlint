@@ -49,6 +49,7 @@ except ImportError:  # pragma: no cover - Python < 3.11
 
 from .linter import (
     _TIMING_DEFAULTS,
+    _bad_match_labels,
     _dict_items,
     _go_regex_to_python,
     _matchers,
@@ -170,21 +171,13 @@ def _build(node: dict, path: str, parent: RouteOpts) -> _Route:
     return _Route(path, matchers, bool(node.get("continue")), opts, children)
 
 
-# Keys of match / match_re maps: Alertmanager checks them against the classic label name
-# syntax (a quoted "service.name" works in matchers: only).
-_LEGACY_LABEL_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
-
-
 def _compile_matchers(node: dict, path: str, prefix: str = "") -> List[_Matcher]:
     """Matchers of a route, or of one side of an inhibit rule, with regexes compiled."""
-    for key in (prefix + "match", prefix + "match_re"):
-        names = node.get(key)
-        for name in names if isinstance(names, dict) else ():
-            if not _LEGACY_LABEL_NAME.fullmatch(str(name)):
-                raise RoutingError(
-                    f"{path}: {key} label name {str(name)!r} is invalid, which Alertmanager "
-                    f"rejects (use {prefix}matchers: ['\"{name}\"=...'] for such names)"
-                )
+    for key, name, _ in _bad_match_labels(node, prefix):
+        raise RoutingError(
+            f"{path}: {key} label name {name!r} is invalid, which Alertmanager "
+            f"rejects (use {prefix}matchers: ['\"{name}\"=...'] for such names)"
+        )
     matchers: List[_Matcher] = []
     for label, op, value in _matchers(node, prefix):
         if op == "?":

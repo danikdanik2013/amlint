@@ -28,6 +28,13 @@
   closing brace. Alertmanager reads `code=~[0-9]{3}` as the regex `[0-9]{3`, which matches
   `1{3` and not `123`, and loads the config without a word. The finding says which value
   Alertmanager reads and suggests the quoted one (`code=~"[0-9]{3}"`).
+- `bad-match-label` (error): a `match:` or `match_re:` key (or `source_match` /
+  `target_match` and their `_re` forms in inhibit rules) that isn't a classic label name,
+  such as `match: {k8s.ns: x}` or `match_re: {1a: x}`. Alertmanager refuses to load the
+  config ("invalid label name"), so `amtool check-config` catches it too; `amlint check`
+  used to say nothing, though `amlint route` already refused such configs. The finding
+  writes the quoted `matchers:` entry to use instead (`matchers: ['"k8s.ns"="x"']`). The
+  differential config-error test now generates such keys in routes and inhibit rules.
 
 ### Changed
 - `groupby-ellipsis` is an error instead of a warning: Alertmanager refuses to load
