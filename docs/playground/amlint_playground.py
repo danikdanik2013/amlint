@@ -19,6 +19,7 @@ import yaml  # noqa: E402
 
 from amlint import cli  # noqa: E402
 from amlint.explains import EXPLAINS  # noqa: E402
+from amlint.linter import route_cycle  # noqa: E402
 from amlint.rules import RulesError, load_rules, rule_files  # noqa: E402
 from amlint.source import SourceMap  # noqa: E402
 
@@ -164,14 +165,15 @@ def _matchers(node: dict) -> list:
 
 def tree(config: str) -> str:
     """The route tree with each route's line, matchers, receiver and own settings, or
-    {"tree": null} when the config has no route mapping to draw."""
+    {"tree": null} when the config has no route mapping to draw, or one that contains
+    itself (check reports why)."""
     try:
         cfg = yaml.safe_load(config)
         smap = SourceMap(config)
     except yaml.YAMLError:
         return json.dumps({"tree": None})
     root = cfg.get("route") if isinstance(cfg, dict) else None
-    if not isinstance(root, dict):
+    if not isinstance(root, dict) or route_cycle(root):
         return json.dumps({"tree": None})
 
     def walk(node: dict, path: str, inherited):

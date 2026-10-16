@@ -46,6 +46,7 @@ from .linter import (
     _unquote,
     _walk_routes,
     lint,
+    route_cycle,
 )
 from .markdown import diff_report
 from .routing import GROUP_BY_ALL, Inhibitor, Router, RoutingError, diff_routing, route_coverage
@@ -128,7 +129,8 @@ def _read_yaml(path, content=None):
 
 
 def load(path, content=None):
-    """Load an Alertmanager config; exits 2 unless its top level is a mapping."""
+    """Load an Alertmanager config; exits 2 unless its top level is a mapping, or if its
+    route tree contains itself through a YAML alias."""
     cfg = _read_yaml(path, content)
     if cfg is None:
         return {}
@@ -136,6 +138,15 @@ def load(path, content=None):
         err_console.print(
             f"[red]Not an Alertmanager config[/red] ({path}): "
             f"top level must be a mapping, got {type(cfg).__name__}"
+        )
+        sys.exit(2)
+    cycle = route_cycle(cfg.get("route"))
+    if cycle:
+        where, ancestor = cycle
+        err_console.print(
+            f"[red]Route contains itself[/red] ({escape(_display(path))}): {where} is a YAML "
+            f"alias of {ancestor}, which contains it, so the route tree never ends. "
+            f"Alertmanager can't load this config either.", soft_wrap=True,
         )
         sys.exit(2)
     return cfg
