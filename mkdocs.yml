@@ -34,6 +34,7 @@ nav:
   - Install: install.md
   - Usage: usage.md
   - GitHub Action: github-action.md
+  - Verified against Alertmanager: fidelity.md
   - Checks:
     - Overview: checks/index.md
     - Routing: checks/routing.md

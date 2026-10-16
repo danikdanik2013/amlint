@@ -307,7 +307,7 @@ cat alertmanager.yml | amlint tree -   # stdin
 ```
 
 ```
-⚠  (root)  →  default-team  (groupby-ellipsis)
+✖  (root)  →  default-team  (groupby-ellipsis)
 ├── ⚠  (catch-all)  →  catch-all-team  (unreachable-route)
 ├── ✖  {severity=critical}  →  pager-team  (undefined-receiver)
 └── ✖  {service=~auth([}  →  default-team  (bad-regex)
@@ -375,6 +375,10 @@ The simulation follows Alertmanager's own `dispatch/route.go`:
 - Regexes are fully anchored, like Alertmanager's `^(?:pattern)$`: `service=~"api"`
   matches `api`, not `api-gateway`. They follow Go RE2: `(?i)` flags, ASCII-only `\d`,
   `\w`, `\s` and POSIX classes such as `[[:alpha:]]` all behave as in Alertmanager.
+
+Matchers are parsed the way Alertmanager parses them, quirks included: see
+[Verified against Alertmanager](fidelity.md), which also covers how this simulation is
+tested against Alertmanager itself.
 
 Configs Alertmanager would refuse to load (a regex RE2 rejects, a malformed duration,
 matchers on the root route) exit `2` with the route that causes it. So does a regex with

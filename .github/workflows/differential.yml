@@ -1,0 +1,101 @@
+name: Alertmanager differential
+
+# amlint against the real Alertmanager on generated configs: routing against
+# `amtool config routes test`, error-level findings against `amtool check-config`, and
+# inhibition against a running alertmanager. See tests/differential/ and CONTRIBUTING.md.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - amlint/routing.py
+      - amlint/linter.py
+      - amlint/goyaml.py
+      - amlint/explains.py
+      - tests/differential/**
+      - scripts/fetch_alertmanager.py
+      - scripts/differential.sh
+      - .github/workflows/differential.yml
+  push:
+    branches: [main]
+    paths:
+      - amlint/routing.py
+      - amlint/linter.py
+      - amlint/goyaml.py
+      - amlint/explains.py
+      - tests/differential/**
+      - scripts/fetch_alertmanager.py
+      - scripts/differential.sh
+      - .github/workflows/differential.yml
+  schedule:
+    - cron: "23 4 * * 1"  # weekly, with a fresh seed
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Hypothesis seed (default 0)
+        default: "0"
+      examples:
+        description: Generated configs per routing / validation test
+        default: "300"
+
+permissions:
+  contents: read
+
+jobs:
+  differential:
+    name: Alertmanager ${{ matrix.alertmanager }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # The last two minor releases and the newest. sha256 of the linux-amd64 tarball,
+        # from the release's sha256sums.txt; scripts/fetch_alertmanager.py checks both.
+        include:
+          - alertmanager: "0.32.2"
+            sha256: 842f30671734e9920327aa8308e19aea7bb79c2b9905e941d83236267f87b13d
+          - alertmanager: "0.33.1"
+            sha256: 93d802cba6a8d27239d747ce117df7648d326ab67394e32247540b030e9842ba
+          - alertmanager: "0.34.1"
+            sha256: 265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Differential tests
+        env:
+          AM_VERSION: ${{ matrix.alertmanager }}
+          AM_SHA256: ${{ matrix.sha256 }}
+          # Pull requests and pushes replay seed 0; the weekly run explores new cases. The
+          # seed is printed in the pytest header, so a failure can be replayed locally.
+          AMLINT_DIFF_SEED: ${{ github.event_name == 'schedule' && github.run_id || inputs.seed || '0' }}
+          AMLINT_DIFF_EXAMPLES: ${{ github.event_name == 'schedule' && '1500' || inputs.examples || '300' }}
+          AMLINT_DIFF_INHIBIT_EXAMPLES: ${{ github.event_name == 'schedule' && '150' || '40' }}
+        run: scripts/differential.sh -v -p no:cacheprovider --hypothesis-show-statistics
+
+  newer-release:
+    name: Newer Alertmanager release?
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare the latest release with the matrix
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          latest=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/prometheus/alertmanager/releases/latest \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["tag_name"].lstrip("v"))')
+          if grep -q "alertmanager: \"$latest\"" .github/workflows/differential.yml; then
+            echo "Alertmanager $latest is in the matrix."
+          else
+            echo "::warning::Alertmanager $latest is out: add it to the differential matrix (and the README note)."
+          fi

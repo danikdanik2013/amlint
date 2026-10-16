@@ -1,5 +1,54 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Differential tests against the real Alertmanager (`tests/differential/`, run with
+  `scripts/differential.sh`). Hypothesis generates seeded configs and label sets: nested
+  routes, `continue` fan-out, `=` `!=` `=~` `!~` matchers in quoted, bare, braced and
+  quoted-label-name spellings, regex alternations and anchors, missing labels, and YAML 1.1
+  scalars. amlint's receivers must equal `amtool config routes test`'s, `amtool
+  check-config` must reject a config exactly when amlint reports an error amtool also
+  catches, and alerts POSTed to a running Alertmanager must be inhibited
+  (`status.inhibitedBy`) and routed as amlint simulates. A mismatch is reduced to a minimal
+  config and label set and printed with both results.
+- CI workflow `differential.yml` runs them against Alertmanager 0.32.2, 0.33.1 and 0.34.1
+  (release tarballs with pinned sha256), on pull requests that touch the routing engine and
+  weekly with a fresh seed. The README badge and the new docs page "Verified against
+  Alertmanager" (`docs/fidelity.md`) are backed by it. The page also lists the known
+  differences, such as Alertmanager before 0.34.1 missing some inhibitions depending on the
+  order alerts arrive (fixed upstream in 0.34.1, which amlint follows).
+
+### Changed
+- `groupby-ellipsis` is an error instead of a warning: Alertmanager refuses to load
+  `group_by: ['...', alertname]`.
+
+### Fixed
+Differences from Alertmanager that the differential tests found:
+- YAML scalars in `match:` maps and other string fields keep their text, as Alertmanager
+  (Go's yaml.v2) reads them: `country: NO` is "NO", not false; `version: 1.10` is "1.10";
+  `code: 0x1F` is "0x1F".
+- `matchers:` entries are parsed the way Alertmanager's default "fallback" mode parses them:
+  with the classic parser whenever it can read the whole entry, and with the UTF-8 parser
+  only when it can't. So:
+  - the classic parser strips a trailing `}` even without a leading `{`. A bare
+    `code=~[0-9]{3}` is the regex `[0-9]{3`, with a literal `{3`: it matches `1{3`, not
+    `123`, in Alertmanager and now in amlint
+  - bare values are unescaped like quoted ones: `a=x\\y` is the value `x\y`
+  - an entry with a quoted label name (`"service.name"="api"`) is read with Go string
+    escapes, all of its matchers: `\t` is a tab, and `\.` is an error
+  - a regex that only the UTF-8 reading makes valid (`a=~"\u0041+"`) is no longer
+    `bad-regex`
+  - `amlint route` and `amlint test` exit 2 on entries Alertmanager rejects (`a=b,,c=d`,
+    `a=b"c`, `"x.y"="a\.b"`) and on `match:` keys that aren't classic label names
+    (`k8s.ns`), instead of simulating them
+- Regexes: `\b` and `\B` see ASCII word characters only and ignore `(?i)`, and `\B`
+  matches an empty value, as in Go. `$` outside `(?m)` no longer matches before a final
+  newline. A quantifier after an anchor (`^*`, `\b+`) is valid Go and no longer
+  `bad-regex`. `[\b]` is `bad-regex`, since Go rejects it.
+- `slack-no-api-url` also reports `api_url: ""` (say, an empty Helm value). Alertmanager
+  rejects it as a URL instead of falling back to `global.slack_api_url`.
+
 ## [0.4.1] - 2026-10-16
 
 ### Added
