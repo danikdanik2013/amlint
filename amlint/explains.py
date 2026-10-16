@@ -13,6 +13,8 @@ ALSO_CAUGHT_BY_AMTOOL = {
     "undefined-receiver",
     "undefined-time-interval",
     "bad-regex",
+    "bad-match-label",
+    "bad-matcher",
     "groupby-ellipsis",
     "no-root-route",
     "invalid-root-route",
@@ -132,6 +134,83 @@ routes:
   - match_re:
       service: "auth(.*)"  # valid regex
     receiver: team""",
+    },
+
+    "bad-match-label": {
+        "level": "error",
+        "summary": "A match: or match_re: label name that isn't a classic one, like k8s.ns.",
+        "why": (
+            "match: and match_re: (and source_match / target_match and their _re forms in "
+            "inhibit rules) only take classic label names: a letter or underscore, then "
+            "letters, digits and underscores. Alertmanager refuses to load a config with any "
+            "other key there ('invalid label name'), so no route in the file works, even "
+            "though matchers: takes dotted and other UTF-8 names just fine. Move the matcher "
+            "to matchers: (or source_matchers / target_matchers) and quote the name. amtool "
+            "catches it too; amlint names the route or rule and writes the matchers: entry "
+            "for you."
+        ),
+        "bad": """\
+routes:
+  - match:
+      k8s.namespace: payments   # not a classic label name
+    receiver: payments""",
+        "good": """\
+routes:
+  - matchers:
+      - '"k8s.namespace"="payments"'   # quoted: any UTF-8 name
+    receiver: payments""",
+    },
+
+    "bad-matcher": {
+        "level": "error",
+        "summary": "A matchers: entry that neither of Alertmanager's matcher parsers can read.",
+        "why": (
+            "Alertmanager reads each matchers: / source_matchers: / target_matchers: entry "
+            "with its classic parser, and with the UTF-8 one only when the classic one "
+            "fails. When both fail it refuses to load the config ('bad matcher format', "
+            "'matcher value contains unescaped double quote'), so no route in the file "
+            "works. Typical causes: an empty matcher between two commas, a stray double "
+            "quote, a comma or brace in a bare value, and in an entry with a quoted label "
+            "name (\"service.name\"=...), where values are Go strings, a regex escape like "
+            "\\. that Go doesn't know. amtool catches it too; amlint names the entry and "
+            "the route or rule it is in."
+        ),
+        "bad": """\
+routes:
+  - matchers:
+      - 'service=api,,env=prod'        # empty matcher between the commas
+      - '"service.name"=~"api\\.v2"'   # quoted label name: \\. is not a Go escape
+    receiver: team""",
+        "good": """\
+routes:
+  - matchers:
+      - 'service="api", env="prod"'
+      - '"service.name"=~"api\\\\.v2"'  # Go string: \\\\ is one backslash
+    receiver: team""",
+    },
+
+    "stripped-brace": {
+        "level": "warn",
+        "summary": "A bare matcher value ends in '}', which Alertmanager strips off.",
+        "why": (
+            "Alertmanager's classic matcher parser removes one trailing '}' from a "
+            "matchers: entry whether or not the entry starts with '{'. So the bare regex in "
+            "`code=~[0-9]{3}` becomes `[0-9]{3`, which matches the literal text '1{3' and "
+            "not '123'. The config loads and the route just never matches what you meant. "
+            "amtool accepts it without a word. Quote the value, or wrap the whole entry in "
+            "braces, and the closing brace stays part of it."
+        ),
+        "bad": """\
+routes:
+  - matchers:
+      - code=~[0-9]{3}        # the regex is [0-9]{3: matches "1{3", not "123"
+    receiver: http-errors""",
+        "good": """\
+routes:
+  - matchers:
+      - code=~"[0-9]{3}"      # quoted: the regex is [0-9]{3}
+    receiver: http-errors
+# or: - '{code=~[0-9]{3}}'""",
     },
 
     "duplicate-receiver": {

@@ -1305,11 +1305,216 @@ def test_route_unicode_escape_falls_back_to_the_utf8_parser():
     ({"matchers": ['a=b"c']}, "cannot parse matcher"),
     ({"match": {"k8s.ns": "x"}}, "label name 'k8s.ns' is invalid"),
     ({"match_re": {"1a": "x"}}, "label name '1a' is invalid"),
+    ({"match": {None: "x"}}, "label name '' is invalid"),  # ~ is "" to Alertmanager
 ])
 def test_router_rejects_matchers_alertmanager_rejects(route, message):
     from amlint.routing import Router, RoutingError
     with pytest.raises(RoutingError, match=re.escape(message)):
         Router({"receiver": "d", "routes": [route]})
+
+
+# ── Matchers: entries Alertmanager rejects or reads differently ──────
+
+def _route_matchers(*entries):
+    return {"route": {"receiver": "d", "routes": [{"receiver": "d", "matchers": list(entries)}]},
+            "receivers": [{"name": "d"}]}
+
+
+@pytest.mark.parametrize("entry", [
+    "a=b,,c=d",            # empty matcher between the commas
+    'a=b"c',               # unescaped double quote
+    r'"x.y"="a\.b"',       # quoted label name: Go string, \. is no escape
+    r'"x.y"=~\d+',         # quoted label name: a bare value can't hold a backslash
+    "a=b, c=~x{1,2}",      # the comma in the bare regex splits the entry
+    '{a="b"}}',            # the classic parser keeps the second brace after the quote
+    "=b", "a", "foo bar=b", 123,
+])
+def test_bad_matcher(entry):
+    """`amtool check-config` rejects each of these: 'bad matcher format' or 'matcher value
+    contains unescaped double quote'."""
+    found = [f for f in lint(_route_matchers(entry)) if f.code in ("bad-matcher", "bad-regex")]
+    assert [(f.code, f.level, f.where) for f in found] == [
+        ("bad-matcher", ERROR, "route.routes[0]")]
+    assert f"matchers entry '{entry}'" in found[0].msg
+
+
+@pytest.mark.parametrize("entry", [
+    "", None, "{}", "a=", "a=b,", "{a=b", "a=b}}", r"a=b\\", '"a"=b', "a = b",
+    r'"x.y"=~"a\\.b"', r'a=~"\u0041+"', '{"service.name"="api", tier=~"a|b"}',
+])
+def test_bad_matcher_not_for_entries_alertmanager_accepts(entry):
+    assert "bad-matcher" not in codes(_route_matchers(entry))
+
+
+def test_bad_matcher_leaves_invalid_regexes_to_bad_regex():
+    assert codes(_route_matchers("a=~(")) & {"bad-matcher", "bad-regex"} == {"bad-regex"}
+
+
+def test_bad_matcher_hint_depends_on_the_parser():
+    [quoted] = [f for f in lint(_route_matchers(r'"x.y"="a\.b"')) if f.code == "bad-matcher"]
+    assert "UTF-8 parser" in quoted.msg and "Go strings" in quoted.msg
+    [plain] = [f for f in lint(_route_matchers("a=b,,c=d")) if f.code == "bad-matcher"]
+    assert "one comma between matchers" in plain.msg
+
+
+def test_bad_matcher_in_inhibit_rule():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_matchers": ["a=b,,c=d"], "target_matchers": ['x=y"'],
+                           "equal": ["a"]}],
+    }
+    found = [f for f in lint(cfg) if f.code == "bad-matcher"]
+    assert [f.where for f in found] == ["inhibit_rules[0]", "inhibit_rules[0]"]
+    assert "source_matchers entry" in found[0].msg and "target_matchers entry" in found[1].msg
+
+
+def test_bad_matcher_also_caught_by_amtool():
+    from amlint.explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
+    assert "bad-matcher" in ALSO_CAUGHT_BY_AMTOOL
+    assert EXPLAINS["bad-matcher"]["level"] == "error"
+    assert "stripped-brace" not in ALSO_CAUGHT_BY_AMTOOL
+    assert EXPLAINS["stripped-brace"]["level"] == "warn"
+
+
+def test_stripped_brace():
+    """Alertmanager reads bare `code=~[0-9]{3}` as the regex [0-9]{3 and loads the config."""
+    [f] = [f for f in lint(_route_matchers("code=~[0-9]{3}")) if f.code == "stripped-brace"]
+    assert f.level == WARN and f.where == "route.routes[0]"
+    assert "the regex for 'code' is '[0-9]{3', not '[0-9]{3}'" in f.msg
+    assert 'code=~"[0-9]{3}"' in f.msg
+    assert "bad-matcher" not in codes(_route_matchers("code=~[0-9]{3}"))
+
+
+@pytest.mark.parametrize("entry", [
+    "code=~[0-9]{3}", r"code=~\d{3}", "a=b, code!~x{1}", "a=b}", "a=b}}", r"a=x\ny}",
+    r"a=x\\}",
+])
+def test_stripped_brace_suggestion_means_what_was_meant(entry):
+    """The quoted value the message suggests reads back as the value with its brace."""
+    from amlint.linter import _parse_matcher_entry
+    [f] = [f for f in lint(_route_matchers(entry)) if f.code == "stripped-brace"]
+    suggestion = re.search(r"Quote the value \((.*)\) or wrap", f.msg).group(1)
+    meant = _parse_matcher_entry("{" + entry + "}")[-1]
+    assert _parse_matcher_entry(suggestion) == (meant,)
+    assert "stripped-brace" not in codes(_route_matchers(suggestion))
+
+
+@pytest.mark.parametrize("entry", [
+    'code=~"[0-9]{3}"', "{code=~[0-9]{3}}", "{a=b}", 'a="b"}', "{a=b",
+    "a=b} ", '"x.y"=~"[0-9]{3}"', "a=b,,c=d}",
+])
+def test_stripped_brace_not_for_entries_that_keep_their_meaning(entry):
+    assert "stripped-brace" not in codes(_route_matchers(entry))
+
+
+def test_stripped_brace_in_inhibit_rule():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_matchers": ["code=~5[0-9]{2}"],
+                           "target_matchers": ['code=~"5[0-9]{2}"'], "equal": ["a"]}],
+    }
+    [f] = [f for f in lint(cfg) if f.code == "stripped-brace"]
+    assert f.where == "inhibit_rules[0]" and "source_matchers entry" in f.msg
+
+
+# ── match: / match_re: label names Alertmanager rejects ─────────────
+
+def _route_match(key, labels):
+    return {"route": {"receiver": "d", "routes": [{"receiver": "d", key: labels}]},
+            "receivers": [{"name": "d"}]}
+
+
+def _suggestion(finding):
+    """(key, entries) of the `Use <key>: [...] instead` part of a bad-match-label message."""
+    m = re.search(r"Use (\w+): (\[.*\]) instead", finding.msg)
+    return m.group(1), yaml.safe_load(m.group(2))
+
+
+@pytest.mark.parametrize("key", ["match", "match_re"])
+@pytest.mark.parametrize("name, shown", [
+    ("k8s.ns", "k8s.ns"), ("1a", "1a"), ("a-b", "a-b"), ("a:b", "a:b"), ("a b", "a b"),
+    ("ä", "ä"), ("", ""), (None, ""), (1, "1"),
+])
+def test_bad_match_label(key, name, shown):
+    """`amtool check-config` rejects each of these: 'invalid label name'. A null key is ""
+    to Alertmanager."""
+    [f] = [f for f in lint(_route_match(key, {name: "x"})) if f.code == "bad-match-label"]
+    assert (f.level, f.where) == (ERROR, "route.routes[0]")
+    assert f"{key} label name '{shown}' is not a classic label name" in f.msg
+    op = "=~" if key == "match_re" else "="
+    assert _suggestion(f) == ("matchers", [f'"{shown}"{op}"x"'])
+
+
+@pytest.mark.parametrize("name", ["a", "_a1", "A_b", "__name__", "true", True])
+def test_bad_match_label_not_for_classic_names(name):
+    for key in ("match", "match_re"):
+        assert "bad-match-label" not in codes(_route_match(key, {name: "x"}))
+
+
+@pytest.mark.parametrize("name, value", [
+    ("k8s.ns", r"a\.b"), ("it's", "it's"), ('q"uote', 'say "hi"'), ("back\\slash", "a\\b"),
+    ("a\tb", "a\tb"), ("ü", "ü|x"), ("a,b", "x{3}"),
+])
+@pytest.mark.parametrize("key, op", [("match", "="), ("match_re", "=~")])
+def test_bad_match_label_suggestion_means_the_same(name, value, key, op):
+    """The matchers: entry the message suggests reads back as the same matcher, and fixes
+    the config. Checked against amtool 0.34.1 check-config for these names and values."""
+    from amlint.linter import _parse_matcher_entry
+    [f] = [f for f in lint(_route_match(key, {name: value})) if f.code == "bad-match-label"]
+    new_key, entries = _suggestion(f)
+    assert new_key == "matchers"
+    assert _parse_matcher_entry(entries[0]) == ((name, op, value),)
+    fixed = codes(_route_match("matchers", entries))
+    assert not fixed & {"bad-match-label", "bad-matcher", "stripped-brace"}
+
+
+def test_bad_match_label_in_inhibit_rule():
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{
+            "source_match": {"k8s.ns": "x", "ok": "y"}, "source_match_re": {"1a": "x"},
+            "target_match": {"a.b": "x"}, "target_match_re": {"c-d": "x|y"},
+            "equal": ["ok"],
+        }],
+    }
+    found = [f for f in lint(cfg) if f.code == "bad-match-label"]
+    assert [f.where for f in found] == ["inhibit_rules[0]"] * 4
+    assert [_suggestion(f) for f in found] == [
+        ("source_matchers", ['"k8s.ns"="x"']), ("source_matchers", ['"1a"=~"x"']),
+        ("target_matchers", ['"a.b"="x"']), ("target_matchers", ['"c-d"=~"x|y"']),
+    ]
+    assert "source_match label name 'k8s.ns'" in found[0].msg
+    assert "target_match_re label name 'c-d'" in found[3].msg
+
+
+def test_bad_match_label_on_root_route_suggests_no_matchers():
+    """The root route takes no matchers at all, which invalid-root-route reports."""
+    cfg = {"route": {"receiver": "d", "match": {"k8s.ns": "x"}}, "receivers": [{"name": "d"}]}
+    [f] = [f for f in lint(cfg) if f.code == "bad-match-label"]
+    assert f.where == "route" and "matchers:" not in f.msg
+    assert "invalid-root-route" in codes(cfg)
+
+
+def test_bad_match_label_also_caught_by_amtool():
+    from amlint.explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
+    assert "bad-match-label" in ALSO_CAUGHT_BY_AMTOOL
+    assert EXPLAINS["bad-match-label"]["level"] == "error"
+
+
+def test_bad_match_label_in_file(tmp_path):
+    """Keys as amlint check loads them: Alertmanager's YAML reading, where ~ is ""."""
+    from amlint.cli import load
+    path = tmp_path / "am.yml"
+    path.write_text(
+        "route:\n  receiver: d\n  routes:\n    - receiver: d\n"
+        "      match: {~: x, 1: y, 0x1F: z, yes: w, k8s.ns: v}\n"
+        "receivers: [{name: d}]\n")
+    found = [f for f in lint(load(str(path))) if f.code == "bad-match-label"]
+    assert [re.search("label name '(.*?)'", f.msg).group(1) for f in found] == [
+        "", "1", "0x1F", "k8s.ns"]
 
 
 @pytest.mark.parametrize("route, message", [

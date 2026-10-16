@@ -13,7 +13,7 @@ Semantic linter for Prometheus Alertmanager configs.
 Alertmanager's own `amtool check-config` already validates most schema-level mistakes —
 undefined receivers, missing integration fields, bad regex — and refuses to start over them.
 **amlint covers that same ground in one dependency-free CLI with JSON/SARIF/diff output,
-plus 14 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
+plus 15 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
 starts and runs, and just silently doesn't do what you meant.**
 
 **[Try it in your browser](https://danikdanik2013.github.io/amlint/playground/)**: paste a
@@ -41,7 +41,7 @@ schema violations — they're valid configs that behave wrong:
 - receiver defined but never routed to, or routed to but has no integration configured
 
 None of this fails `amtool check-config` or stops Alertmanager from starting. Run
-`amlint list` to see which of the 32 checks are these vs. which duplicate amtool's own
+`amlint list` to see which of the 35 checks are these vs. which duplicate amtool's own
 validation (included for convenience — one tool, one output format, no Go binary needed).
 
 ## Install
@@ -254,6 +254,8 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `undefined-receiver` | error | route references a receiver that doesn't exist |
 | `invalid-root-route` | error | root route has no `receiver`, or has matchers / `continue` / time intervals |
 | `bad-regex` | error | regex fails to compile or uses syntax Go RE2 rejects (lookarounds, backrefs) |
+| `bad-matcher` | error | `matchers:` entry Alertmanager can't parse (`a=b,,c=d`, a stray `"`, `"x.y"="a\.b"`) |
+| `bad-match-label` | error | `match:` / `match_re:` key that isn't a classic label name (`k8s.ns`); use `matchers: ['"k8s.ns"=...']` |
 | `groupby-ellipsis` | error | `...` mixed with explicit labels in `group_by` |
 | `no-root-route` | error | no root `route` defined |
 | `duplicate-receiver` | error | receiver name defined more than once |
@@ -272,6 +274,7 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `template-file-missing` | error/warn | `templates:` references a file that doesn't exist |
 | `inhibit-no-equal` | warn | inhibition without `equal` silences too broadly |
 | `unreachable-route` | warn | catch-all hides subsequent sibling routes |
+| `stripped-brace` | warn | bare value ending in `}` loses it: `code=~[0-9]{3}` is the regex `[0-9]{3` |
 | `repeat-before-group` | warn | `repeat_interval` shorter than `group_interval` |
 | `circular-inhibition` | warn | two inhibition rules that silence each other |
 | `wait-exceeds-interval` | warn | `group_wait` longer than `group_interval` |

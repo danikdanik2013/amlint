@@ -13,6 +13,7 @@ Usage:
 
 import fnmatch
 import glob as _glob
+import json
 import os
 import posixpath
 import re
@@ -352,6 +353,24 @@ def _matchers(node: dict, prefix: str = "") -> List[Matcher]:
     return out
 
 
+# Keys of match / match_re maps: Alertmanager checks them against the classic label name
+# syntax (a quoted "service.name" works in matchers: only).
+_LEGACY_LABEL_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+
+
+def _bad_match_labels(node: dict, prefix: str = "") -> List[Tuple[str, str, str]]:
+    """(key, label name, value) for each match / match_re key of a route, or of one side of
+    an inhibit rule, that isn't a classic label name. Alertmanager rejects all of them."""
+    out = []
+    for key in (prefix + "match", prefix + "match_re"):
+        names = node.get(key)
+        for name, value in names.items() if isinstance(names, dict) else ():
+            name = _scalar(name)  # a null key is "" to Alertmanager
+            if not _LEGACY_LABEL_NAME.fullmatch(name):
+                out.append((key, name, _scalar(value)))
+    return out
+
+
 def _equality(matchers: List[Matcher]) -> Dict[str, str]:
     return {label: value for label, op, value in matchers if op == "="}
 
@@ -685,16 +704,21 @@ def _regex_patterns(node: dict, prefix: str = ""):
             yield label, value
 
 
-def check_bad_regex(cfg):
-    out = []
-    targets = []
+def _matcher_nodes(cfg: dict) -> Generator[Tuple[dict, str, str], None, None]:
+    """(node, where, prefix) for each route (prefix "") and for each side of an inhibit
+    rule (prefix "source_" / "target_"), the nodes `_matchers` reads."""
     route = _root_route(cfg)
     if route:
-        targets += [(node, path, "") for node, path in _walk_routes(route)]
+        for node, path in _walk_routes(route):
+            yield node, path, ""
     for i, rule in _dict_items(cfg.get("inhibit_rules")):
         for prefix in ("source_", "target_"):
-            targets.append((rule, f"inhibit_rules[{i}]", prefix))
-    for node, path, prefix in targets:
+            yield rule, f"inhibit_rules[{i}]", prefix
+
+
+def check_bad_regex(cfg):
+    out = []
+    for node, path, prefix in _matcher_nodes(cfg):
         for label, pattern in _regex_patterns(node, prefix):
             problem = _regex_problem(pattern)
             if problem:
@@ -703,6 +727,115 @@ def check_bad_regex(cfg):
                     f"Regex for '{label}' {problem}. Alertmanager will reject this config.",
                     path,
                 ))
+    return out
+
+
+def _go_quote(text: str) -> str:
+    """`text` as a double-quoted Go string literal, as the UTF-8 matcher parser reads it:
+    json.dumps only writes escapes that Go has too (\\", \\\\, \\n, \\u0001, ...)."""
+    return json.dumps(text, ensure_ascii=False)
+
+
+# CHECK 33: a match: / match_re: label name that isn't a classic one
+def check_bad_match_label(cfg: dict) -> List[Finding]:
+    """match: and match_re: (and the source_ / target_ ones of inhibit rules) take classic
+    label names only, so Alertmanager refuses `match: {k8s.ns: x}` ("invalid label name").
+    In a matchers: entry a quoted label name can be any UTF-8 text."""
+    out: List[Finding] = []
+    for node, where, prefix in _matcher_nodes(cfg):
+        for key, name, value in _bad_match_labels(node, prefix):
+            msg = (
+                f"{key} label name '{name}' is not a classic label name "
+                f"([a-zA-Z_][a-zA-Z0-9_]*), the only kind {key}: takes, so Alertmanager "
+                f"will reject this config."
+            )
+            if where != "route":  # the root route takes no matchers at all
+                op = "=~" if key.endswith("_re") else "="
+                entry = _go_quote(name) + op + _go_quote(value)
+                entry = entry.replace("'", "''")  # in a single-quoted YAML scalar
+                msg += (
+                    f" Use {prefix}matchers: ['{entry}'] instead, where a quoted label name "
+                    f"can be any UTF-8 text."
+                )
+            out.append(Finding(ERROR, "bad-match-label", msg, where))
+    return out
+
+
+def _matcher_entries(cfg: dict) -> Generator[Tuple[str, str, str], None, None]:
+    """(where, key, entry) for each `matchers:` entry of a route and each
+    `source_matchers:` / `target_matchers:` entry of an inhibit rule."""
+    for node, where, prefix in _matcher_nodes(cfg):
+        items = node.get(prefix + "matchers")
+        for item in items if isinstance(items, list) else ():
+            yield where, prefix + "matchers", _scalar(item)
+
+
+# CHECK 31: a matchers: entry neither of Alertmanager's matcher parsers can read
+def check_bad_matcher(cfg: dict) -> List[Finding]:
+    out: List[Finding] = []
+    for where, key, entry in _matcher_entries(cfg):
+        if _parse_matcher_entry(entry) is not None:
+            continue
+        if entry.lstrip("{ \t\n\f\r").startswith('"'):
+            hint = (
+                "With a quoted label name Alertmanager reads the entry with its UTF-8 "
+                "parser, where values are Go strings: quote them and double each "
+                'backslash ("x.y"=~"a\\\\.b").'
+            )
+        else:
+            hint = (
+                'Write each matcher as label="value" (or !=, =~, !~), with the value in '
+                'double quotes and any " or \\ in it escaped, and one comma between matchers.'
+            )
+        out.append(Finding(
+            ERROR, "bad-matcher",
+            f"{key} entry '{entry}' is not a matcher Alertmanager can parse, so it will "
+            f"reject this config. {hint}",
+            where,
+        ))
+    return out
+
+
+def _classic_quote(value: str) -> str:
+    """`value` in double quotes as labels.ParseMatcher reads it back, escaping only what
+    must be: a regex like \\d keeps its single backslash."""
+    out = []
+    for i, ch in enumerate(value):
+        if ch in ('"', "\n"):
+            out.append({'"': '\\"', "\n": "\\n"}[ch])
+        elif ch == "\\" and value[i + 1:i + 2] in ('"', "\\", "n", ""):
+            out.append("\\\\")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
+# CHECK 32: a bare value at the end of a matchers: entry that loses its closing brace
+def check_stripped_brace(cfg: dict) -> List[Finding]:
+    """The classic parser drops one trailing "}" from an entry whether or not the entry
+    opens with "{", so a bare `code=~[0-9]{3}` is the regex `[0-9]{3`. Reported where
+    Alertmanager reads the entry that way and keeping the brace would change a value."""
+    out: List[Finding] = []
+    for where, key, entry in _matcher_entries(cfg):
+        if entry.startswith("{") or not entry.endswith("}"):
+            continue
+        read = _classic_matchers(entry)
+        if read is None or _parse_matcher_entry(entry) != tuple(read):
+            continue  # the UTF-8 parser reads it (no brace stripped), or nothing does
+        meant = _classic_matchers("{" + entry + "}")
+        if meant is None or len(meant) != len(read) or meant == read:
+            continue
+        label, op, value = read[-1]
+        intended = meant[-1][2]
+        what = "regex" if op in ("=~", "!~") else "value"
+        out.append(Finding(
+            WARN, "stripped-brace",
+            f"{key} entry '{entry}' does not start with '{{', but Alertmanager still strips "
+            f"its trailing '}}': the {what} for '{label}' is '{value}', not '{intended}'. "
+            f"Quote the value ({label}{op}{_classic_quote(intended)}) or wrap the entry "
+            f"in braces.",
+            where,
+        ))
     return out
 
 
@@ -1410,6 +1543,9 @@ ALL_CHECKS = [
     check_unused_receivers,
     check_dead_inhibitions,
     check_bad_regex,
+    check_bad_match_label,
+    check_bad_matcher,
+    check_stripped_brace,
     check_unreachable_routes,
     check_groupby,
     check_duplicate_receivers,

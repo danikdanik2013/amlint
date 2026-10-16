@@ -40,7 +40,9 @@ from a fixed seed, so every run of a given seed tests the same cases:
   types (`NO`, `1.10`, `0x1F`)
 - label sets with labels missing, empty, or set to values the matchers look for
 - configs with up to two of the mistakes `amtool check-config` rejects, including integration
-  fields covered (or not) by a `_file` variant or a `global:` default
+  fields covered (or not) by a `_file` variant or a `global:` default, `matchers:`
+  entries in routes and inhibit rules that neither matcher parser reads, and `match:` /
+  `match_re:` keys that aren't classic label names (`k8s.ns`, `1a`, a null key)
 - inhibit rules with `equal:`, rules matching both sides, and alerts that match several rules
 
 When amlint and Alertmanager disagree, the test reduces the case to a minimal config and
@@ -60,12 +62,14 @@ Each fix has a regression test in `test_linter.py`.
 - **Bare regexes with braces.** Alertmanager's classic matcher parser strips one trailing
   `}` from a `matchers:` entry even when it doesn't start with `{`, so a bare
   `code=~[0-9]{3}` is the regex `[0-9]{3`, which matches `1{3` and not `123`. Quote the
-  value (`code=~"[0-9]{3}"`) to get what you meant.
+  value (`code=~"[0-9]{3}"`) to get what you meant. `amlint check` warns about it
+  (`stripped-brace`).
 - **Which matcher parser reads an entry.** The classic parser reads an entry whenever it
   can, even where the UTF-8 one would read it differently. Only when it fails, for example
   on a quoted label name, does the UTF-8 parser read the whole entry, with Go string
   escapes: there `\t` is a tab and `\.` is an error. Bare values are unescaped like quoted
-  ones (`a=x\\y` is `x\y`).
+  ones (`a=x\\y` is `x\y`). `amlint check` reports an entry neither parser reads as
+  `bad-matcher`.
 - **Regex details.** `\b` and `\B` look at ASCII word characters only, ignore `(?i)`, and
   `\B` matches an empty value. `$` outside `(?m)` doesn't match before a final newline. A
   quantifier after an anchor (`^*`, `\b+`) is valid Go. `[\b]` is not.
