@@ -56,9 +56,10 @@ amlint check alertmanager.yml --format github  # PR annotations straight from a 
 amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
-amlint diff old.yml new.yml                 # show what changed
+amlint diff old.yml new.yml                 # what changed: findings, and alerts routed differently
 amlint tree alertmanager.yml                # visualize the route tree, issues inline
-amlint test alertmanager.yml tests.yml      # routing regression tests: label-set -> expected receiver
+amlint route alertmanager.yml team=infra severity=critical  # where does this alert go?
+amlint test alertmanager.yml tests.yml      # routing unit tests: labels -> expected receivers
 amlint init > alertmanager.yml              # generate minimal valid config
 amlint list                                 # all check codes with level + description
 amlint explain undefined-receiver           # detailed explanation + examples
@@ -114,6 +115,30 @@ Example output:
 Every finding carries `file:line:col`, so terminals and editors can jump straight to it.
 
 Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
+
+## Routing tests
+
+`amlint route` shows where one alert goes: the routes it matches, its receivers, and the
+`group_by` and timings it inherits. `amlint test` turns that into unit tests for CI:
+
+```yaml
+# tests.yml
+- name: critical infra alerts page infra and the on-call
+  labels: {team: infra, severity: critical}
+  expect: [infra-pager, pager]   # any order
+- labels: {team: unknown}
+  expect: [default]
+```
+
+```bash
+amlint test alertmanager.yml tests.yml   # exit 1 on any failing case, with a diff
+```
+
+The simulation follows Alertmanager's own routing code: `continue: true` fan-out,
+inherited settings, fully anchored Go RE2 regexes, missing labels matching as `""`.
+`amlint diff` uses it too: after the findings it lists the label sets that two configs
+route differently, e.g. `team=db, severity=critical: pagerduty-db → slack-db`.
+Details in [docs/usage.md](docs/usage.md#route).
 
 ## CI example
 

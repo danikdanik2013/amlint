@@ -147,6 +147,52 @@ amlint diff main.yml feature-branch.yml
 
 Exits `1` if any **new** findings appeared (regressions), `0` otherwise.
 
+### Routing changes
+
+After the findings, `diff` compares how the two configs route alerts — the same simulation
+as [`route`](#route), run against both files with the same label sets:
+
+```
+───────────────────────────── Routing ─────────────────────────────
+
+  team=infra
+    infra-slack  group_wait   30s → 10s
+    and 5 more label sets with the same change
+
+  team=db, severity=critical
+    receivers   pagerduty-db → slack-db
+    and 2 more label sets with the same change
+
+  2 routing changes  · 18 label sets checked
+```
+
+A label set shows up when its receivers change, or when a receiver it reaches gets a
+different `group_by`, `group_wait`, `group_interval`, `repeat_interval` or time intervals.
+Edits that still deliver every alert the same way (`match:` rewritten as `matchers:`,
+siblings reordered that never match the same alert) don't.
+
+The label sets come from the matchers of both configs: for every label, the values used
+with `=` and `!=`, a few strings each `=~` / `!~` regex fully matches, and the label being
+absent. Small configs get every combination. Larger ones get, for every route, a label set
+that reaches it and one that stops on it, then single-label variations of those, spread
+evenly over the routes and capped at 5000 label sets — the summary says when the cap was
+hit. Label sets with exactly the same change are folded into one, shown with the smallest
+label set.
+
+Routing changes are informational: they don't change the exit code, since a PR that edits
+routing usually means to. If either config can't be simulated (see [`route`](#route)), the
+section says why and the findings diff still runs. `--no-routing` skips the comparison.
+With `--format json`, a `routing` key holds `checked`, `truncated` and `changes` — each
+with the `labels`, the `differences`, the full `old` / `new` routes, and how many `similar`
+label sets were folded into it — or `skipped` with the reason.
+
+**Options:**
+
+| flag | description |
+|------|-------------|
+| `--format json` | Machine-readable output |
+| `--no-routing` | Compare findings only |
+
 ### In CI (PR check)
 
 ```yaml
@@ -194,62 +240,133 @@ settings, timing) are counted separately since they don't map to a specific node
 |------|-------------|
 | `--ignore CODE` | Skip these codes when annotating the tree (comma-separated or repeat) |
 
+## route
+
+Show where one alert goes: which route(s) it matches, which receiver(s) it is delivered
+to, and the `group_by` and timings it ends up with after inheritance.
+
+```bash
+amlint route alertmanager.yml team=infra severity=critical alertname=DiskFull
+```
+
+```
+  Labels  team=infra, severity=critical, alertname=DiskFull
+
+  1. route → route.routes[0] → route.routes[0].routes[0]
+    receiver          infra-pager          set here
+    group_by          alertname, cluster   inherited from route
+    group_wait        10s                  inherited from route.routes[0]
+    group_interval    5m                   Alertmanager default
+    repeat_interval   1h                   set here
+
+  2. route → route.routes[1]
+    receiver          pager                set here
+    group_by          alertname, cluster   inherited from route
+    group_wait        30s                  Alertmanager default
+    group_interval    5m                   Alertmanager default
+    repeat_interval   4h                   Alertmanager default
+
+  Delivered to: infra-pager, pager
+```
+
+Here `route.routes[0]` has `continue: true`, so after the alert lands on its critical
+child, `route.routes[1]` is checked too and matches as well. `mute_time_intervals` and
+`active_time_intervals` are shown when the matched route sets them.
+
+The simulation follows Alertmanager's own `dispatch/route.go`:
+
+- Routes are checked depth-first, children in definition order. A child matches when all
+  of its matchers match. The first matching child ends the search at its level, unless it
+  has `continue: true`. A route none of whose children match is itself the match — a
+  matched parent with a matched child does not also fire.
+- `receiver`, `group_by`, `group_wait`, `group_interval` and `repeat_interval` are
+  inherited from the parent, starting from Alertmanager's defaults (30s / 5m / 4h).
+  `group_by: []` resets grouping to none, `group_by: ['...']` groups by every label.
+  Time intervals are not inherited: each route has only its own.
+- A label the alert doesn't have matches as the empty string, so `env!="prod"` matches an
+  alert without `env`, and `env=""` matches it too.
+- Regexes are fully anchored, like Alertmanager's `^(?:pattern)$`: `service=~"api"`
+  matches `api`, not `api-gateway`. They follow Go RE2: `(?i)` flags, ASCII-only `\d`,
+  `\w`, `\s` and POSIX classes such as `[[:alpha:]]` all behave as in Alertmanager.
+
+Configs Alertmanager would refuse to load (a regex RE2 rejects, a malformed duration,
+matchers on the root route) exit `2` with the route that causes it. So does a regex with
+Unicode classes (`\pL`), which Python can't evaluate the way Go does — check those with
+`amtool config routes test`.
+
+`--format json` prints the receivers, and for every matched route its path, effective
+settings, and `set_by`: which route set each value (a value missing from `set_by` is
+Alertmanager's default).
+
+`amtool config routes test` also takes a label set and prints the receivers it reaches.
+`amlint route` also shows the effective `group_by` and timings and which route each one
+comes from, and needs no Go binary.
+
+**Options:**
+
+| flag | description |
+|------|-------------|
+| `--format json` | Machine-readable output |
+
 ## test
 
-Write regression tests for your routing tree — given a set of alert labels, assert which
-receiver(s) the alert reaches. Runs entirely against the local config file; no live
-Alertmanager or Go toolchain needed:
+Unit tests for your routing tree: for each set of alert labels, assert which receivers the
+alert reaches. Runs entirely against the local config file, with the same simulation as
+[`route`](#route) — no live Alertmanager or Go toolchain needed:
 
 ```bash
 amlint test alertmanager.yml routing-tests.yml
 ```
 
-`routing-tests.yml`:
+`routing-tests.yml` is a list of cases:
 
 ```yaml
-tests:
-  - name: "critical infra alerts page"
-    labels: {severity: critical, team: infra}
-    receiver: infra-pager
+- name: critical infra alerts page infra and the on-call
+  labels: {team: infra, severity: critical}
+  expect: [infra-pager, pager]
 
-  - name: "warning infra alerts go to slack only"
-    labels: {severity: warning, team: infra}
-    receiver: infra-slack
+- name: warning infra alerts go to slack only
+  labels: {team: infra, severity: warning}
+  expect: [infra-slack]
 
-  - name: "continue:true fans out to both siblings"
-    labels: {team: infra, severity: critical}
-    receivers: [infra-slack, pager]   # order matters — matches definition order
-
-  - name: "unrelated alert isn't silently swallowed"
-    labels: {team: unknown}
-    receiver: default
+- name: unrelated alerts aren't swallowed
+  labels: {team: unknown}
+  expect: [default]
 ```
 
-Each test case sets exactly one of:
+`expect:` lists the receivers the alert must reach, in any order: no more, no fewer.
+`name:` is optional. Each case sets exactly one of:
 
 | key | asserts |
 |-----|---------|
+| `expect: [a, b]` | alert reaches exactly these receivers, in any order |
 | `receiver: name` | alert reaches exactly this one receiver |
-| `receivers: [a, b]` | alert reaches exactly these receivers, in this order (for `continue: true` fan-out) |
-| `drop: true` | alert matches no receiver at all |
+| `receivers: [a, b]` | alert reaches exactly these receivers, in this order (`continue: true` fan-out follows definition order) |
+| `drop: true` | alert reaches no receiver at all |
+
+Files from amlint 0.3.0, with the cases under a top-level `tests:` key, still work.
+
+A failing case shows what differs, and which routes the alert matched. Had the second
+case said `expect: [infra-slack, pager]`:
 
 ```
-  ✓  critical infra alerts page
+  ✓  critical infra alerts page infra and the on-call
   ✗  warning infra alerts go to slack only
-     expected: infra-slack
-     actual:   default
-     labels:   severity=warning, team=infra
+     labels:    team=infra, severity=warning
+     expected:  infra-slack, pager
+     actual:    infra-slack
+       - pager  expected, not delivered
+     routes:    route.routes[0]
 
   1 failed  ·  1 passed
 ```
 
-Exit code `1` if any test fails — same CI story as `check`. `--format json` for
-machine-readable output.
+Exit code `1` if any case fails — same CI story as `check` — and `2` if the config can't
+be simulated (see [`route`](#route)). `--format json` gives, per case, `passed`,
+`expected`, `actual`, `missing`, `unexpected` and the matched `routes`.
 
-This replicates Alertmanager's own dispatch algorithm (deepest-match-wins, `continue`
-fan-out in definition order, receiver inheritance from parent) — verified against
-`amtool config routes test` on the same inputs. `amtool` can test one alert
-interactively; this runs a whole suite from a file, in CI, without the Go binary.
+`amtool config routes test` checks one alert at a time from the command line; `amlint test`
+runs a whole suite from a file, in CI, without the Go binary.
 
 **Options:**
 

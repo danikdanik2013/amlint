@@ -53,7 +53,8 @@ duplicate amtool and which don't; `amlint explain <code>` says so for any indivi
 On the last row: `amtool config routes test` already lets you test one alert's routing
 interactively — that part isn't new either. What it doesn't have is a way to run a whole
 suite of these as regression tests from a file, in CI, without a live Alertmanager. That's
-what `amlint test` adds.
+what `amlint test` adds; `amlint route` is the single-alert version, showing the matched
+routes and the `group_by` and timings each one inherits.
 
 ## 31 checks — 13 of them amtool can't do
 
