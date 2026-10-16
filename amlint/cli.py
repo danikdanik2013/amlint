@@ -36,10 +36,20 @@ from rich.text import Text
 from rich.tree import Tree
 
 from .config import load_project_config
-from .linter import ERROR, INFO, WARN, _dict_items, _scalar, lint
+from .linter import (
+    ERROR,
+    INFO,
+    WARN,
+    _dict_items,
+    _scalar,
+    _split_matchers,
+    _unquote,
+    _walk_routes,
+    lint,
+)
 from .markdown import diff_report
-from .routing import GROUP_BY_ALL, Router, RoutingError, diff_routing
-from .source import apply_source
+from .routing import GROUP_BY_ALL, Inhibitor, Router, RoutingError, diff_routing, route_coverage
+from .source import SourceMap, apply_source
 
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
@@ -409,6 +419,35 @@ def _router(cfg: dict):
         return None
 
 
+def _inhibitor(cfg: dict):
+    """Inhibitor for the config's inhibit_rules, or None after printing why it can't be built."""
+    try:
+        return Inhibitor(cfg.get("inhibit_rules"))
+    except RoutingError as e:
+        err_console.print(f"[red]Cannot simulate inhibition:[/red] {escape(str(e))}")
+        return None
+
+
+def _inhibition_json(inhibition, smap):
+    if inhibition is None:
+        return None
+    line, col = smap.locate(inhibition.rule)
+    return {"rule": inhibition.rule, "line": line, "column": col, "source": inhibition.source}
+
+
+def _parse_label_set(text: str):
+    """`alertname=NodeDown,instance=a` (braces and quoted values allowed) as a dict, or
+    None unless every part is label=value."""
+    labels = {}
+    for part in _split_matchers(text):
+        name, sep, value = part.partition("=")
+        name, value = name.strip(), value.strip()
+        if not sep or not name or name.endswith("!") or value.startswith("~"):
+            return None
+        labels[name] = _unquote(value)
+    return labels or None
+
+
 def _format_labels(labels: dict) -> str:
     return ", ".join(f"{k}={v}" for k, v in labels.items()) if labels else "(no labels)"
 
@@ -442,10 +481,28 @@ def _cmd_route(args) -> int:
             )
             return 2
         labels[name.strip()] = value
+    firing = []
+    for item in args.firing or []:
+        alert = _parse_label_set(item)
+        if alert is None:
+            err_console.print(
+                f"[red]Invalid --firing[/red] '{escape(item)}': expected label=value,label=value"
+            )
+            return 2
+        firing.append(alert)
 
-    router = _router(load(args.config))
+    content = _read(args.config)
+    cfg = load(args.config, content)
+    router = _router(cfg)
     if router is None:
         return 2
+    inhibition = None
+    if firing:
+        inhibitor = _inhibitor(cfg)
+        if inhibitor is None:
+            return 2
+        inhibition = inhibitor.inhibited_by(labels, firing)
+    smap = SourceMap(content) if inhibition else None
     matches = router.match(labels)
 
     if args.format == "json":
@@ -453,11 +510,16 @@ def _cmd_route(args) -> int:
             "labels": labels,
             "receivers": _receivers_of(matches),
             "routes": [_route_match_json(m) for m in matches],
+            "firing": firing,
+            "inhibited": inhibition is not None,
+            "inhibited_by": _inhibition_json(inhibition, smap),
         }, ensure_ascii=False, indent=2))
         return 0
 
     console.print()
     console.print(f"  [bold]Labels[/bold]  {escape(_format_labels(labels))}")
+    for alert in firing:
+        console.print(f"  [bold]Firing[/bold]  {escape(_format_labels(alert))}")
     for n, m in enumerate(matches, 1):
         here = m.path[-1]
         console.print()
@@ -492,10 +554,28 @@ def _cmd_route(args) -> int:
     console.print()
     console.print(Rule(style="dim"))
     receivers = _receivers_of(matches)
+    if inhibition:
+        line, col = smap.locate(inhibition.rule)
+        console.print(
+            f"  [bold yellow]Inhibited[/bold yellow] by {escape(inhibition.rule)}"
+            f"  ·  {escape(_display(args.config))}:{line}:{col}", soft_wrap=True,
+        )
+        console.print(f"     while firing: {escape(_format_labels(inhibition.source))}")
+        if receivers:
+            console.print(f"  Routed to: [bold]{escape(', '.join(receivers))}[/bold], but no "
+                          f"notification is sent while it is inhibited.\n")
+        else:
+            console.print("  [yellow]No receiver, and inhibited: the alert would not be "
+                          "delivered.[/yellow]\n")
+        return 0
     if receivers:
-        console.print(f"  Delivered to: [bold]{escape(', '.join(receivers))}[/bold]\n")
+        console.print(f"  Delivered to: [bold]{escape(', '.join(receivers))}[/bold]")
     else:
-        console.print("  [yellow]No receiver: the alert would not be delivered.[/yellow]\n")
+        console.print("  [yellow]No receiver: the alert would not be delivered.[/yellow]")
+    if firing:
+        noun = "alert" if len(firing) == 1 else "alerts"
+        console.print(f"  [dim]Not inhibited by the {len(firing)} firing {noun}.[/dim]")
+    console.print()
     return 0
 
 
@@ -509,26 +589,40 @@ def _load_test_cases(path):
     return cases if isinstance(cases, list) else None
 
 
-def _run_test_case(router, i: int, case) -> dict:
+def _test_error(name: str, labels: dict, error: str):
+    return {"name": name, "labels": labels, "passed": False, "error": error}, []
+
+
+def _run_test_case(router, inhibitor, smap, i: int, case):
+    """(result, matches) of one case; matches is empty when the case is malformed."""
     if not isinstance(case, dict):
-        return {"name": f"test #{i + 1}", "labels": {}, "passed": False,
-                "error": "test case must be a mapping with labels: and expect:"}
+        return _test_error(f"test #{i + 1}", {},
+                           "test case must be a mapping with labels: and expect:")
     name = str(case.get("name") or f"test #{i + 1}")
     labels = case.get("labels") or {}
     if not isinstance(labels, dict):
-        return {"name": name, "labels": {}, "passed": False,
-                "error": "labels: must be a mapping of label names to values"}
+        return _test_error(name, {}, "labels: must be a mapping of label names to values")
     labels = {str(k): _scalar(v) for k, v in labels.items()}
-    if sum(k in case for k in _TEST_ASSERTIONS) != 1:
-        return {"name": name, "labels": labels, "passed": False,
-                "error": "test case must set exactly one of: expect, receiver, receivers, drop"}
+    asserted = [k for k in _TEST_ASSERTIONS if k in case]
+    if len(asserted) > 1 or not asserted and "inhibited" not in case:
+        return _test_error(name, labels, "test case must set exactly one of: expect, receiver, "
+                                         "receivers, drop (or only inhibited:)")
     if "drop" in case and case["drop"] is not True:
-        return {"name": name, "labels": labels, "passed": False,
-                "error": "drop: only accepts true — use expect: to list receivers"}
+        return _test_error(name, labels, "drop: only accepts true — use expect: to list receivers")
+    firing = case.get("firing") or []
+    if not isinstance(firing, list) or not all(isinstance(a, dict) for a in firing):
+        return _test_error(name, labels, "firing: must be a list of label sets, "
+                                         "e.g. [{alertname: NodeDown, instance: a}]")
+    firing = [{str(k): _scalar(v) for k, v in a.items()} for a in firing]
+    if "inhibited" in case and not isinstance(case["inhibited"], bool):
+        return _test_error(name, labels, "inhibited: must be true or false")
+    # with firing: and no inhibited:, the case expects the alert to get through
+    expect_inhibited = case.get("inhibited", False if "firing" in case else None)
 
     matches = router.match(labels)
     actual = _receivers_of(matches)
-    ordered = False
+    inhibition = inhibitor.inhibited_by(labels, firing) if firing else None
+    expected, missing, unexpected, ordered, routed_ok = None, [], [], False, True
     if "expect" in case:
         raw = case["expect"]
         expected = [_scalar(r) for r in raw] if isinstance(raw, list) else (
@@ -539,23 +633,33 @@ def _run_test_case(router, i: int, case) -> dict:
         ordered = True
     elif "receiver" in case:
         expected = [_scalar(case["receiver"])]
-    else:
+    elif "drop" in case:
         expected = []
 
-    missing = list((Counter(expected) - Counter(actual)).elements())
-    unexpected = list((Counter(actual) - Counter(expected)).elements())
-    passed = actual == expected if ordered else not missing and not unexpected
+    if expected is not None:
+        missing = list((Counter(expected) - Counter(actual)).elements())
+        unexpected = list((Counter(actual) - Counter(expected)).elements())
+        routed_ok = actual == expected if ordered else not missing and not unexpected
+    inhibited_ok = expect_inhibited is None or expect_inhibited == (inhibition is not None)
     return {
-        "name": name, "labels": labels, "passed": passed,
-        "expected": ", ".join(expected) if expected else "(no receiver)",
-        "actual": ", ".join(actual) if actual else "(no receiver)",
+        "name": name, "labels": labels, "passed": routed_ok and inhibited_ok,
+        "expected": None if expected is None else ", ".join(expected) or "(no receiver)",
+        "actual": ", ".join(actual) or "(no receiver)",
         "missing": missing, "unexpected": unexpected,
         "routes": [m.path[-1] for m in matches],
-        "order_only": ordered and not passed and not missing and not unexpected,
-    }
+        "order_only": ordered and not routed_ok and not missing and not unexpected,
+        "firing": firing,
+        "expected_inhibited": expect_inhibited,
+        "inhibited": inhibition is not None,
+        "inhibited_by": _inhibition_json(inhibition, smap),
+    }, matches
 
 
-def _print_test_result(r: dict) -> None:
+def _yes_no(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def _print_test_result(r: dict, config: str) -> None:
     if r["passed"]:
         console.print(f"  [bold green]✓[/bold green]  {escape(r['name'])}")
         return
@@ -564,8 +668,11 @@ def _print_test_result(r: dict) -> None:
         console.print(f"     [red]{escape(r['error'])}[/red]")
     else:
         console.print(f"     [dim]labels:[/dim]    {escape(_format_labels(r['labels']))}")
-        console.print(f"     [dim]expected:[/dim]  {escape(r['expected'])}")
-        console.print(f"     [dim]actual:[/dim]    {escape(r['actual'])}")
+        for alert in r["firing"]:
+            console.print(f"     [dim]firing:[/dim]    {escape(_format_labels(alert))}")
+        if r["expected"] is not None:
+            console.print(f"     [dim]expected:[/dim]  {escape(r['expected'])}")
+            console.print(f"     [dim]actual:[/dim]    {escape(r['actual'])}")
         for rcv in r["missing"]:
             console.print(f"       [red]- {escape(rcv)}[/red]  [dim]expected, not delivered[/dim]")
         for rcv in r["unexpected"]:
@@ -577,12 +684,70 @@ def _print_test_result(r: dict) -> None:
                 "       [dim]same receivers, different order (receivers: is "
                 "order-sensitive, expect: is not)[/dim]"
             )
+        if r["expected_inhibited"] is not None:
+            console.print(f"     [dim]inhibited:[/dim] expected {_yes_no(r['expected_inhibited'])}"
+                          f", actual {_yes_no(r['inhibited'])}")
+        by = r["inhibited_by"]
+        if by:
+            console.print(
+                f"       [dim]by[/dim] {escape(by['rule'])}  [dim]·[/dim]  "
+                f"{escape(_display(config))}:{by['line']}:{by['column']}  [dim]·  while firing:"
+                f"[/dim] {escape(_format_labels(by['source']))}", soft_wrap=True,
+            )
         console.print(f"     [dim]routes:[/dim]    {escape(', '.join(r['routes']))}")
     console.print()
 
 
+def _coverage_percent(cov) -> float:
+    """Coverage as shown, to one decimal; 100.0 only when every route is covered."""
+    percent = round(cov.percent, 1)
+    return 99.9 if percent == 100 and cov.uncovered else percent
+
+
+def _coverage_json(cov, smap, fail_under) -> dict:
+    uncovered = []
+    for path in cov.uncovered:
+        line, col = smap.locate(path)
+        uncovered.append({"path": path, "line": line, "column": col})
+    return {
+        "routes": len(cov.routes), "covered": len(cov.covered),
+        "percent": _coverage_percent(cov), "fail_under": fail_under, "uncovered": uncovered,
+    }
+
+
+def _route_summary(node: dict, path: str) -> str:
+    parts = _format_matchers(node)
+    piece = "{" + ", ".join(parts) + "}" if parts else (
+        "(root)" if path == "route" else "(catch-all)"
+    )
+    return f"{piece}  →  {node['receiver']}" if node.get("receiver") else piece
+
+
+def _print_coverage(cov, cfg: dict, smap, config: str, fail_under) -> None:
+    percent = _coverage_percent(cov)
+    console.print(f"  [bold]Route coverage[/bold]  {len(cov.covered)} of {len(cov.routes)} "
+                  f"routes  ·  {percent:.1f}%")
+    if cov.uncovered:
+        nodes = {path: node for node, path in _walk_routes(cfg["route"])}
+        console.print("  [dim]Not matched by any test case:[/dim]")
+        rows = [(path, "{}:{}:{}".format(_display(config), *smap.locate(path)))
+                for path in cov.uncovered]
+        path_w = max(len(path) for path, _ in rows)
+        loc_w = max(len(loc) for _, loc in rows)
+        for path, loc in rows:
+            row = Text(f"    {path.ljust(path_w)}   {loc.ljust(loc_w)}   ")
+            row.append(_route_summary(nodes[path], path), style="dim")
+            console.print(row, soft_wrap=True)  # keep file:line:col in one piece
+    if fail_under is not None and percent < fail_under:
+        console.print(f"  [red]✖ Route coverage {percent:.1f}% is below --fail-under "
+                      f"{fail_under:g}%[/red]")
+    console.print()
+
+
 def _cmd_test(args) -> int:
-    router = _router(load(args.config))
+    content = _read(args.config)
+    cfg = load(args.config, content)
+    router = _router(cfg)
     if router is None:
         return 2
 
@@ -594,14 +759,29 @@ def _cmd_test(args) -> int:
         )
         return 2
 
-    results = [_run_test_case(router, i, case) for i, case in enumerate(cases)]
+    inhibitor = None
+    if any(isinstance(case, dict) and "firing" in case for case in cases):
+        inhibitor = _inhibitor(cfg)
+        if inhibitor is None:
+            return 2
+    coverage = args.coverage or args.fail_under is not None
+    smap = SourceMap(content) if coverage or inhibitor is not None else None
+
+    runs = [_run_test_case(router, inhibitor, smap, i, case) for i, case in enumerate(cases)]
+    results = [r for r, _ in runs]
+    cov = route_coverage(router, (matches for _, matches in runs)) if coverage else None
+    below = (cov is not None and args.fail_under is not None
+             and _coverage_percent(cov) < args.fail_under)
 
     if args.format == "json":
-        print(json.dumps(results, ensure_ascii=False, indent=2))
+        doc = results if cov is None else {
+            "tests": results, "coverage": _coverage_json(cov, smap, args.fail_under),
+        }
+        print(json.dumps(doc, ensure_ascii=False, indent=2))
     else:
         console.print()
         for r in results:
-            _print_test_result(r)
+            _print_test_result(r, args.config)
         passed_n = sum(1 for r in results if r["passed"])
         failed_n = len(results) - passed_n
         console.print(Rule(style="dim"))
@@ -609,8 +789,10 @@ def _cmd_test(args) -> int:
             console.print(f"  [red]{failed_n} failed[/red]  ·  [green]{passed_n} passed[/green]\n")
         else:
             console.print(f"  [green]{passed_n} passed[/green]\n")
+        if cov is not None:
+            _print_coverage(cov, cfg, smap, args.config, args.fail_under)
 
-    return 1 if any(not r["passed"] for r in results) else 0
+    return 1 if below or any(not r["passed"] for r in results) else 0
 
 
 _INIT_TEMPLATE = """\
@@ -867,6 +1049,16 @@ def _cmd_explain(args):
     return 0
 
 
+def _percentage(value: str) -> float:
+    try:
+        percent = float(value)
+    except ValueError:
+        percent = -1.0
+    if not 0 <= percent <= 100:
+        raise argparse.ArgumentTypeError(f"expected a percentage from 0 to 100, got {value!r}")
+    return percent
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(
         prog="amlint",
@@ -910,12 +1102,20 @@ def main(argv=None):
     pr.add_argument("config", help="path to alertmanager.yml, or - for stdin")
     pr.add_argument("labels", nargs="*", metavar="label=value",
                     help="alert labels, e.g. severity=critical team=infra")
+    pr.add_argument("--firing", action="append", metavar="LABELS",
+                    help="another alert firing at the same time, e.g. "
+                         "'alertname=NodeDown,instance=a' (repeat the flag for more); shows "
+                         "whether an inhibit rule mutes this alert")
     pr.add_argument("--format", choices=["text", "json"], default="text")
 
     ptst = sub.add_parser("test", help="run routing unit tests against a config")
     ptst.add_argument("config", help="path to alertmanager.yml")
     ptst.add_argument("tests", help="path to a YAML file with a list of test cases")
     ptst.add_argument("--format", choices=["text", "json"], default="text")
+    ptst.add_argument("--coverage", action="store_true",
+                      help="list the routes no test case reaches, and the share that is reached")
+    ptst.add_argument("--fail-under", type=_percentage, metavar="N", dest="fail_under",
+                      help="exit 1 if route coverage is below N%% (implies --coverage)")
 
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 
