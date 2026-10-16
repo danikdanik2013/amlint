@@ -1,0 +1,63 @@
+# Alerting rules in the shape kube-prometheus ships them: a PrometheusRule manifest,
+# Watchdog and InfoInhibitor with severity "none", most alerts at warning, a few at
+# critical and info, and labels such as namespace that come from the PromQL series.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kube-prometheus-rules
+  namespace: monitoring
+spec:
+  groups:
+    - name: general.rules
+      rules:
+        - alert: TargetDown
+          expr: 100 * (count(up == 0) by (job, namespace) / count(up) by (job, namespace)) > 10
+          for: 10m
+          labels:
+            severity: warning
+        - alert: Watchdog
+          expr: vector(1)
+          labels:
+            severity: none
+        - alert: InfoInhibitor
+          expr: ALERTS{severity="info"} == 1 unless on (namespace) ALERTS{alertname!="InfoInhibitor", severity=~"warning|critical", alertstate="firing"} == 1
+          labels:
+            severity: none
+    - name: kubernetes-apps
+      rules:
+        - alert: KubePodCrashLooping
+          expr: max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}[5m]) >= 1
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeDeploymentReplicasMismatch
+          expr: kube_deployment_spec_replicas > kube_deployment_status_replicas_available
+          for: 15m
+          labels:
+            severity: warning
+        - alert: KubeQuotaAlmostFull
+          expr: kube_resourcequota{type="used"} / kube_resourcequota{type="hard"} > 0.9
+          for: 15m
+          labels:
+            severity: info
+    - name: node-exporter
+      rules:
+        - record: instance:node_cpu_utilisation:rate5m
+          expr: 1 - avg without (cpu) (rate(node_cpu_seconds_total{mode="idle"}[5m]))
+        - alert: NodeFilesystemAlmostOutOfSpace
+          expr: node_filesystem_avail_bytes / node_filesystem_size_bytes * 100 < 5
+          for: 30m
+          labels:
+            severity: warning
+        - alert: NodeFilesystemAlmostOutOfSpace
+          expr: node_filesystem_avail_bytes / node_filesystem_size_bytes * 100 < 3
+          for: 30m
+          labels:
+            severity: critical
+    - name: alertmanager.rules
+      rules:
+        - alert: AlertmanagerFailedReload
+          expr: max_over_time(alertmanager_config_last_reload_successful[5m]) == 0
+          for: 10m
+          labels:
+            severity: critical

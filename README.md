@@ -15,6 +15,11 @@ undefined receivers, missing integration fields, bad regex — and refuses to st
 plus 13 checks that amtool doesn't do: bugs that are structurally valid, so Alertmanager
 starts and runs, and just silently doesn't do what you meant.**
 
+**[Try it in your browser](https://danikdanik2013.github.io/amlint/playground/)**: paste a
+config and see the findings, the route tree, where an alert goes and what a change does to
+routing. amlint runs inside the page (Python compiled to WebAssembly), so your config never
+leaves your browser. Nothing to install.
+
 ## Why
 
 Alertmanager configs are YAML routing trees with inhibition rules and receivers. The
@@ -37,7 +42,8 @@ validation (included for convenience — one tool, one output format, no Go bina
 pip install amlint
 ```
 
-Or with Docker (no Python required):
+Or with Docker (no Python required), or not at all with the
+[playground](https://danikdanik2013.github.io/amlint/playground/):
 
 ```bash
 docker run --rm -v $(pwd):/cfg ghcr.io/danikdanik2013/amlint check /cfg/alertmanager.yml
@@ -52,12 +58,20 @@ cat alertmanager.yml | amlint check -       # stdin
 amlint check alertmanager.yml --strict      # WARN also exits non-zero
 amlint check alertmanager.yml --format json
 amlint check alertmanager.yml --format sarif > results.sarif  # GitHub Code Scanning
+amlint check alertmanager.yml --format github  # PR annotations straight from a workflow step
 amlint check alertmanager.yml --ignore empty-receiver,unused-receiver
 amlint check alertmanager.yml --only undefined-receiver,bad-regex  # run only these checks
 amlint check alertmanager.yml --exit-zero   # always exits 0, just show findings
-amlint diff old.yml new.yml                 # show what changed
+amlint check alertmanager.yml --rules 'rules/*.yml'  # also check against Prometheus alerting rules
+amlint check alertmanager-secret.yaml       # a Kubernetes Secret, Helm values, a Mimir config...
+kubectl kustomize deploy/ | amlint check -  # ...or AlertmanagerConfig resources, merged like the operator
+amlint diff old.yml new.yml                 # what changed: findings, and alerts routed differently
+amlint diff old.yml new.yml --format markdown  # the same as a compact PR comment
 amlint tree alertmanager.yml                # visualize the route tree, issues inline
-amlint test alertmanager.yml tests.yml      # routing regression tests: label-set -> expected receiver
+amlint route alertmanager.yml team=infra severity=critical  # where does this alert go?
+amlint route alertmanager.yml alertname=DiskFull --firing alertname=NodeDown  # inhibited?
+amlint test alertmanager.yml tests.yml      # routing unit tests: labels -> expected receivers
+amlint test alertmanager.yml tests.yml --fail-under 90  # and fail if tests reach < 90% of routes
 amlint init > alertmanager.yml              # generate minimal valid config
 amlint list                                 # all check codes with level + description
 amlint explain undefined-receiver           # detailed explanation + examples
@@ -81,6 +95,17 @@ ignore = ["empty-receiver"]
 strict = true
 ```
 
+**Inline suppressions** — silence a check for one spot, with the reason next to it:
+
+```yaml
+# amlint: disable-file=global-resolve-timeout-missing     ← top of file: whole file
+
+receivers:
+  - name: blackhole   # amlint: disable=empty-receiver     ← this line
+  # amlint: disable=unused-receiver                       ← or the line below
+  - name: spare
+```
+
 **Shell completions (bash/zsh):**
 ```bash
 pip install "amlint[completions]"
@@ -90,37 +115,129 @@ eval "$(register-python-argcomplete amlint)"  # add to ~/.zshrc or ~/.bashrc
 Example output:
 
 ```
-  ERROR  Route references receiver 'pager-team' which is not defined in receivers. Alerts matched here will be dropped.
-  ↳ route.routes[1]  [undefined-receiver]
+  ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:10:7  ·  route.routes[1]
+     Route references receiver 'pager-team' which is not defined in receivers. Alerts matched here will be dropped.
 
-  WARN   Catch-all route (no matchers) with continue:false will intercept all alerts — 2 subsequent sibling(s) are unreachable.
-  ↳ route.routes[0]  [unreachable-route]
+  ⚠  WARN   [unreachable-route]  ·  alertmanager.yml:8:7  ·  route.routes[0]
+     Catch-all route (no matchers) with continue:false will intercept all alerts — 2 subsequent sibling(s) are unreachable.
 
-  2 error · 3 warn · 1 info
+  ✖ 2 errors  ·  ⚠ 5 warnings  ·  ℹ 3 info
 ```
 
+Every finding carries `file:line:col`, so terminals and editors can jump straight to it.
+
 Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
+
+## Routing tests
+
+`amlint route` shows where one alert goes: the routes it matches, its receivers, and the
+`group_by` and timings it inherits. `amlint test` turns that into unit tests for CI:
+
+```yaml
+# tests.yml
+- name: critical infra alerts page infra and the on-call
+  labels: {team: infra, severity: critical}
+  expect: [infra-pager, pager]   # any order
+- labels: {team: unknown}
+  expect: [default]
+- name: disk alerts are muted while their node is down
+  labels: {alertname: DiskFull, instance: db-1}
+  firing:                        # other alerts firing at the same time
+    - {alertname: NodeDown, instance: db-1}
+  inhibited: true
+```
+
+```bash
+amlint test alertmanager.yml tests.yml              # exit 1 on any failing case, with a diff
+amlint test alertmanager.yml tests.yml --coverage   # also list routes no case reaches, file:line
+amlint test alertmanager.yml tests.yml --fail-under 90   # exit 1 below 90% route coverage
+```
+
+The simulation follows Alertmanager's own routing code: `continue: true` fan-out,
+inherited settings, fully anchored Go RE2 regexes, missing labels matching as `""`.
+Inhibition follows Alertmanager's `inhibit_rules` evaluation, `equal` labels and the rule
+that an alert matching both sides of a rule doesn't inhibit itself. `amlint route --firing`
+shows which rule mutes an alert.
+`amlint diff` uses it too: after the findings it lists the label sets that two configs
+route differently, e.g. `team=db, severity=critical: pagerduty-db → slack-db`.
+Details in [docs/usage.md](docs/usage.md#route).
+
+## Checking against Prometheus rules
+
+Pass your alerting rules and amlint checks the config against the alerts that actually
+exist: a route or inhibit rule on an `alertname` no rule produces (with a "did you mean"),
+and alerts that, by their static labels, match no child route and land on the root
+receiver:
+
+```bash
+amlint check alertmanager.yml --rules 'rules/*.yml'   # quote the glob; repeat for more
+```
+
+```
+  ⚠  WARN   [route-unknown-alertname]  ·  alertmanager.yml:4:7  ·  route.routes[0]
+     Route matches alertname 'HighCpuUsage', which no alerting rule in the --rules files
+     produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source,
+     this branch is dead.
+```
+
+Prometheus rule files and prometheus-operator `PrometheusRule` manifests both work. At
+runtime alerts also carry labels from their PromQL series and `external_labels`, so amlint
+goes by the rule's static labels only and skips anything that depends on a label it can't
+know. Details in [docs/checks/rules.md](docs/checks/rules.md).
+
+## Kubernetes, Helm and Mimir
+
+amlint reads the config in the shape you deploy it, detected from the content
+(`--input-format` overrides it):
+
+- a Kubernetes **Secret** or ConfigMap holding `alertmanager.yaml`, in `stringData` or
+  base64 `data`, with its other keys as template files;
+- **kube-prometheus-stack** values: `alertmanager.config`, merged over the chart's default
+  config the way Helm merges it, and `alertmanager.templateFiles`;
+- a **Mimir** or **Cortex** tenant config: the `alertmanager_config` string and
+  `template_files`;
+- prometheus-operator **AlertmanagerConfig** resources (v1alpha1 and v1beta1), merged into
+  the base config as the operator does it: receivers named `<namespace>/<name>/<receiver>`,
+  a `namespace` matcher on each resource's route and inhibit rules (per
+  `alertmanagerConfigMatcherStrategy`), and Secret references counted as set.
+
+`check`, `tree`, `route`, `test` and `diff` work on all of them, and findings point at the
+line in your file, inside a `stringData` block too:
+
+```
+  ✖  ERROR  [undefined-receiver]  ·  team-a.yaml:10:9  ·  route.routes[0].routes[0]
+     Route references receiver 'team-a/payments/pager' which is not defined in receivers.
+     Alerts matched here will be dropped.
+```
+
+Details, including what isn't modeled, in [docs/kubernetes.md](docs/kubernetes.md).
 
 ## CI example
 
 ```yaml
 # .github/workflows/lint.yml
 - name: Lint Alertmanager config
-  run: amlint check alertmanager.yml --strict
+  run: amlint check alertmanager.yml --strict --format github  # findings annotate the PR diff
 ```
 
 ### As a GitHub Action
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: danikdanik2013/amlint@v0.2.0
+- uses: danikdanik2013/amlint@v0.4.1
   with:
     config-path: alertmanager.yml
     strict: true
 ```
 
-No `pip install` step needed. Supports `--ignore`/`--only` via inputs and optional SARIF upload
-for PR annotations — see the [GitHub Action docs](https://danikdanik2013.github.io/amlint/github-action/).
+No `pip install` step needed. Findings annotate the PR diff; `--ignore`/`--only` work via
+inputs, and SARIF upload to Code Scanning is optional.
+
+Add `diff-base: ${{ github.event.pull_request.base.sha }}` and the action also posts the
+routing diff against the PR's base as one comment: which label sets now reach other
+receivers, changed `group_by` and timings, and new and fixed findings. It updates that
+comment on every push. It needs `permissions: pull-requests: write` and the base commit in
+the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik2013.github.io/amlint/github-action/).
 
 ## Checks
 
@@ -158,13 +275,16 @@ for PR annotations — see the [GitHub Action docs](https://danikdanik2013.githu
 | `global-resolve-timeout-missing` | info | `global.resolve_timeout` not set; defaults to 5m |
 | `route-match-collision` | warn | two sibling routes with identical matchers |
 | `shadowed-route` | warn | earlier sibling with a subset of the route's matchers catches every alert first |
+| `route-unknown-alertname` | warn | with `--rules`: route matches an `alertname` no alerting rule produces |
+| `inhibit-unknown-alertname` | warn | with `--rules`: inhibit rule matches an `alertname` no alerting rule produces |
+| `alert-hits-default-receiver` | info | with `--rules`: by their static labels, alerts match no child route (grouped by routing labels) |
 
 Run `amlint explain <code>` for detailed description and examples of any check.
 
 ## Tests
 
 ```bash
-python3 -m pytest test_linter.py -v
+python3 -m pytest test_linter.py test_formats.py -v
 ```
 
 ## License

@@ -11,8 +11,10 @@ Usage:
     amlint check alertmanager.yml --format json
 """
 
+import fnmatch
 import glob as _glob
 import os
+import posixpath
 import re
 import warnings
 from typing import Dict, FrozenSet, Generator, Iterable, List, Optional, Set, Tuple
@@ -26,13 +28,16 @@ Matcher = Tuple[str, str, str]
 
 
 class Finding:
-    __slots__ = ("level", "code", "msg", "where")
+    __slots__ = ("level", "code", "msg", "where", "line", "col")
 
     def __init__(self, level: str, code: str, msg: str, where: str = "") -> None:
         self.level = level
         self.code = code
         self.msg = msg
         self.where = where
+        # 1-based position of `where` in the source file, filled in by the CLI
+        self.line: Optional[int] = None
+        self.col: Optional[int] = None
 
 
 def _dict_items(value) -> List[Tuple[int, dict]]:
@@ -60,6 +65,35 @@ def _walk_routes(node: dict, path: str = "route") -> Generator[Tuple[dict, str],
     yield node, path
     for i, child in _dict_items(node.get("routes")):
         yield from _walk_routes(child, f"{path}.routes[{i}]")
+
+
+def route_cycle(route, path: str = "route") -> Optional[Tuple[str, str]]:
+    """(path, ancestor) when the route at `path` is the route at `ancestor` again, which
+    contains it: a YAML alias of a route used inside that route. yaml.safe_load builds a
+    recursive dict for it, and every walk over the tree would recurse forever, so the CLI
+    rejects it when it reads the config (Alertmanager can't load it either). A route
+    reused in several places without nesting in itself is fine, and is walked once here.
+    `path` names `route` in the paths returned."""
+    if not isinstance(route, dict):
+        return None
+    walking: Dict[int, str] = {}  # id -> path of the routes from the root down to here
+    done: Set[int] = set()
+
+    def visit(node: dict, path: str) -> Optional[Tuple[str, str]]:
+        walking[id(node)] = path
+        for i, child in _dict_items(node.get("routes")):
+            cpath = f"{path}.routes[{i}]"
+            if id(child) in walking:
+                return cpath, walking[id(child)]
+            if id(child) not in done:
+                found = visit(child, cpath)
+                if found:
+                    return found
+        del walking[id(node)]
+        done.add(id(node))
+        return None
+
+    return visit(route, path)
 
 
 # Matchers: match / match_re maps and matchers: lists all normalized to Matcher tuples,
@@ -181,11 +215,11 @@ def check_unused_receivers(cfg):
         for node, _ in _walk_routes(route):
             if node.get("receiver"):
                 used.add(node["receiver"])
-    for name in defined - used:
+    for name in sorted(defined - used, key=str):
         out.append(Finding(
             INFO, "unused-receiver",
             f"Receiver '{name}' is defined but not referenced by any route.",
-            "receivers",
+            f"receivers[{name}]",
         ))
     return out
 
@@ -196,6 +230,11 @@ def check_dead_inhibitions(cfg):
     An inhibition rule silences target alerts when a source alert fires,
     but only when labels in 'equal' match. Missing 'equal' means the rule
     will silence across unrelated alerts — almost never intentional.
+
+    A rule with target matchers but no source matchers is the exception: every
+    alert counts as its source, so it mutes its targets whenever anything else
+    fires. That is a deliberate "always mute" idiom (kube-prometheus uses it for
+    InfoInhibitor), not a forgotten 'equal'.
     """
     out = []
     for i, rule in _dict_items(cfg.get("inhibit_rules")):
@@ -204,7 +243,7 @@ def check_dead_inhibitions(cfg):
         tgt = _matchers(rule, "target_")
         equal = rule.get("equal", []) or []
 
-        if not equal and (src or tgt):
+        if not equal and src:
             out.append(Finding(
                 WARN, "inhibit-no-equal",
                 "Inhibition rule has no 'equal' field: it will silence alerts across "
@@ -229,20 +268,43 @@ _GO_FLAGS_RE = re.compile(r"\(\?([a-zA-Z-]*)([:)])")
 _REPEAT_RE = re.compile(r"\{(\d+)(?:,(\d*))?\}")
 _MAX_REPEAT = 1000  # RE2 rejects larger repeat counts
 
+# Exact equivalents of RE2's ASCII-only Perl classes and POSIX classes, for matching.
+_PERL_CLASSES = {"d": "0-9", "w": "0-9A-Za-z_", "s": "\\t\\n\\f\\r "}
+_POSIX_CLASSES = {
+    "alnum": "0-9A-Za-z", "alpha": "A-Za-z", "ascii": "\\x00-\\x7f", "blank": "\\t ",
+    "cntrl": "\\x00-\\x1f\\x7f", "digit": "0-9", "graph": "!-~", "lower": "a-z",
+    "print": " -~", "punct": "!-/:-@\\[-`{-~", "space": "\\t\\n\\v\\f\\r ", "upper": "A-Z",
+    "word": "0-9A-Za-z_", "xdigit": "0-9A-Fa-f",
+}
 
-def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
+
+def _python_flags(go_flags: str) -> str:
+    """Go inline flags (imsU, optionally with -) as Python ones. U only swaps greedy
+    and lazy, which never changes whether a full-string match exists, so it is dropped."""
+    on, _, off = go_flags.replace("U", "").partition("-")
+    return on + ("-" + off if off else "")
+
+
+def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
     """
-    Translate a Go RE2 pattern into Python `re` syntax for a compile check.
+    Translate a Go RE2 pattern into Python `re` syntax.
 
     Returns (python_pattern, unsupported). `unsupported` names the first construct
     Python accepts but RE2 rejects (lookarounds, backreferences, ...), or "" if none.
-    Go-only syntax (\\pL, \\z, \\x{..}, \\Q..\\E, [:alpha:], (?<name>), (?U)) is swapped
-    for an equivalent Python stand-in: the result is only compiled, never matched.
+
+    By default the result is only meant to be compiled: Go-only syntax (\\pL, \\z, \\x{..},
+    \\Q..\\E, [:alpha:], (?<name>), (?U)) is swapped for a Python stand-in and flags are
+    dropped. With exact=True the result matches what Go matches: flags are kept as scoped
+    groups, \\d \\w \\s and POSIX classes stay ASCII-only as in RE2, and constructs with
+    no exact Python equivalent (\\pL, [:^alpha:]) are reported in `unsupported`.
     """
     out: List[str] = []
     i, n = 0, len(pattern)
     in_class = False
     after_quantifier = False
+    # Python only allows flags at the very start, Go anywhere: a mid-pattern (?i) becomes
+    # (?i: ... ) closed at the end of its group, one entry per open scope per group level.
+    flag_scopes: List[List[str]] = [[]]
     while i < n:
         ch = pattern[i]
         nxt = pattern[i + 1:i + 2]
@@ -250,6 +312,8 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
 
         if ch == "\\" and nxt:
             if nxt in "pP":
+                if exact:
+                    return "", "Unicode character classes (\\p{...})"
                 end = pattern.find("}", i) + 1 if pattern[i + 2:i + 3] == "{" else i + 3
                 out.append("\\w")
                 i = end if end > 0 else n
@@ -273,6 +337,15 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
                 i += 1 + len(octal.group(0))
             elif nxt in "ZuUN":
                 return "", "the \\%s escape" % nxt
+            elif exact and nxt.lower() in _PERL_CLASSES:
+                chars = _PERL_CLASSES[nxt.lower()]
+                if not in_class:
+                    out.append(("[^%s]" if nxt.isupper() else "[%s]") % chars)
+                elif nxt.islower():
+                    out.append(chars)
+                else:
+                    return "", "negated classes (\\%s) inside [...]" % nxt
+                i += 2
             else:
                 out.append("\\Z" if nxt == "z" else "\\" + nxt)
                 i += 2
@@ -283,7 +356,13 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
             if ch == "[" and nxt == ":":
                 end = pattern.find(":]", i + 2)
                 if end >= 0:
-                    out.append("\\w")
+                    if exact:
+                        name = pattern[i + 2:end]
+                        if name not in _POSIX_CLASSES:
+                            return "", "the [:%s:] class" % name
+                        out.append(_POSIX_CLASSES[name])
+                    else:
+                        out.append("\\w")
                     i = end + 2
                     continue
             if ch == "]":
@@ -319,6 +398,7 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
             if ext[:1] == "<" or ext == "P<":
                 # named group: Go accepts (?<name>) and (?P<name>), Python only the latter
                 out.append("(?P<")
+                flag_scopes.append([])
                 i += 3 if ext[:1] == "<" else 4
                 continue
             flags = _GO_FLAGS_RE.match(pattern, i)
@@ -326,13 +406,29 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
                 bad = sorted(set(flags.group(1)) - set("imsU-"))
                 if bad:
                     return "", "the (?%s) flag" % "".join(bad)
-                # Flags never change whether a pattern compiles; drop them (Python lacks U
-                # and rejects global flags mid-pattern, Go allows both).
-                out.append("(?:" if flags.group(2) == ":" else "")
+                py_flags = _python_flags(flags.group(1)) if exact else ""
+                if flags.group(2) == ":":
+                    out.append("(?%s:" % py_flags)
+                    flag_scopes.append([])
+                elif py_flags:
+                    out.append("(?%s:" % py_flags)
+                    flag_scopes[-1].append("(?%s:" % py_flags)
+                # Without exact, flags are dropped: they never change whether a pattern
+                # compiles (Python lacks U and rejects global flags mid-pattern, Go allows both).
                 i = flags.end()
                 continue
 
-        if ch in "*+?":
+        if ch == "(":
+            flag_scopes.append([])
+        elif ch == ")" and len(flag_scopes) > 1:
+            out.append(")" * len(flag_scopes.pop()))
+        elif ch == "|":
+            # a flag scope must not swallow the alternation: a(?i)b|c is a(?i:b)|(?i:c)
+            out.append(")" * len(flag_scopes[-1]) + "|" + "".join(flag_scopes[-1]))
+            i += 1
+            after_quantifier = False
+            continue
+        elif ch in "*+?":
             if ch == "+" and after_quantifier:
                 return "", "possessive quantifiers (*+, ++, ?+)"
             # `?` right after a quantifier makes it lazy, which ends the quantifier
@@ -346,11 +442,17 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
                 i = rep.end()
                 after_quantifier = True
                 continue
+            if exact:
+                # Go reads a { that starts no valid repeat as a literal; Python may not ({,3})
+                out.append("\\{")
+                i += 1
+                continue
 
         out.append(ch)
         after_quantifier = quantifier
         i += 1
 
+    out.append(")" * len(flag_scopes[0]))
     return "".join(out), ""
 
 
@@ -504,7 +606,7 @@ def _describe_timing(value, path: str) -> str:
 def check_duplicate_receivers(cfg):
     out = []
     seen = set()
-    for r in _receivers(cfg):
+    for i, r in _dict_items(cfg.get("receivers")):
         name = r.get("name")
         if not name:
             continue
@@ -513,7 +615,7 @@ def check_duplicate_receivers(cfg):
                 ERROR, "duplicate-receiver",
                 f"Receiver '{name}' is defined more than once. "
                 f"The second definition will be silently ignored.",
-                "receivers",
+                f"receivers[{i}]",  # by index: by name would point at the first definition
             ))
         seen.add(name)
     return out
@@ -528,6 +630,9 @@ _INTEGRATION_KEYS = {
     "incidentio_configs",
 }
 
+# Names that say "drop these on purpose" (kube-prometheus routes Watchdog/InfoInhibitor to "null")
+_BLACKHOLE_NAMES = {"null", "blackhole", "devnull", "dev-null", "discard", "drop"}
+
 def check_empty_receivers(cfg):
     out = []
     route = _root_route(cfg)
@@ -538,13 +643,14 @@ def check_empty_receivers(cfg):
             continue
         # an empty list (`webhook_configs: []`) delivers nothing either
         if not any(r.get(k) for k in _INTEGRATION_KEYS):
-            level = INFO if name == default_rcv else WARN
+            intentional = name == default_rcv or str(name).lower() in _BLACKHOLE_NAMES
+            level = INFO if intentional else WARN
             out.append(Finding(
                 level, "empty-receiver",
                 f"Receiver '{name}' has no integration configured "
                 f"(no slack_configs, pagerduty_configs, webhook_configs, etc.). "
                 f"Alerts sent here will be silently dropped.",
-                "receivers",
+                f"receivers[{name}]",
             ))
     return out
 
@@ -597,17 +703,36 @@ def check_timing(cfg):
 
 
 # CHECK 11: two inhibition rules that silence each other
+def _same_alert(a: Dict[str, str], b: Dict[str, str]) -> bool:
+    """Whether two sides of inhibit rules can match the same alert: they share a label
+    and agree on every shared one. A shared namespace=x doesn't make alertname=NodeDown
+    and alertname=PodDown the same alert."""
+    shared = set(a) & set(b)
+    return bool(shared) and all(a[k] == b[k] for k in shared)
+
+
+def _can_agree(equal: List[str], a: Dict[str, str], b: Dict[str, str]) -> bool:
+    """Whether two alerts can have the same value for every label in a rule's 'equal':
+    no label there is fixed to different values on the two sides."""
+    return all(k not in a or k not in b or a[k] == b[k] for k in equal)
+
+
 def check_circular_inhibition(cfg):
     out = []
     rules = [
-        (i, _equality(_matchers(r, "source_")), _equality(_matchers(r, "target_")))
+        (i, _equality(_matchers(r, "source_")), _equality(_matchers(r, "target_")),
+         [_scalar(k) for k in r["equal"]] if isinstance(r.get("equal"), list) else [])
         for i, r in _dict_items(cfg.get("inhibit_rules"))
     ]
-    for pos, (i, src_a, tgt_a) in enumerate(rules):
-        for j, src_b, tgt_b in rules[pos + 1:]:
-            a_can_silence_b = any(src_a.get(k) == tgt_b.get(k) for k in set(src_a) & set(tgt_b))
-            b_can_silence_a = any(src_b.get(k) == tgt_a.get(k) for k in set(src_b) & set(tgt_a))
-            if a_can_silence_b and b_can_silence_a:
+    for pos, (i, src_a, tgt_a, equal_a) in enumerate(rules):
+        for j, src_b, tgt_b, equal_b in rules[pos + 1:]:
+            # each rule's source alert is the other rule's target
+            if not (_same_alert(src_a, tgt_b) and _same_alert(src_b, tgt_a)):
+                continue
+            # x fires for A and is muted by B, y the other way round; each rule mutes only
+            # when the two alerts agree on its 'equal' labels
+            x, y = {**src_a, **tgt_b}, {**src_b, **tgt_a}
+            if _can_agree(equal_a, x, y) and _can_agree(equal_b, x, y):
                 out.append(Finding(
                     WARN, "circular-inhibition",
                     f"inhibit_rules[{i}] and inhibit_rules[{j}] may silence each other — "
@@ -819,28 +944,79 @@ def check_route_match_collision(cfg: dict) -> List[Finding]:
 
 # CHECK 22: templates: references files that do not exist on disk
 def check_template_files(cfg: dict, basedir: str) -> List[Finding]:
+    """
+    Relative paths are resolved against the config file's directory, as Alertmanager
+    does. Absolute paths (e.g. /etc/alertmanager/templates/*.tmpl) point into the
+    Alertmanager host or container, not wherever amlint runs, so they aren't checked.
+    Alertmanager itself starts fine when a path matches nothing; it just loads no
+    templates from it, and notifications that use them fail to render.
+    """
     out: List[Finding] = []
     templates = cfg.get("templates")
-    for tpl in templates if isinstance(templates, list) else []:
-        if not isinstance(tpl, str):
+    for i, tpl in enumerate(templates if isinstance(templates, list) else []):
+        if not isinstance(tpl, str) or os.path.isabs(tpl):
             continue
-        full = tpl if os.path.isabs(tpl) else os.path.join(basedir, tpl)
-        if _glob.glob(full):
+        if _glob.glob(os.path.join(basedir, tpl)):
             continue
         is_glob = any(c in tpl for c in "*?[")
         if is_glob:
             out.append(Finding(
                 WARN, "template-file-missing",
-                f"templates glob '{tpl}' matches no files. "
-                f"Alertmanager will load no custom templates.",
-                "templates",
+                f"templates glob '{tpl}' matches no files (relative to the config file). "
+                f"Alertmanager loads no templates from it, so notifications that use "
+                f"templates defined there fail to render.",
+                f"templates[{i}]",
             ))
         else:
             out.append(Finding(
                 ERROR, "template-file-missing",
-                f"Template file '{tpl}' does not exist. "
-                f"Alertmanager will fail to start.",
-                "templates",
+                f"Template file '{tpl}' does not exist (relative to the config file). "
+                f"Alertmanager loads nothing from it, so notifications that use its "
+                f"templates fail to render.",
+                f"templates[{i}]",
+            ))
+    return out
+
+
+def check_bundled_templates(cfg: dict, bundled) -> List[Finding]:
+    """
+    templates: entries checked against the template files that ship inside the input (the
+    other keys of a Kubernetes Secret, Helm alertmanager.templateFiles) rather than files on
+    disk. Only entries in the directory Alertmanager reads those files from are checked. A
+    glob that matches nothing is only reported when some template files do ship: the
+    kube-prometheus-stack default (`*.tmpl` and no templateFiles) loads nothing on purpose.
+    """
+    out: List[Finding] = []
+    if bundled.directory is None:
+        return out
+    names = sorted(bundled.names)
+    listing = ", ".join(names)
+    templates = cfg.get("templates")
+    for i, tpl in enumerate(templates if isinstance(templates, list) else []):
+        if not isinstance(tpl, str) or posixpath.normpath(posixpath.dirname(tpl) or ".") \
+                != bundled.directory:
+            continue
+        # Go's filepath.Match negates a class with ^, fnmatch with !
+        pattern = posixpath.basename(tpl).replace("[^", "[!")
+        if any(fnmatch.fnmatchcase(name, pattern) for name in names):
+            continue
+        if any(c in pattern for c in "*?["):
+            if names:
+                out.append(Finding(
+                    WARN, "template-file-missing",
+                    f"templates glob '{tpl}' matches none of the template files in "
+                    f"{bundled.source} ({listing}). Alertmanager loads no templates from it, "
+                    f"so notifications that use templates defined there fail to render.",
+                    f"templates[{i}]",
+                ))
+        else:
+            has = f" ({listing})" if names else " (it has none)"
+            out.append(Finding(
+                ERROR, "template-file-missing",
+                f"Template file '{tpl}' is not one of the template files in "
+                f"{bundled.source}{has}. Alertmanager loads nothing from it, so "
+                f"notifications that use its templates fail to render.",
+                f"templates[{i}]",
             ))
     return out
 
@@ -1039,12 +1215,22 @@ ALL_CHECKS = [
 _VALID_LEVELS = {ERROR, WARN, INFO}
 
 
-def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None) -> List[Finding]:
+def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None,
+         rules=None, template_files=None) -> List[Finding]:
+    """Run every check. `rules`, the alerting rules from amlint.rules.load_rules, adds the
+    checks against Prometheus rules. `template_files` (amlint.formats.BundledTemplates) are
+    the template files that ship with the config; templates: is then checked against them
+    instead of files under `basedir`."""
     findings: List[Finding] = []
     for check in ALL_CHECKS:
         findings.extend(check(cfg))
-    if basedir is not None:
+    if template_files is not None:
+        findings.extend(check_bundled_templates(cfg, template_files))
+    elif basedir is not None:
         findings.extend(check_template_files(cfg, basedir))
+    if rules is not None:
+        from .rules import check_rules  # imported here: rules.py builds on this module
+        findings.extend(check_rules(cfg, rules))
     if severity:
         for f in findings:
             if f.code in severity and severity[f.code] in _VALID_LEVELS:

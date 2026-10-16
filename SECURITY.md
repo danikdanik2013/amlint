@@ -24,3 +24,7 @@ structural information from the config (receiver names, label keys/values,
 duration strings, route paths). amlint **never prints the actual values** of
 sensitive fields such as `api_url`, `routing_key`, `api_key`, `webhook_url`,
 or SMTP credentials — it only checks for their presence or absence.
+
+With `--format github`, newlines and `%` in finding messages (and `:` / `,` in the file
+path and title) are escaped the way GitHub specifies, so text from a config, such as a
+receiver name, can't start a workflow command of its own.

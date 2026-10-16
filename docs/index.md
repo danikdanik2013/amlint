@@ -9,6 +9,11 @@ fine, that Alertmanager runs without complaint, and that still silently don't do
 meant: unreachable routes behind a catch-all, timing that contradicts itself, inhibition
 rules that silence too broadly.
 
+Try it without installing anything: the [playground](playground/index.md) checks a config
+in your browser, and the config never leaves the page.
+
+[Open the playground](playground/index.md){ .md-button .md-button--primary }
+
 ## Quick example
 
 ```bash
@@ -44,6 +49,7 @@ Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure t
 | Inhibition rules that silence too broadly, or never fire | ❌ | ✅ |
 | Timing misconfig (`group_wait`/`group_interval`/`repeat_interval`) | ❌ | ✅ |
 | Unused or empty receivers | ❌ | ✅ |
+| Routes and inhibit rules on alert names your Prometheus rules don't define (`--rules`) | ❌ | ✅ |
 | Batch routing regression tests (label-set → expected receiver, run from a file in CI) | single alert, interactive only | ✅ |
 
 amtool already covers the first four rows — amlint re-implements those so you get one
@@ -54,7 +60,8 @@ duplicate amtool and which don't; `amlint explain <code>` says so for any indivi
 On the last row: `amtool config routes test` already lets you test one alert's routing
 interactively — that part isn't new either. What it doesn't have is a way to run a whole
 suite of these as regression tests from a file, in CI, without a live Alertmanager. That's
-what `amlint test` adds.
+what `amlint test` adds; `amlint route` is the single-alert version, showing the matched
+routes and the `group_by` and timings each one inherits.
 
 ## 32 checks — 14 of them amtool can't do
 
