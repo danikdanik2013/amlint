@@ -1471,6 +1471,20 @@ def test_dead_routes_reported_once():
     ]
 
 
+@pytest.mark.parametrize("first, second", [
+    ({"matchers": ['severity="critical"']},
+     {"matchers": ['severity="critical"', 'team="infra"']}),
+    ({"match": {"severity": "critical"}},
+     {"matchers": ['{severity="critical", team="infra"}']}),
+])
+def test_shadowed_route_agrees_with_simulation(first, second):
+    from amlint.simulate import simulate_route
+    cfg = _sibling_routes(first, second)
+    assert _where(cfg, "shadowed-route") == ["route.routes[1]"]
+    alert = {"severity": "critical", "team": "infra"}
+    assert [path for _, path in simulate_route(cfg["route"], alert)] == ["route.routes[0]"]
+
+
 def test_shadowed_route_has_explain():
     from amlint.explains import EXPLAINS
     assert EXPLAINS["shadowed-route"]["level"] == "warn"
