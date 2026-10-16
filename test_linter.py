@@ -965,6 +965,132 @@ def test_invalid_root_route_has_explain():
     assert "invalid-root-route" in EXPLAINS
 
 
+# ── shadowed-route ───────────────────────────────────────────────────
+
+def _sibling_routes(*routes):
+    return {
+        "route": {"receiver": "a", "routes": [dict(r, receiver="a") for r in routes]},
+        "receivers": [{"name": "a"}],
+    }
+
+
+def _where(cfg, code):
+    return [f.where for f in lint(cfg) if f.code == code]
+
+
+def test_shadowed_route_strict_subset():
+    cfg = _sibling_routes(
+        {"matchers": ['severity="critical"']},
+        {"matchers": ['severity="critical"', 'team="infra"']},
+    )
+    found = [f for f in lint(cfg) if f.code == "shadowed-route"]
+    assert [f.where for f in found] == ["route.routes[1]"]
+    assert found[0].level == WARN
+    assert "route.routes[0]" in found[0].msg
+
+
+def test_shadowed_route_match_vs_matchers_spelling():
+    cfg = _sibling_routes(
+        {"match": {"severity": "critical"}},
+        {"matchers": ['{severity="critical", team="infra"}']},
+    )
+    assert _where(cfg, "shadowed-route") == ["route.routes[1]"]
+
+
+def test_shadowed_route_nested_siblings():
+    cfg = _sibling_routes({"matchers": ["env=prod"], "routes": [
+        {"matchers": ["team=infra"], "receiver": "a"},
+        {"matchers": ["team=infra", "severity=critical"], "receiver": "a"},
+    ]})
+    assert _where(cfg, "shadowed-route") == ["route.routes[0].routes[1]"]
+
+
+@pytest.mark.parametrize("first, second", [
+    ({"matchers": ['severity="critical"'], "continue": True},
+     {"matchers": ['severity="critical"', 'team="infra"']}),
+    ({"matchers": ['severity="critical"', 'team="infra"']},
+     {"matchers": ['severity="critical"']}),
+    ({"matchers": ['severity="critical"']},
+     {"matchers": ['severity="warning"', 'team="infra"']}),
+    ({"matchers": ['severity=~"critical"']},
+     {"matchers": ['severity="critical"', 'team="infra"']}),
+    ({"matchers": ['severity="critical"']},
+     {"matchers": ['severity=~"critical"', 'team="infra"']}),
+], ids=["continue-true", "earlier-more-specific", "different-value",
+        "regex-before-equality", "equality-before-regex"])
+def test_shadowed_route_not_reported(first, second):
+    assert "shadowed-route" not in codes(_sibling_routes(first, second))
+
+
+def test_shadowed_route_leaves_identical_to_route_match_collision():
+    cfg = _sibling_routes(
+        {"matchers": ['severity="critical"']},
+        {"match": {"severity": "critical"}},
+    )
+    found = codes(cfg)
+    assert "route-match-collision" in found
+    assert "shadowed-route" not in found
+
+
+def test_shadowed_route_leaves_catch_all_to_unreachable_route():
+    cfg = _sibling_routes(
+        {"matchers": ['team=~".*"']},
+        {"matchers": ['team=~".*"', 'severity="critical"']},
+    )
+    found = codes(cfg)
+    assert "unreachable-route" in found
+    assert "shadowed-route" not in found
+
+
+def test_dead_routes_reported_once():
+    cfg = _sibling_routes(
+        {"matchers": ['severity="critical"']},
+        {"matchers": ['severity="critical"', 'team="infra"']},   # shadowed by [0]
+        {"matchers": ['team="infra"', 'severity="critical"']},   # identical to [1]
+    )
+    found = sorted((f.code, f.where) for f in lint(cfg)
+                   if f.code in ("shadowed-route", "route-match-collision"))
+    assert found == [
+        ("route-match-collision", "route.routes[2]"),
+        ("shadowed-route", "route.routes[1]"),
+    ]
+
+
+def test_shadowed_route_has_explain():
+    from amlint.explains import EXPLAINS
+    assert EXPLAINS["shadowed-route"]["level"] == "warn"
+
+
+# ── unreachable-route: =~".*" counts as catch-all ────────────────────
+
+def test_unreachable_route_match_all_regex():
+    cfg = _sibling_routes(
+        {"match_re": {"team": ".*"}},
+        {"matchers": ['severity="critical"']},
+    )
+    found = [f for f in lint(cfg) if f.code == "unreachable-route"]
+    assert [f.where for f in found] == ["route.routes[0]"]
+    assert '=~".*"' in found[0].msg
+
+
+def test_unreachable_route_non_empty_regex_is_not_catch_all():
+    cfg = _sibling_routes(
+        {"matchers": ['team=~".+"']},
+        {"matchers": ['severity="critical"']},
+    )
+    assert "unreachable-route" not in codes(cfg)
+
+
+def test_route_match_collision_leaves_match_all_regex_to_unreachable_route():
+    cfg = _sibling_routes(
+        {"match_re": {"team": ".*"}},
+        {"matchers": ['team=~".*"']},
+    )
+    found = codes(cfg)
+    assert "unreachable-route" in found
+    assert "route-match-collision" not in found
+
+
 # ── Robustness and CLI ───────────────────────────────────────────────
 
 def test_lint_tolerates_malformed_entries():

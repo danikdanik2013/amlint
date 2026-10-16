@@ -133,6 +133,7 @@ Exit code `1` on ERROR — ready for CI. `--strict` makes WARN block too.
 | `deep-nesting` | info | route tree deeper than 5 levels |
 | `global-resolve-timeout-missing` | info | `global.resolve_timeout` not set; defaults to 5m |
 | `route-match-collision` | warn | two sibling routes with identical matchers |
+| `shadowed-route` | warn | earlier sibling with a subset of the route's matchers catches every alert first |
 
 Run `amlint explain <code>` for detailed description and examples of any check.
 

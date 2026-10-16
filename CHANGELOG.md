@@ -5,6 +5,10 @@
 ### Added
 - `invalid-root-route` (error) — root route has no `receiver`, or sets matchers, `continue`,
   `mute_time_intervals` or `active_time_intervals`; Alertmanager refuses to load such a config
+- `shadowed-route` (warn) — a route never receives alerts because an earlier sibling without
+  `continue: true` has a strict subset of its matchers (`severity="critical"` before
+  `severity="critical", team="infra"`). Identical matchers stay `route-match-collision` and
+  catch-alls stay `unreachable-route`, so each dead route is reported once
 - Warning on stderr for unknown check codes in `--ignore`, `--only` and `severity:`, with a
   "did you mean" suggestion
 
@@ -23,6 +27,8 @@
 - `undefined-time-interval` accepts intervals defined in legacy top-level `mute_time_intervals:`
 - `route-match-collision` treats `match:` and `matchers:` spellings as equal, and no longer
   fires when the earlier sibling has `continue: true`
+- `unreachable-route` treats a route whose only matchers are `label=~".*"` as a catch-all;
+  `route-match-collision` leaves such routes to it instead of reporting them twice
 - `slack-no-api-url` accepts `global.slack_api_url_file`
 - Durations are parsed strictly (`30sec` is no longer read as `30s`) and support `y`
 - `diff` now runs the `template-file-missing` check
