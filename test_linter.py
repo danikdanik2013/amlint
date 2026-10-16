@@ -8,7 +8,7 @@ import pytest
 import yaml
 
 from amlint.cli import main
-from amlint.linter import WARN, lint
+from amlint.linter import ERROR, WARN, lint
 
 
 def codes(cfg):
@@ -833,16 +833,25 @@ def test_cli_exit_zero_clean_still_zero(tmp_path):
 def test_template_literal_missing(tmp_path):
     basedir = str(tmp_path)
     cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
-           "templates": ["/nonexistent/path/custom.tmpl"]}
-    found = {f.code for f in lint(cfg, basedir=basedir)}
-    assert "template-file-missing" in found
+           "templates": ["templates/custom.tmpl"]}
+    f = [x for x in lint(cfg, basedir=basedir) if x.code == "template-file-missing"]
+    assert f and f[0].level == ERROR
+    assert "fail to start" not in f[0].msg  # Alertmanager starts; it just loads nothing
 
 
 def test_template_literal_exists_ok(tmp_path):
     tpl = tmp_path / "custom.tmpl"
     tpl.write_text("{{ define 'test' }}ok{{ end }}")
     cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
-           "templates": [str(tpl)]}
+           "templates": ["custom.tmpl"]}  # resolved against the config's directory
+    found = {f.code for f in lint(cfg, basedir=str(tmp_path))}
+    assert "template-file-missing" not in found
+
+
+def test_template_absolute_paths_not_checked(tmp_path):
+    # absolute paths live on the Alertmanager host/container, not where amlint runs
+    cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
+           "templates": ["/etc/alertmanager/config/*.tmpl", "/nonexistent/custom.tmpl"]}
     found = {f.code for f in lint(cfg, basedir=str(tmp_path))}
     assert "template-file-missing" not in found
 
@@ -866,7 +875,7 @@ def test_template_glob_matches_ok(tmp_path):
 
 def test_template_check_skipped_without_basedir():
     cfg = {"route": {"receiver": "a"}, "receivers": [{"name": "a"}],
-           "templates": ["/nonexistent/path/custom.tmpl"]}
+           "templates": ["templates/custom.tmpl"]}
     found = {f.code for f in lint(cfg)}
     assert "template-file-missing" not in found
 
@@ -2943,3 +2952,63 @@ def test_cli_diff_markdown_escapes_receiver_names(tmp_path):
     _, out = _markdown_diff(old_path, new_path, "--only", "undefined-receiver")
     assert "| `team=infra` (+1 similar) | `infra-slack` | `` @ops\\|`x` `` |" in out
     assert "receiver '@&#8203;ops\\|\\`x\\`' which is not defined" in out
+
+
+# ── Configs modeled on widely used public setups must lint clean ─────
+
+_REAL_WORLD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "real-world")
+
+
+@pytest.mark.parametrize("name", sorted(f for f in os.listdir(_REAL_WORLD) if f.endswith(".yml")))
+def test_real_world_configs_lint_clean(name):
+    """Anything above INFO on these is noise: it would fail `--strict` out of the box."""
+    path = os.path.join(_REAL_WORLD, name)
+    with open(path) as f:
+        cfg = yaml.safe_load(f)
+    noisy = [(x.level, x.code, x.where, x.msg) for x in lint(cfg, basedir=_REAL_WORLD)
+             if x.level in (ERROR, WARN)]
+    assert noisy == []
+    assert main(["check", "--strict", path]) == 0
+
+
+def test_inhibit_target_only_rule_is_not_flagged():
+    # kube-prometheus's "always mute InfoInhibitor" idiom: no source matchers, no equal
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"target_matchers": ["alertname = InfoInhibitor"]}],
+    }
+    assert "inhibit-no-equal" not in codes(cfg)
+
+
+def test_inhibit_source_only_rule_without_equal_still_warns():
+    # no target matchers = every alert is a target: muting everything is never the idea
+    cfg = {
+        "route": {"receiver": "a"},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_matchers": ['severity="critical"']}],
+    }
+    assert "inhibit-no-equal" in codes(cfg)
+
+
+@pytest.mark.parametrize("name", ["null", "Blackhole", "devnull"])
+def test_empty_receiver_named_as_blackhole_is_info(name):
+    cfg = {
+        "route": {"receiver": "a", "routes": [{"matchers": ["alertname=Watchdog"],
+                                               "receiver": name}]},
+        "receivers": [{"name": "a", "webhook_configs": [{"url": "http://x"}]}, {"name": name}],
+    }
+    found = [f for f in lint(cfg) if f.code == "empty-receiver"]
+    assert [f.level for f in found] == ["info"]
+
+
+def test_empty_receiver_placeholder_still_warns():
+    # kube-prometheus ships "Critical" without integrations: critical alerts would be dropped
+    cfg = {
+        "route": {"receiver": "a", "routes": [{"matchers": ["severity=critical"],
+                                               "receiver": "Critical"}]},
+        "receivers": [{"name": "a", "webhook_configs": [{"url": "http://x"}]},
+                      {"name": "Critical"}],
+    }
+    found = [f for f in lint(cfg) if f.code == "empty-receiver"]
+    assert [f.level for f in found] == [WARN]
