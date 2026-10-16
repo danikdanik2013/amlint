@@ -1,0 +1,27 @@
+# kube-prometheus-stack values. Helm merges alertmanager.config over the chart's default
+# config, so the chart's inhibit_rules stay in, and templateFiles end up in the config
+# Secret next to alertmanager.yaml.
+alertmanager:
+  config:
+    global:
+      resolve_timeout: 5m
+      slack_api_url_file: /etc/alertmanager/secrets/slack-webhook/url
+    route:
+      receiver: "null"
+      group_by: [namespace, alertname]
+      routes:
+        - receiver: "null"
+          matchers: ['alertname = "Watchdog"']
+        - receiver: slack
+          matchers: ['severity =~ "warning|critical"']
+    receivers:
+      - name: "null"
+      - name: slack
+        slack_configs:
+          - channel: "#alerts"
+            title: '{{ template "slack.title" . }}'
+  templateFiles:
+    slack.tmpl: |-
+      {{ define "slack.title" }}[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ end }}
+  alertmanagerSpec:
+    secrets: [slack-webhook]

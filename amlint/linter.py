@@ -11,8 +11,10 @@ Usage:
     amlint check alertmanager.yml --format json
 """
 
+import fnmatch
 import glob as _glob
 import os
+import posixpath
 import re
 import warnings
 from typing import Dict, Generator, List, Optional, Set, Tuple
@@ -921,6 +923,49 @@ def check_template_files(cfg: dict, basedir: str) -> List[Finding]:
     return out
 
 
+def check_bundled_templates(cfg: dict, bundled) -> List[Finding]:
+    """
+    templates: entries checked against the template files that ship inside the input (the
+    other keys of a Kubernetes Secret, Helm alertmanager.templateFiles) rather than files on
+    disk. Only entries in the directory Alertmanager reads those files from are checked. A
+    glob that matches nothing is only reported when some template files do ship: the
+    kube-prometheus-stack default (`*.tmpl` and no templateFiles) loads nothing on purpose.
+    """
+    out: List[Finding] = []
+    if bundled.directory is None:
+        return out
+    names = sorted(bundled.names)
+    listing = ", ".join(names)
+    templates = cfg.get("templates")
+    for i, tpl in enumerate(templates if isinstance(templates, list) else []):
+        if not isinstance(tpl, str) or posixpath.normpath(posixpath.dirname(tpl) or ".") \
+                != bundled.directory:
+            continue
+        # Go's filepath.Match negates a class with ^, fnmatch with !
+        pattern = posixpath.basename(tpl).replace("[^", "[!")
+        if any(fnmatch.fnmatchcase(name, pattern) for name in names):
+            continue
+        if any(c in pattern for c in "*?["):
+            if names:
+                out.append(Finding(
+                    WARN, "template-file-missing",
+                    f"templates glob '{tpl}' matches none of the template files in "
+                    f"{bundled.source} ({listing}). Alertmanager loads no templates from it, "
+                    f"so notifications that use templates defined there fail to render.",
+                    f"templates[{i}]",
+                ))
+        else:
+            has = f" ({listing})" if names else " (it has none)"
+            out.append(Finding(
+                ERROR, "template-file-missing",
+                f"Template file '{tpl}' is not one of the template files in "
+                f"{bundled.source}{has}. Alertmanager loads nothing from it, so "
+                f"notifications that use its templates fail to render.",
+                f"templates[{i}]",
+            ))
+    return out
+
+
 # CHECK 23: global.resolve_timeout not set — Alertmanager default (5m) may surprise
 def check_global_resolve_timeout(cfg: dict) -> List[Finding]:
     out: List[Finding] = []
@@ -1078,13 +1123,17 @@ _VALID_LEVELS = {ERROR, WARN, INFO}
 
 
 def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None,
-         rules=None) -> List[Finding]:
+         rules=None, template_files=None) -> List[Finding]:
     """Run every check. `rules`, the alerting rules from amlint.rules.load_rules, adds the
-    checks against Prometheus rules."""
+    checks against Prometheus rules. `template_files` (amlint.formats.BundledTemplates) are
+    the template files that ship with the config; templates: is then checked against them
+    instead of files under `basedir`."""
     findings: List[Finding] = []
     for check in ALL_CHECKS:
         findings.extend(check(cfg))
-    if basedir is not None:
+    if template_files is not None:
+        findings.extend(check_bundled_templates(cfg, template_files))
+    elif basedir is not None:
         findings.extend(check_template_files(cfg, basedir))
     if rules is not None:
         from .rules import check_rules  # imported here: rules.py builds on this module

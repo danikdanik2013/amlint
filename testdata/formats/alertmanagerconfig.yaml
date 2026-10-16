@@ -1,0 +1,106 @@
+# prometheus-operator resources, as `kubectl kustomize` or `helm template` print them: the
+# Alertmanager, its config Secret (the base config) and two teams' AlertmanagerConfigs, one
+# v1alpha1 and one v1beta1. amlint merges them the way the operator does: each team's route
+# goes first under the root, matches only alerts from its namespace and has continue: true,
+# and every receiver and time interval name becomes <namespace>/<name>/<name>.
+apiVersion: monitoring.coreos.com/v1
+kind: Alertmanager
+metadata:
+  name: main
+  namespace: monitoring
+spec:
+  replicas: 3
+  alertmanagerConfigSelector:
+    matchLabels:
+      alertmanagerConfig: main
+  alertmanagerConfigNamespaceSelector: {}
+  alertmanagerConfigMatcherStrategy:
+    type: OnNamespace
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: alertmanager-main
+  namespace: monitoring
+stringData:
+  alertmanager.yaml: |-
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: default
+      group_by: [namespace]
+      routes:
+        - matchers: ['alertname = "Watchdog"']
+          receiver: "null"
+    receivers:
+      - name: default
+        webhook_configs:
+          - url: http://alert-gateway.monitoring.svc:8080/alerts
+      - name: "null"
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: payments
+  namespace: team-a
+  labels:
+    alertmanagerConfig: main
+spec:
+  route:
+    receiver: slack
+    groupBy: [alertname]
+    routes:
+      - receiver: pager
+        matchers:
+          - name: severity
+            value: critical
+        muteTimeIntervals: [maintenance]
+  receivers:
+    - name: slack
+      slackConfigs:
+        - apiURL:
+            name: slack-webhook
+            key: url
+          channel: "#payments"
+    - name: pager
+      pagerdutyConfigs:
+        - routingKey:
+            name: pagerduty
+            key: routing-key
+  muteTimeIntervals:
+    - name: maintenance
+      timeIntervals:
+        - weekdays: [saturday]
+          times:
+            - startTime: "02:00"
+              endTime: "04:00"
+  inhibitRules:
+    - sourceMatch:
+        - name: severity
+          value: critical
+      targetMatch:
+        - name: severity
+          value: warning|info
+          regex: true
+      equal: [alertname]
+---
+apiVersion: monitoring.coreos.com/v1beta1
+kind: AlertmanagerConfig
+metadata:
+  name: search
+  namespace: team-b
+  labels:
+    alertmanagerConfig: main
+spec:
+  route:
+    receiver: webhook
+    matchers:
+      - name: service
+        value: search-.*
+        matchType: "=~"
+  receivers:
+    - name: webhook
+      webhookConfigs:
+        - urlSecret:
+            name: search-webhook
+            key: url

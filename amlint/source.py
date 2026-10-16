@@ -58,9 +58,19 @@ class SourceMap:
     """
 
     def __init__(self, text: str) -> None:
+        self._build(yaml.compose(text, Loader=yaml.SafeLoader))
+
+    @classmethod
+    def of_node(cls, root: Optional[Node]) -> "SourceMap":
+        """SourceMap of a document that is already composed, such as one document of a
+        multi-document stream. Positions stay those of the whole stream."""
+        smap = cls.__new__(cls)
+        smap._build(root)
+        return smap
+
+    def _build(self, root: Optional[Node]) -> None:
         self._paths: Dict[str, Position] = {}
         self._strings: List[Tuple[int, int]] = []
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
         self._root: Position = _pos(root) if root is not None else (1, 1)
         if root is not None:
             self._index(root, "", "", set())

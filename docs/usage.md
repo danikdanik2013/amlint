@@ -22,6 +22,16 @@ cat alertmanager.yml | amlint check -  # stdin
 | `--only CODE` | Show only findings with these codes; repeat or comma-separate |
 | `--exit-zero` | Always exit 0 regardless of findings; useful for informational CI runs |
 | `--rules GLOB` | Also check routes and inhibit rules against these Prometheus rule files; quote the glob, repeat for more ([details](#checking-against-prometheus-rules)) |
+| `--input-format FORMAT` | What the file is: `auto` (default, detected), `alertmanager`, `secret`, `helm`, `mimir` or `alertmanagerconfig` ([details](kubernetes.md)) |
+| `--matcher-strategy STRATEGY` | `alertmanagerConfigMatcherStrategy` for AlertmanagerConfig resources: `OnNamespace`, `OnNamespaceExceptForAlertmanagerNamespace` or `None` |
+
+`diff`, `tree`, `route` and `test` take `--input-format` and `--matcher-strategy` too.
+
+**Kubernetes, Helm and Mimir** — besides a plain `alertmanager.yml`, amlint reads a
+Kubernetes Secret or ConfigMap holding `alertmanager.yaml`, kube-prometheus-stack Helm
+values, a Mimir or Cortex tenant config, and prometheus-operator `AlertmanagerConfig`
+resources, which it merges the way the operator does. Findings point at the line in the
+file you passed. See [Kubernetes & Mimir](kubernetes.md).
 
 **Project config** — amlint loads config automatically. Two options (first found wins):
 

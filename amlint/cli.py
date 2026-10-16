@@ -36,6 +36,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from .config import load_project_config
+from .formats import FORMATS, MATCHER_STRATEGIES, FormatError, apply_locations, load_input
 from .linter import (
     ERROR,
     INFO,
@@ -50,7 +51,6 @@ from .linter import (
 from .markdown import diff_report
 from .routing import GROUP_BY_ALL, Inhibitor, Router, RoutingError, diff_routing, route_coverage
 from .rules import RulesError, load_rules, rule_files
-from .source import SourceMap, apply_source
 
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
@@ -145,19 +145,44 @@ def _display(path) -> str:
     return "<stdin>" if path == "-" else path
 
 
-def _lint_file(path, **kwargs):
+def _load_input(path, content, input_format=None, matcher_strategy=None):
+    """The config in `content`, read in its format (a plain alertmanager.yml, a Kubernetes
+    Secret, Helm values, a Mimir config, AlertmanagerConfig resources); exits 2 if it can't
+    be read. Notes about how it was read go to stderr."""
+    try:
+        loaded = load_input(content, input_format, matcher_strategy)
+    except FormatError as e:
+        err_console.print(f"[red]{e.title}[/red] ({escape(path)}): {escape(str(e))}")
+        sys.exit(2)
+    where = escape(_display(path))
+    for line, note in loaded.notes:
+        at = f"{where}:{line}" if line else where
+        err_console.print(f"[yellow]note:[/yellow] {at}: {escape(note)}", soft_wrap=True)
+    return loaded
+
+
+def _input_options(args) -> dict:
+    return {"input_format": getattr(args, "input_format", None),
+            "matcher_strategy": getattr(args, "matcher_strategy", None)}
+
+
+def _lint_file(path, input_format=None, matcher_strategy=None, **kwargs):
     """Load and lint one file. Findings get their line/col, and the ones disabled by
     `# amlint:` comments in the file are dropped. Returns (cfg, findings)."""
     content = _read(path)
-    cfg = load(path, content)
-    findings, suppressions = apply_source(lint(cfg, basedir=_basedir(path), **kwargs), content)
+    loaded = _load_input(path, content, input_format, matcher_strategy)
+    # template files that ship inside the input replace the files next to it on disk
+    basedir = _basedir(path) if loaded.templates is None else None
+    findings = apply_locations(
+        lint(loaded.cfg, basedir=basedir, template_files=loaded.templates, **kwargs), loaded,
+    )
     where = escape(_display(path))
-    for line, codes in suppressions.comments:
+    for line, codes in loaded.comments:
         _warn_unknown_codes(codes, f"'# amlint:' comment at {where}:{line}")
-    for line, problem in suppressions.problems:
+    for line, problem in loaded.problems:
         err_console.print(f"[yellow]warning:[/yellow] {where}:{line}: {escape(problem)}",
                           soft_wrap=True)
-    return cfg, findings
+    return loaded.cfg, findings
 
 
 def _location(path, f) -> str:
@@ -339,7 +364,7 @@ def _cmd_check(args):
     all_findings = []
     for path in args.files:
         cfg, findings = _lint_file(path, ignore=ignore, severity=severity, only=only or None,
-                                   rules=rules)
+                                   rules=rules, **_input_options(args))
         if args.rules:
             _warn_if_rule_file(path, cfg)
         all_findings.append((path, findings))
@@ -380,7 +405,8 @@ def _format_matchers(node: dict) -> list:
 def _cmd_tree(args) -> int:
     _, ignore, _, severity = _project_settings(args)
 
-    cfg, findings = _lint_file(args.file, ignore=ignore, severity=severity)
+    cfg, findings = _lint_file(args.file, ignore=ignore, severity=severity,
+                               **_input_options(args))
     route = cfg.get("route")
     if not isinstance(route, dict):
         err_console.print("[red]No root 'route' defined.[/red]")
@@ -524,8 +550,8 @@ def _cmd_route(args) -> int:
             return 2
         firing.append(alert)
 
-    content = _read(args.config)
-    cfg = load(args.config, content)
+    loaded = _load_input(args.config, _read(args.config), **_input_options(args))
+    cfg = loaded.cfg
     router = _router(cfg)
     if router is None:
         return 2
@@ -535,7 +561,7 @@ def _cmd_route(args) -> int:
         if inhibitor is None:
             return 2
         inhibition = inhibitor.inhibited_by(labels, firing)
-    smap = SourceMap(content) if inhibition else None
+    smap = loaded if inhibition else None
     matches = router.match(labels)
 
     if args.format == "json":
@@ -778,8 +804,8 @@ def _print_coverage(cov, cfg: dict, smap, config: str, fail_under) -> None:
 
 
 def _cmd_test(args) -> int:
-    content = _read(args.config)
-    cfg = load(args.config, content)
+    loaded = _load_input(args.config, _read(args.config), **_input_options(args))
+    cfg = loaded.cfg
     router = _router(cfg)
     if router is None:
         return 2
@@ -798,7 +824,7 @@ def _cmd_test(args) -> int:
         if inhibitor is None:
             return 2
     coverage = args.coverage or args.fail_under is not None
-    smap = SourceMap(content) if coverage or inhibitor is not None else None
+    smap = loaded if coverage or inhibitor is not None else None
 
     runs = [_run_test_case(router, inhibitor, smap, i, case) for i, case in enumerate(cases)]
     results = [r for r, _ in runs]
@@ -918,9 +944,9 @@ def _print_routing_diff(rdiff, skipped) -> None:
 def _cmd_diff(args):
     _, ignore, only, severity = _project_settings(args)
     old_cfg, old_findings = _lint_file(args.old, ignore=ignore, severity=severity,
-                                       only=only or None)
+                                       only=only or None, **_input_options(args))
     new_cfg, new_findings = _lint_file(args.new, ignore=ignore, severity=severity,
-                                       only=only or None)
+                                       only=only or None, **_input_options(args))
     if not old_cfg:
         # An empty old file (e.g. the config is new): nothing to fix, and nothing was routed.
         old_cfg, old_findings = {"route": {}}, []
@@ -1100,7 +1126,20 @@ def main(argv=None):
     p.add_argument("--version", action="version", version=f"amlint {_VERSION}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    pc = sub.add_parser("check", help="validate one or more config files")
+    inputs = argparse.ArgumentParser(add_help=False)
+    inputs.add_argument(
+        "--input-format", choices=("auto",) + FORMATS, default="auto", dest="input_format",
+        help="what the config file is: a plain alertmanager.yml, a Kubernetes Secret or "
+             "ConfigMap, kube-prometheus-stack Helm values, a Mimir/Cortex config, or "
+             "prometheus-operator AlertmanagerConfig resources (default: auto, detected)",
+    )
+    inputs.add_argument(
+        "--matcher-strategy", choices=MATCHER_STRATEGIES, dest="matcher_strategy",
+        help="alertmanagerConfigMatcherStrategy for AlertmanagerConfig resources (default: "
+             "the Alertmanager resource's in the input, else OnNamespace)",
+    )
+
+    pc = sub.add_parser("check", parents=[inputs], help="validate one or more config files")
     pc.add_argument("files", nargs="+", metavar="file",
                     help="path(s) to alertmanager.yml, or - for stdin")
     pc.add_argument("--format", choices=["text", "json", "sarif", "github"], default="text",
@@ -1117,7 +1156,8 @@ def main(argv=None):
                     help="Prometheus rule files (or PrometheusRule manifests) to check routes "
                          "and inhibit rules against; quote the glob, repeat the flag for more")
 
-    pd = sub.add_parser("diff", help="show findings that changed between two configs")
+    pd = sub.add_parser("diff", parents=[inputs],
+                        help="show findings that changed between two configs")
     pd.add_argument("old", help="baseline config")
     pd.add_argument("new", help="updated config")
     pd.add_argument("--format", choices=["text", "json", "markdown"], default="text",
@@ -1129,12 +1169,14 @@ def main(argv=None):
     pd.add_argument("--no-routing", action="store_true", dest="no_routing",
                     help="skip the routing comparison (label sets routed differently)")
 
-    pt = sub.add_parser("tree", help="print route tree with matchers, receivers, and issues")
+    pt = sub.add_parser("tree", parents=[inputs],
+                        help="print route tree with matchers, receivers, and issues")
     pt.add_argument("file", help="path to alertmanager.yml, or - for stdin")
     pt.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes when annotating the tree")
 
-    pr = sub.add_parser("route", help="show which route(s) and receiver(s) a label set reaches")
+    pr = sub.add_parser("route", parents=[inputs],
+                        help="show which route(s) and receiver(s) a label set reaches")
     pr.add_argument("config", help="path to alertmanager.yml, or - for stdin")
     pr.add_argument("labels", nargs="*", metavar="label=value",
                     help="alert labels, e.g. severity=critical team=infra")
@@ -1144,7 +1186,8 @@ def main(argv=None):
                          "whether an inhibit rule mutes this alert")
     pr.add_argument("--format", choices=["text", "json"], default="text")
 
-    ptst = sub.add_parser("test", help="run routing unit tests against a config")
+    ptst = sub.add_parser("test", parents=[inputs],
+                          help="run routing unit tests against a config")
     ptst.add_argument("config", help="path to alertmanager.yml")
     ptst.add_argument("tests", help="path to a YAML file with a list of test cases")
     ptst.add_argument("--format", choices=["text", "json"], default="text")
