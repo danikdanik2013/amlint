@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.1] - 2026-10-16
 
 ### Added
 - `amlint diff --format markdown` — a compact, deterministic report for a pull-request

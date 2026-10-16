@@ -189,7 +189,7 @@ know. Details in [docs/checks/rules.md](docs/checks/rules.md).
 
 ```yaml
 - uses: actions/checkout@v7
-- uses: danikdanik2013/amlint@v0.4.0
+- uses: danikdanik2013/amlint@v0.4.1
   with:
     config-path: alertmanager.yml
     strict: true

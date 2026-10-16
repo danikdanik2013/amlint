@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: danikdanik2013/amlint@v0.4.0
+      - uses: danikdanik2013/amlint@v0.4.1
         with:
           config-path: alertmanager.yml
           strict: true
@@ -33,13 +33,13 @@ fails on ERROR-level findings (or WARN too, with `strict: true`).
 | `strict` | no | `false` | Exit non-zero on WARN as well as ERROR |
 | `ignore` | no | `""` | Comma-separated check codes to skip |
 | `only` | no | `""` | Comma-separated check codes to run exclusively |
-| `version` | no | `""` (latest) | Pin a specific amlint version, e.g. `0.4.0` |
+| `version` | no | `""` (latest) | Pin a specific amlint version, e.g. `0.4.1` |
 | `format` | no | `github` | `github`: findings become PR annotations. `text`: the console report in the job log |
 | `sarif` | no | `false` | Also upload findings to GitHub Code Scanning as SARIF |
 | `diff-base` | no | `""` | Git ref to compare `config-path` against; posts the routing diff as a PR comment (see below) |
 | `github-token` | no | `github.token` | Token used to post the routing diff comment |
 
-`format`, `diff-base` and `github-token` are new since v0.4.0 and ship in the next release.
+`format`, `diff-base` and `github-token` are new in v0.4.1.
 
 ## Routing diff as a PR comment
 
@@ -66,7 +66,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # the base commit has to be in the checkout
-      - uses: danikdanik2013/amlint@v0.4.0
+      - uses: danikdanik2013/amlint@v0.4.1
         with:
           config-path: alertmanager.yml
           diff-base: ${{ github.event.pull_request.base.sha }}
@@ -129,7 +129,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v7
-      - uses: danikdanik2013/amlint@v0.4.0
+      - uses: danikdanik2013/amlint@v0.4.1
         with:
           config-path: alertmanager.yml
           sarif: true
@@ -146,11 +146,11 @@ Use `version` to pin amlint itself independently of the action tag — useful if
 action's argument-handling to stay current while freezing the linter's rule set:
 
 ```yaml
-      - uses: danikdanik2013/amlint@v0.4.0
+      - uses: danikdanik2013/amlint@v0.4.1
         with:
           config-path: alertmanager.yml
-          version: '0.4.0'
+          version: '0.4.1'
 ```
 
-`diff-base` runs `amlint diff --format markdown`, which amlint 0.4.0 doesn't have, so don't pin
-`version` below the release that adds it.
+`diff-base` runs `amlint diff --format markdown`, which is new in amlint 0.4.1, so don't pin
+`version` below `0.4.1`.
