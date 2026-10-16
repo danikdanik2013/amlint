@@ -282,7 +282,7 @@ the checkout (`fetch-depth: 0`); see the [GitHub Action docs](https://danikdanik
 | `deep-nesting` | info | route tree deeper than 5 levels |
 | `global-resolve-timeout-missing` | info | `global.resolve_timeout` not set; defaults to 5m |
 | `route-match-collision` | warn | two sibling routes with identical matchers |
-| `shadowed-route` | warn | earlier sibling with a subset of the route's matchers catches every alert first |
+| `shadowed-route` | warn | earlier sibling catches every alert first (`=~"warning\|critical"` before `="critical"`) |
 | `route-unknown-alertname` | warn | with `--rules`: route matches an `alertname` no alerting rule produces |
 | `inhibit-unknown-alertname` | warn | with `--rules`: inhibit rule matches an `alertname` no alerting rule produces |
 | `alert-hits-default-receiver` | info | with `--rules`: by their static labels, alerts match no child route (grouped by routing labels) |
