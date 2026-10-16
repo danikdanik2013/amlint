@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- A Claude Code plugin. Run `/plugin marketplace add danikdanik2013/amlint` and then
+  `/plugin install amlint@amlint`. Its `lint-alertmanager` skill teaches Claude to run amlint
+  when you ask it to check an Alertmanager config, explain a finding, trace where an alert goes
+  or write routing tests.
+- `llms.txt` on the docs site, a short summary of amlint for AI assistants, and
+  `llms-full.txt`, every docs page in one file. `scripts/build_llms_full.py` generates the
+  latter in the docs workflow.
+- `AGENTS.md` for AI coding agents working on this repository.
+- Pushing a `vX.Y.Z` tag now also creates the GitHub release, with that version's CHANGELOG
+  section as its notes, once the package is on PyPI.
 - Python 3.14 and 3.15 support: CI runs the test suite on both, and the package lists them
   in its classifiers. No code changes were needed.
 - A browser playground at https://danikdanik2013.github.io/amlint/playground/, published
@@ -116,6 +126,13 @@
   differential config-error test now generates such keys in routes and inhibit rules.
 
 ### Changed
+- The README and the docs are rewritten in plainer language. Each page leads with what it
+  helps you do, and each check shows what goes wrong, a bad example and the fix. Examples
+  and numbers were re-checked against the CLI. Check counts are now 38, 18 of them not
+  covered by amtool. The Homebrew instructions now name the tap's URL (there is no
+  `homebrew-amlint` repository), and the pre-commit example now uses the current version.
+- PyPI metadata: a clearer description, more keywords, and Documentation, Playground and
+  Changelog links.
 - A file with several YAML documents that are all plain Alertmanager configs now fails with
   "found 2 Alertmanager configs (lines 1, 3)" instead of a YAML error; it still exits 2.
   `--input-format alertmanager` keeps the old behaviour.
@@ -123,6 +140,8 @@
   `group_by: ['...', alertname]`.
 
 ### Fixed
+- GitHub Action: `ignore` and `only` now apply to the SARIF upload too. Before, ignored
+  checks still reached code scanning.
 - `circular-inhibition` no longer reports two unrelated rules because one label value
   matches. It took one shared label with the same value (say `namespace=x` on both sides
   of both rules) as enough for each rule's source to be the other's target, even when

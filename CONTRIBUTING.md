@@ -1,6 +1,11 @@
 # Contributing to amlint
 
-## Setup
+This is the short version: set up, run the tests, open a pull request. The full guide, with
+how to add a check, the tests against the real Alertmanager and the browser playground, is
+[docs/contributing.md](docs/contributing.md), also on the
+[docs site](https://danikdanik2013.github.io/amlint/contributing/).
+
+## Set up
 
 ```bash
 git clone https://github.com/danikdanik2013/amlint
@@ -8,106 +13,35 @@ cd amlint
 pip install -e ".[dev]"
 ```
 
-## Running tests
+You need Python 3.9 or later.
+
+## Run the tests
+
+CI runs these on Python 3.9 to 3.15:
 
 ```bash
-pytest test_linter.py -v
+ruff check amlint/
+pytest test_linter.py test_formats.py -v
 ```
 
-## Differential tests against Alertmanager
+If you change routing, inhibition or how configs are read, also run the differential tests
+against a real Alertmanager: `scripts/differential.sh`. See
+[Differential tests](docs/contributing.md#differential-tests-against-alertmanager).
 
-amlint simulates Alertmanager in Python, so its routing, inhibition and the config errors
-it shares with `amtool check-config` are tested against the real thing. One command:
+## Open a pull request
 
-```bash
-scripts/differential.sh
-```
+- One check or one fix per pull request is easiest to review.
+- Include a test that fails without your change and passes with it.
+- `ruff check amlint/` and `pytest test_linter.py test_formats.py` pass.
+- For a new check, follow [Add a check](docs/contributing.md#how-to-add-a-new-check): the
+  function, `ALL_CHECKS`, `EXPLAINS`, a test, and its docs under `docs/checks/`.
+- Add a line to `CHANGELOG.md` under `## [Unreleased]`.
 
-It downloads an Alertmanager release (0.34.1 by default) into `.cache/alertmanager/`,
-checks the tarball's sha256 against the release's `sha256sums.txt`, and runs
-`tests/differential/` with that release's `amtool` and `alertmanager` binaries:
+## More
 
-- `test_routing.py`: generated configs and label sets, amlint's receivers against
-  `amtool config routes test`
-- `test_validation.py`: `amtool check-config` rejects a config exactly when amlint reports
-  an error-level finding of a code amtool also catches (`ALSO_CAUGHT_BY_AMTOOL`)
-- `test_inhibition.py`: alerts POSTed to a running `alertmanager`; each one's
-  `status.inhibitedBy` and receivers against amlint's simulation
-
-```bash
-AM_VERSION=0.32.2 scripts/differential.sh                       # another release
-AMLINT_DIFF_SEED=7 AMLINT_DIFF_EXAMPLES=2000 scripts/differential.sh -x   # explore more
-```
-
-Cases come from Hypothesis with a fixed seed (`AMLINT_DIFF_SEED`, default 0), so a run is
-reproducible. CI prints the seed in the pytest header. On a mismatch the test reduces the
-case to a minimal config and label set and prints both results, plus the `amtool` command
-that reproduces it. Plain `pytest` skips these tests when `amtool` isn't on PATH.
-
-CI runs them in `.github/workflows/differential.yml` against the last two minor releases
-and the newest, on pull requests that touch the routing engine, and weekly with a fresh
-seed. A mismatch is either a bug in amlint, which you fix with a regression test in
-`test_linter.py`, or a deliberate difference or an Alertmanager bug, which you document in
-[docs/fidelity.md](docs/fidelity.md) and teach the test to recognize, narrowly.
-
-## Working on the playground
-
-The browser playground (`docs/playground/`, built by `playground/build.py`) has its own
-notes in [docs/contributing.md](docs/contributing.md#the-playground).
-
-## How to add a new check
-
-Every check is a standalone function in [amlint/linter.py](amlint/linter.py).
-Adding one takes about 5 lines of logic and a test.
-
-**1. Write the function:**
-
-```python
-def check_your_rule(cfg):
-    out = []
-    # cfg is the parsed alertmanager.yml dict
-    # use _walk_routes(cfg["route"]) to iterate all routes
-    if something_wrong:
-        out.append(Finding(
-            WARN,              # ERROR / WARN / INFO
-            "your-rule-code",  # unique kebab-case code
-            "Human-readable message explaining what's wrong and why it matters.",
-            "route.routes[0]", # where in the config (optional)
-        ))
-    return out
-```
-
-**2. Register it:**
-
-```python
-ALL_CHECKS = [
-    ...
-    check_your_rule,   # add here
-]
-```
-
-**3. Add a test:**
-
-```python
-def test_your_rule():
-    cfg = {
-        "route": {"receiver": "a"},
-        "receivers": [{"name": "a"}],
-        # minimal config that triggers the rule
-    }
-    assert "your-rule-code" in codes(cfg)
-```
-
-## Severity guide
-
-| Level | Use when |
-|-------|----------|
-| `ERROR` | Alertmanager will drop or fail to route alerts |
-| `WARN` | Almost certainly not what the author intended |
-| `INFO` | Suspicious, worth reviewing, but may be intentional |
-
-## Opening a PR
-
-- One check per PR is easiest to review
-- Include a test that fails without the fix and passes with it
-- Update the checks table in README.md
+- [Add a check](docs/contributing.md#how-to-add-a-new-check), and which severity to give it
+- [Differential tests against Alertmanager](docs/contributing.md#differential-tests-against-alertmanager)
+  and what to do when they fail
+- [Working on the playground](docs/contributing.md#the-playground)
+- Security issues: don't open a public issue; see [SECURITY.md](SECURITY.md).
+- Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).

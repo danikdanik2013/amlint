@@ -1,53 +1,45 @@
 # Kubernetes & Mimir
 
-Most Alertmanagers don't read a hand-written `alertmanager.yml`. They get their config from a
-Kubernetes Secret, from kube-prometheus-stack Helm values, from prometheus-operator
-`AlertmanagerConfig` resources, or from a Mimir or Cortex tenant config. amlint reads all of
-these directly. `check`, `tree`, `route`, `test` and `diff` work the same on each, and
-findings point at the line in the file you gave it, not at some config it generated.
+Lint the file you actually deploy: a Kubernetes Secret, kube-prometheus-stack Helm values, a
+Mimir or Cortex tenant config, or prometheus-operator `AlertmanagerConfig` resources. You
+don't need to extract `alertmanager.yml` first, and findings point at the line in the file
+you gave amlint.
+
+## Point amlint at the file you deploy
 
 ```bash
-amlint check alertmanager-secret.yaml
-amlint check values.yaml
-amlint check tenant-config.yaml
-kubectl kustomize deploy/monitoring | amlint check -
+amlint check alertmanager-secret.yaml                    # Secret or ConfigMap
+amlint check values.yaml                                 # kube-prometheus-stack values
+amlint check tenant-config.yaml                          # Mimir / Cortex
 amlint route alertmanagerconfigs.yaml namespace=team-a severity=critical
+kubectl kustomize deploy/monitoring | amlint check -     # a whole stream on stdin
 ```
 
-| input | what amlint reads | findings point at |
-|-------|-------------------|-------------------|
-| plain `alertmanager.yml` | the file, as before | the line in the file |
-| Kubernetes `Secret` / `ConfigMap` | `alertmanager.yaml` in `stringData` or base64 `data`, other keys as template files | inside a `\|` block: the exact line; base64 or a quoted string: the `alertmanager.yaml:` key |
-| kube-prometheus-stack values | `alertmanager.config` merged over the chart's default, `alertmanager.templateFiles` | the line in the values file |
-| Mimir / Cortex | `alertmanager_config` (a string) and `template_files` | inside a `\|` block: the exact line, otherwise the key |
-| `AlertmanagerConfig` (v1alpha1, v1beta1) | the resources, merged into the base config the way prometheus-operator merges them | the line in the resource |
+`check`, `diff`, `tree`, `route` and `test` all read these formats. amlint detects the
+format from the content:
 
-## Detection and `--input-format`
+| If the file has… | amlint reads it as | It lints | Findings point at |
+|---|---|---|---|
+| a `kind: AlertmanagerConfig` anywhere | `alertmanagerconfig` | the resources, merged into the base config the way the operator merges them ([details](#prometheus-operator-alertmanagerconfig)) | the line in the resource |
+| a `Secret` or `ConfigMap` with an `alertmanager.yaml`, `alertmanager.yml` or `alertmanager.yaml.gz` key | `secret` | that key; the other keys are template files | in a literal block (<code>key: &#124;</code>): the exact line. Base64 or a quoted string: the key |
+| a top-level `alertmanager_config:` string | `mimir` | that string, plus `template_files` | in a literal block: the exact line. Otherwise: the key |
+| a top-level `alertmanager:` map, and no top-level `route:` or `receivers:` | `helm` | `alertmanager.config` merged over the chart's defaults, plus `alertmanager.templateFiles` | the line in the values file |
+| none of the above | `alertmanager` | the file as a plain config | the line in the file |
 
-The format is detected from the content. A file can be a stream of YAML documents
-(`---`) and can contain `kind: List` objects, as `kubectl get -o yaml` prints them. Other
-Kubernetes objects in the stream (Deployments, Services, PrometheusRules) are skipped.
+- A file can be a stream of YAML documents (`---`) or a `kind: List`, as
+  `kubectl get -o yaml` prints it. amlint skips other objects in it (Deployments, Services,
+  PrometheusRules, and Secrets or ConfigMaps without a config key).
+- amlint lints one config per file. A file with two configs (two config Secrets, say) exits
+  2: split it, or, if the two are in different formats, pick one with `--input-format`. A
+  file with no config at all also exits 2.
+- `note:` lines on stderr say how amlint read the file, for example which parts of a Helm
+  config come from the chart. They don't change the exit code.
 
-- An `AlertmanagerConfig` anywhere in the stream makes it an `alertmanagerconfig` input. A
-  Secret, values file, Mimir config or plain config in the same stream is the base config
-  the resources are merged into.
-- A `Secret` or `ConfigMap` with an `alertmanager.yaml`, `alertmanager.yml` or
-  `alertmanager.yaml.gz` key is a `secret` input. One without such a key is skipped.
-- A top-level `alertmanager_config:` string is a `mimir` input.
-- A top-level `alertmanager:` section, and no top-level `route:` or `receivers:`, is a
-  `helm` input. Alertmanager rejects unknown top-level keys, so a plain config can't have one.
-- Anything else is a plain Alertmanager config, read exactly as amlint always read it.
+To skip detection, pass `--input-format` with `auto` (the default), `alertmanager`, `secret`,
+`helm`, `mimir` or `alertmanagerconfig`. `--input-format alertmanager` reads the file as
+one plain document, even if it looks like something else.
 
-`--input-format` (on `check`, `diff`, `tree`, `route` and `test`) overrides the detection:
-`auto` (the default), `alertmanager`, `secret`, `helm`, `mimir` or `alertmanagerconfig`.
-`--input-format alertmanager` reads the file as one plain document, even if it looks like
-something else. A file that holds two Alertmanager configs (two config Secrets, say) exits 2:
-amlint lints one config per file.
-
-Notes about how a file was read, like which parts of a Helm config come from the chart's
-defaults, go to stderr as `note:` lines and don't change the exit code.
-
-## Kubernetes Secrets
+## Secrets and ConfigMaps { #kubernetes-secrets }
 
 ```yaml
 apiVersion: v1
@@ -64,24 +56,27 @@ stringData:
     {{ define "notify.description" }}...{{ end }}
 ```
 
+- **Use a literal block** (`alertmanager.yaml: |`, YAML's multi-line string that keeps
+  line breaks). Then every finding points at its line and column inside the block, and
+  `# amlint: disable=...` comments inside the block work as in a plain file. With base64
+  `data` or a quoted string, lines can't be mapped one to one, so findings point at the
+  `alertmanager.yaml:` key.
 - `stringData` wins over `data` for the same key, as the API server merges them. `data`
-  values are base64. `alertmanager.yaml.gz` is the gzipped config in the Secret the operator
-  generates (`alertmanager-<name>-generated`).
-- With a literal block (`alertmanager.yaml: |`), every finding points at its line and column
-  inside the block, and `# amlint: disable=...` comments inside the block work as in a
-  plain file. With base64 data or a quoted string the lines can't be mapped one to one, so
-  findings point at the `alertmanager.yaml:` key.
-- The Secret's other keys are template files: the operator mounts them in
-  `/etc/alertmanager/config/`. A `templates:` entry in that directory is checked against
-  them instead of against files on disk. A file name that isn't a key is an error, and a glob
-  that matches none of them is a warning. A glob is only reported if the Secret has template
-  files at all, since `*.tmpl` with no template files just loads nothing. Relative paths and
-  other directories aren't checked: the operator runs Alertmanager on a copy of the config in
-  `config_out/`, so they don't resolve next to the Secret.
-- A `ConfigMap` (`data`, or base64 `binaryData`) is read the same way. Its template files
-  aren't checked, because where it is mounted depends on the chart.
+  values are base64.
+- `alertmanager.yaml.gz` is the gzipped, base64 config in the Secret the operator generates
+  (`alertmanager-<name>-generated`).
+- **Template files.** The Secret's other keys are template files. The operator mounts them
+  in `/etc/alertmanager/config/`, so amlint checks `templates:` entries in that directory
+  against the keys instead of against files on disk:
+    - a file name that isn't a key is an error
+    - a glob that matches no key is a warning, but only if the Secret has template files at
+      all (`*.tmpl` with no template files just loads nothing)
+    - relative paths and other directories aren't checked. The operator runs Alertmanager on
+      a copy of the config in `config_out/`, so they don't resolve next to the Secret.
+- A **ConfigMap** is read the same way, from `data` or base64 `binaryData`. Its template
+  files aren't checked, because where it is mounted depends on how you deploy it.
 
-## kube-prometheus-stack values
+## kube-prometheus-stack Helm values { #kube-prometheus-stack-values }
 
 ```yaml
 alertmanager:
@@ -94,39 +89,47 @@ alertmanager:
           - api_url: https://hooks.slack.com/services/T/B/X
 ```
 
-Helm merges your values over the chart's own `values.yaml`, so the config Alertmanager gets
-isn't only what your file says. amlint merges `alertmanager.config` over the default config
-of kube-prometheus-stack 92.10.1 the way Helm does: maps key by key, lists replaced
-whole, and `null` deletes a key. That catches a common mistake. The values above replace
-`receivers`, so the chart's `null` receiver is gone, but the chart's Watchdog route to
-`null` is still there:
+Helm merges your values over the chart's own `values.yaml`, so Alertmanager gets more than
+your file says. amlint merges `alertmanager.config` over the default config of
+kube-prometheus-stack 92.10.1 the same way: maps key by key, lists replaced whole, and
+`null` deletes a key.
+
+That catches a common mistake. The values above replace `receivers`, so the chart's `null`
+receiver is gone, but the chart's Watchdog route to `null` is still there:
 
 ```
+$ amlint check values.yaml
 note: values.yaml:2: alertmanager.config is merged over the kube-prometheus-stack 92.10.1 defaults, as Helm merges values: global, inhibit_rules, templates, route.routes come from the chart
 
   ✖  ERROR  [undefined-receiver]  ·  values.yaml:3:5  ·  route.routes[0]
-     Route references receiver 'null' which is not defined in receivers. Alerts matched here will be
-dropped.
+     Route references receiver 'null' which is not defined in receivers. Alerts matched here will be dropped.
+
+──────────────────────────────────────────────────────────────────────────────
+  ✖ 1 error
 ```
 
-A finding in a part that only exists in the chart's defaults points at the nearest part your
-file does have, here the `route:` the default routes are merged into.
+A finding in a part that only the chart's defaults have points at the nearest part your
+file does have: here, the `route:` that the default routes are merged into.
 
 - `alertmanager.templateFiles` end up in the config Secret, so `templates:` entries in
   `/etc/alertmanager/config/` are checked against them, as for a Secret.
-- `alertmanager.stringConfig` is only used with `alertmanager.tplConfig: true`, which is
-  what the chart's Secret template does. Without it the chart renders `alertmanager.config`,
-  and amlint notes that the string is ignored. A string `alertmanager.config` is read as a
-  config.
-- `alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy` is used for
-  AlertmanagerConfig resources in the same stream.
-- Values given with `--set` or in other values files aren't in the file. Lint the values
-  Helm actually uses (`helm get values <release> --all`), or render the chart with
-  `helm template` and lint its output, which holds the config Secret.
+- `alertmanager.stringConfig` is used only with `alertmanager.tplConfig: true`, as in the
+  chart's Secret template. Without it the chart renders `alertmanager.config`, and amlint
+  notes that the string is ignored. A string `alertmanager.config` is read as a config.
+- `alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy.type` sets the
+  [matcher strategy](#matcher-strategy) for `AlertmanagerConfig` resources in the same
+  stream.
+- Values from `--set` or other values files aren't in the file. Lint the values Helm
+  actually uses, or the rendered chart, which holds the config Secret:
 
-## Mimir and Cortex
+    ```bash
+    helm get values <release> --all -o yaml | amlint check -
+    helm template monitoring ./chart | amlint check -
+    ```
 
-The format `mimirtool alertmanager get` prints and `POST /api/v1/alerts` takes:
+## Mimir and Cortex { #mimir-and-cortex }
+
+This is the format `mimirtool alertmanager get` prints and `POST /api/v1/alerts` takes:
 
 ```yaml
 template_files:
@@ -138,53 +141,16 @@ alertmanager_config: |
   ...
 ```
 
-`templates:` isn't checked against `template_files`. Mimir loads every template file of the
-tenant, whatever `templates:` lists, and refuses entries that contain a path.
+amlint doesn't check `templates:` against `template_files`: Mimir loads every template file
+of the tenant, whatever `templates:` lists, and refuses entries that contain a path.
 
-## prometheus-operator AlertmanagerConfig
+## prometheus-operator AlertmanagerConfig { #prometheus-operator-alertmanagerconfig }
 
-`AlertmanagerConfig` resources (`monitoring.coreos.com/v1alpha1` and `v1beta1`) are
-converted into Alertmanager's config and merged into the base config the way
-prometheus-operator v0.94.1 does it (`pkg/alertmanager/amcfg.go`):
-
-- **Names.** Receiver and time interval names become `<namespace>/<name>/<receiver>`, so
-  `receiver: pager` in `team-a/payments` is `team-a/payments/pager`. Findings, `tree`,
-  `route` and `test` all use these names.
-- **Namespace matcher.** Each resource's route gets `namespace="<namespace>"` added to its
-  matchers, and so do both sides of each of its inhibit rules (unless a side already has
-  it). So a resource only sees alerts from its own namespace. This follows
-  `alertmanagerConfigMatcherStrategy`:
-  `OnNamespace` (the default) adds it, `None` doesn't, and
-  `OnNamespaceExceptForAlertmanagerNamespace` doesn't for resources in the Alertmanager's
-  own namespace. The strategy comes from `--matcher-strategy`, else from an `Alertmanager`
-  resource in the input, else from Helm values in the input, else it is `OnNamespace`.
-- **Order and `continue`.** The resources' routes go first under the root route, sorted by
-  `namespace/name`, and before the base config's own routes. Each has `continue: true`, so
-  alerts also go on to the routes after it.
-- **Secrets.** Fields that reference a Secret (`apiURL`, `routingKey`, `apiKey`,
-  `urlSecret`, `botToken`, ...) count as set: the operator fills in the Secret's value. The
-  value itself isn't read, so a Secret that doesn't exist isn't caught.
-- **Fields.** camelCase fields become Alertmanager's (`slackConfigs` → `slack_configs`,
-  `groupWait` → `group_wait`). A webhook's `urlSecret` is its `url`, a Discord `apiURL` its
-  `webhook_url`. A zero `groupInterval` or `repeatInterval` is dropped, as the operator drops
-  it, so the parent's value applies.
-- **Versions.** v1alpha1 spells the top-level time intervals `muteTimeIntervals`, v1beta1
-  `timeIntervals`, and amlint notes the other one, which the API server drops. A v1alpha1
-  matcher without `matchType` uses `regex: true` for `=~`.
-- **Without a route.** A resource without `spec.route` only contributes its inhibit rules;
-  the operator drops its receivers and time intervals, and amlint notes it.
-- **Base config.** A Secret, plain config, Helm values or Mimir config in the same stream is
-  the base. Without one, it is the operator's default config (a root route to a `null`
-  receiver), and findings about that default are dropped, since there is nothing in the
-  input to fix. An `Alertmanager` resource whose `spec.alertmanagerConfiguration.name` names
-  one of the resources makes that resource the whole config, without a namespace matcher,
-  as the operator does.
-
-Some findings would only describe what the operator adds on purpose, so they are dropped:
-`inhibit-same-match`, `inhibit-no-equal` and `circular-inhibition` when only the namespace
-matcher causes them (it is on both sides of every rule of a resource), and
-`useless-continue` on a resource's route when it happens to be the last one. Problems in the
-rules themselves are still reported.
+`AlertmanagerConfig` resources (`monitoring.coreos.com/v1alpha1` and `v1beta1`) let each team
+define its own routes and receivers in its own namespace. The operator converts them and
+merges them into one Alertmanager config. amlint does the same, the way prometheus-operator
+v0.94.1 does it, so findings, `tree`, `route` and `test` show the config Alertmanager will
+actually run.
 
 ```
 $ amlint tree alertmanagerconfigs.yaml
@@ -194,12 +160,138 @@ $ amlint tree alertmanagerconfigs.yaml
 │   └──    {severity="critical"}  →  team-a/payments/pager
 ├──    {service=~"search-.*", namespace="team-b"}  →  team-b/search/webhook  [continue]
 └──    {alertname = "Watchdog"}  →  null
+
+  1 more issue outside routing (receivers, global, timing) — run 'amlint check alertmanagerconfigs.yaml' for full details.
 ```
+
+??? example "alertmanagerconfigs.yaml: a config Secret and two teams' resources"
+
+    ```yaml
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: alertmanager-main
+      namespace: monitoring
+    stringData:
+      alertmanager.yaml: |
+        global:
+          resolve_timeout: 5m
+        route:
+          receiver: default
+          routes:
+            - matchers: ['alertname = "Watchdog"']
+              receiver: "null"
+        receivers:
+          - name: default
+            webhook_configs:
+              - url: http://example.com/default
+          - name: "null"
+    ---
+    apiVersion: monitoring.coreos.com/v1alpha1
+    kind: AlertmanagerConfig
+    metadata:
+      name: payments
+      namespace: team-a
+    spec:
+      route:
+        receiver: slack
+        routes:
+          - matchers:
+              - name: severity
+                value: critical
+            receiver: pager
+      receivers:
+        - name: slack
+          slackConfigs:
+            - apiURL:
+                name: slack-webhook
+                key: url
+              channel: '#payments'
+        - name: pager
+          pagerdutyConfigs:
+            - routingKey:
+                name: pagerduty
+                key: routing-key
+    ---
+    apiVersion: monitoring.coreos.com/v1beta1
+    kind: AlertmanagerConfig
+    metadata:
+      name: search
+      namespace: team-b
+    spec:
+      route:
+        receiver: webhook
+        matchers:
+          - name: service
+            value: search-.*
+            matchType: "=~"
+      receivers:
+        - name: webhook
+          webhookConfigs:
+            - url: http://search.example.com/hook
+    ```
+
+What the merge does:
+
+- **Names.** Receiver and time interval names become `<namespace>/<name>/<receiver>`, so
+  `receiver: pager` in `team-a/payments` is `team-a/payments/pager`. Findings, `tree`,
+  `route` and `test` all use these names.
+- **Namespace matcher.** Each resource's route gets `namespace="<namespace>"` added to its
+  matchers, and so do both sides of each of its inhibit rules (unless a side already has
+  it). So a resource only sees alerts from its own namespace. The
+  [matcher strategy](#matcher-strategy) can turn this off.
+- **Order and `continue`.** The resources' routes go first under the root route, sorted by
+  `namespace/name`, before the base config's own routes. Each gets `continue: true`, so
+  alerts also go on to the routes after it.
+- **Base config.** A Secret, plain config, Helm values or Mimir config in the same stream is
+  the base. Without one, amlint uses the operator's default config (a root route to a
+  `null` receiver) and drops findings about that default, since there is nothing in your
+  input to fix.
+- **Secret references.** Fields that reference a Secret (`apiURL`, `routingKey`, `apiKey`,
+  `urlSecret`, `botToken`, ...) count as set, because the operator fills in the value.
+  amlint doesn't read the value, so it can't catch a Secret that doesn't exist.
+- **Field names.** camelCase fields become Alertmanager's (`slackConfigs` →
+  `slack_configs`, `groupWait` → `group_wait`). A webhook's `urlSecret` becomes its `url`, a
+  Discord `apiURL` its `webhook_url`. A zero `groupInterval` or `repeatInterval` is dropped,
+  as the operator drops it, so the parent's value applies.
+- **API versions.** v1alpha1 calls the top-level time intervals `muteTimeIntervals`, v1beta1
+  calls them `timeIntervals`. If a resource uses the other version's name, amlint notes that
+  the API server drops it. A v1alpha1 matcher without `matchType` uses `regex: true` for
+  `=~`.
+- **No `spec.route`.** A resource without a route only contributes its inhibit rules. The
+  operator drops its receivers and time intervals, and amlint notes it.
+- **`spec.alertmanagerConfiguration`.** If an `Alertmanager` resource in the input names one
+  of the resources there, that resource becomes the whole config, without a namespace
+  matcher, as the operator does it.
+
+Some findings would only describe what the operator adds on purpose, so amlint drops them:
+`inhibit-same-match`, `inhibit-no-equal` and `circular-inhibition` when only the namespace
+matcher causes them, and `useless-continue` on a resource's route. Problems in your own
+rules are still reported.
+
+### Matcher strategy
+
+`alertmanagerConfigMatcherStrategy` decides which resources get the namespace matcher:
+
+| Strategy | Namespace matcher |
+|---|---|
+| `OnNamespace` (default) | added to every resource |
+| `OnNamespaceExceptForAlertmanagerNamespace` | added, except to resources in the Alertmanager's own namespace |
+| `None` | never added |
+
+amlint takes the first of these it finds: `--matcher-strategy`, an `Alertmanager` resource in
+the input (`spec.alertmanagerConfigMatcherStrategy.type`), Helm values in the input
+(`alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy.type`). Otherwise it uses
+`OnNamespace`.
+
+For `OnNamespaceExceptForAlertmanagerNamespace`, the Alertmanager's namespace comes from the
+`Alertmanager` resource or the config Secret. If neither is in the input, every resource gets
+the matcher, and amlint notes it.
 
 ### Routing tests
 
-Test cases see the merged config, so their labels need a `namespace`, and receivers are
-named the operator's way:
+Test cases run against the merged config. So their labels need a `namespace`, and they use
+the operator's receiver names:
 
 ```yaml
 tests:
@@ -214,10 +306,19 @@ tests:
     expect: [team-a/payments/slack, "null"]
 ```
 
-### Several files
+```
+$ amlint test alertmanagerconfigs.yaml routing-tests.yaml
+  ✓  payments critical alerts page
+  ✓  another namespace never reaches team-a
+  ✓  team-a's route has continue, so the base routes still see its alerts
+──────────────────────────────────────────────────────────────────────────────
+  3 passed
+```
+
+### Lint several files together { #several-files }
 
 The operator merges every selected resource, and amlint merges every resource in one input.
-To lint resources from several files together, put them in one stream:
+To lint resources from several files together, send them as one stream:
 
 ```bash
 kubectl kustomize deploy/monitoring | amlint check -
@@ -226,15 +327,16 @@ kubectl get alertmanagerconfigs -A -o yaml | amlint check -
 for f in alertmanagerconfigs/*.yaml; do echo ---; cat "$f"; done | amlint check -
 ```
 
-With stdin, findings point at lines of the stream. Passing the files one by one
-(`amlint check a.yaml b.yaml`) lints each resource on its own, under the operator's default
-config.
+With stdin, findings point at lines of the stream. `amlint check a.yaml b.yaml` instead
+lints each file on its own, so each resource is merged into the operator's default config.
 
-### What isn't modeled
+### Limits { #what-isnt-modeled }
 
-- `alertmanagerConfigSelector` and `alertmanagerConfigNamespaceSelector`: every resource in
-  the input counts as selected.
-- The operator's validation, which skips a whole resource it rejects (say, a route to a
-  receiver the resource doesn't define). amlint reports what is wrong instead.
-- Alertmanager versions before 0.22: matchers are always written in the `matchers:` syntax.
+- `alertmanagerConfigSelector` and `alertmanagerConfigNamespaceSelector` aren't modeled:
+  every resource in the input counts as selected.
+- The operator's validation isn't modeled. The operator skips a whole resource it rejects
+  (say, a route to a receiver the resource doesn't define). amlint reports what is wrong
+  instead.
+- Matchers are always written in the `matchers:` syntax, so configs for Alertmanager before
+  0.22 aren't modeled.
 - A resource without `metadata.namespace` is taken to be in `default`, with a note.

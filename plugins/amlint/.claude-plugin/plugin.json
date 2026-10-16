@@ -1,0 +1,12 @@
+{
+  "name": "amlint",
+  "description": "Lint Prometheus Alertmanager configs, trace where alerts go and test routing with the amlint CLI",
+  "author": {
+    "name": "danikdanik2013",
+    "url": "https://github.com/danikdanik2013"
+  },
+  "homepage": "https://danikdanik2013.github.io/amlint/",
+  "repository": "https://github.com/danikdanik2013/amlint",
+  "license": "MIT",
+  "keywords": ["alertmanager", "prometheus", "linter", "monitoring", "ci"]
+}

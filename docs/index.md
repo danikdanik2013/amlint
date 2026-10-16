@@ -1,20 +1,18 @@
 # amlint
 
-**Semantic linter for Prometheus Alertmanager configs.**
+**A linter for Prometheus Alertmanager configs that finds the bugs nothing else complains about.**
 
-Alertmanager's own `amtool check-config` already validates most schema-level mistakes and
-refuses to start over them. **amlint covers that same ground in one dependency-free CLI
-with JSON/SARIF/diff/tree output, plus checks that amtool doesn't do** — configs that load
-fine, that Alertmanager runs without complaint, and that still silently don't do what you
-meant: unreachable routes behind a catch-all, timing that contradicts itself, inhibition
-rules that silence too broadly.
+`amtool check-config` tells you whether your config is *valid*. amlint tells you whether it
+*does what you meant*. Does every alert reach someone? Can every route actually match? Does an
+inhibit rule mute far more than you think? Configs with these bugs load fine and Alertmanager
+runs without a warning, while alerts quietly go to the wrong place, or nowhere.
 
-Try it without installing anything: the [playground](playground/index.md) checks a config
-in your browser, and the config never leaves the page.
+[Try it in your browser](playground/index.md){ .md-button .md-button--primary }
+[Install](install.md){ .md-button }
 
-[Open the playground](playground/index.md){ .md-button .md-button--primary }
+The playground runs amlint inside the page, so your config never leaves your machine.
 
-## Quick example
+## In 30 seconds
 
 ```bash
 pip install amlint
@@ -22,48 +20,68 @@ amlint check alertmanager.yml
 ```
 
 ```
-  ERROR  Route references receiver 'pager-team' which is not defined in receivers.
-         Alerts matched here will be dropped.
-  ↳ route.routes[1]  [undefined-receiver]
+  ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:7:7  ·  route.routes[1]
+     Route references receiver 'pager' which is not defined in receivers. Alerts
+     matched here will be dropped.
 
-  WARN   Catch-all route (no matchers) with continue:false will intercept all alerts
-         — 2 subsequent sibling(s) are unreachable.
-  ↳ route.routes[0]  [unreachable-route]
+  ⚠  WARN   [unreachable-route]  ·  alertmanager.yml:6:7  ·  route.routes[0]
+     Catch-all route (no matchers) with continue:false will intercept all alerts
+     — 1 subsequent sibling(s) are unreachable.
 
-  2 error · 3 warn · 1 info
+  ✖ 1 error  ·  ⚠ 1 warning
 ```
 
-Exit code `1` on any ERROR — ready for CI. `--strict` treats WARN as failure too.
+Each finding names the check, the exact spot in your file and what will go wrong. The exit
+code is `1` on any error, so CI fails. Add `--strict` to fail on warnings too. To see how to
+fix a finding, run `amlint explain <check>`, for example `amlint explain unreachable-route`.
+
+## What you can do with it
+
+| I want to… | Run | Read more |
+|---|---|---|
+| Find problems in a config | `amlint check alertmanager.yml` | [Usage](usage.md) |
+| See where an alert would go | `amlint route alertmanager.yml team=db severity=critical` | [Usage](usage.md#route) |
+| Check whether an alert gets muted | `amlint route … --firing alertname=NodeDown` | [Usage](usage.md#route) |
+| Write unit tests for routing | `amlint test alertmanager.yml tests.yml` | [Usage](usage.md) |
+| See what a change does to routing | `amlint diff old.yml new.yml` | [Usage](usage.md) |
+| Catch routes for alerts that don't exist | `amlint check … --rules 'rules/*.yml'` | [Prometheus rules](checks/rules.md) |
+| Lint a Secret, Helm values or Mimir config | `amlint check alertmanager-secret.yaml` | [Kubernetes & Mimir](kubernetes.md) |
+| Get findings and a routing diff on every PR | the GitHub Action | [GitHub Action](github-action.md) |
+
+## What it catches
+
+There are 38 checks. 18 of them find configs that amtool accepts but that don't behave the
+way you expect:
+
+- **Alerts that reach nobody.** A route points at a receiver with no integration, or a
+  catch-all route sits above more specific ones.
+- **Routes that can never match.** An earlier sibling route catches every alert first.
+- **Inhibit rules that mute too much.** No `equal` labels, or rules that mute each other.
+- **Timings that contradict themselves.** For example, `group_wait` longer than `group_interval`.
+- **Matchers Alertmanager reads differently than you do.** For example, `code=~[0-9]{3}`
+  without quotes loses its closing brace.
+- **Routes for alerts that don't exist.** With `--rules`, a typo in an `alertname` stops
+  being silent.
+
+The other 20 repeat what amtool already rejects, so one tool gives you one report.
+[See all checks](checks/index.md).
 
 ## Why not just amtool?
 
+Keep it. amtool is the reference for "is this config valid?", and amlint agrees with it
+there. amlint adds what comes after that question:
+
 | | amtool | amlint |
-|---|---|---|
-| Syntax errors | ✅ | ✅ |
-| Undefined receiver | ✅ | ✅ |
-| Missing integration fields (webhook url, PagerDuty key, etc.) | ✅ | ✅ |
-| Bad regex in matchers | ✅ | ✅ |
-| Unreachable routes (catch-all swallows siblings) | ❌ | ✅ |
-| Route matcher collisions | ❌ | ✅ |
-| Shadowed routes (an earlier, broader sibling catches every alert) | ❌ | ✅ |
-| Inhibition rules that silence too broadly, or never fire | ❌ | ✅ |
-| Timing misconfig (`group_wait`/`group_interval`/`repeat_interval`) | ❌ | ✅ |
-| Unused or empty receivers | ❌ | ✅ |
-| Routes and inhibit rules on alert names your Prometheus rules don't define (`--rules`) | ❌ | ✅ |
-| Batch routing regression tests (label-set → expected receiver, run from a file in CI) | single alert, interactive only | ✅ |
+|---|:-:|:-:|
+| Rejects invalid configs | ✅ | ✅ |
+| Finds valid configs that misroute or over-mute alerts | — | ✅ |
+| Where does one alert go? | ✅ | ✅ |
+| A file of routing tests in CI, with route coverage | — | ✅ |
+| Is this alert muted while that one fires? | — | ✅ |
+| What does this change do to routing? | — | ✅ |
+| Kubernetes, Helm, Mimir and AlertmanagerConfig input | — | ✅ |
+| PR annotations, SARIF, JSON, Markdown output | — | ✅ |
 
-amtool already covers the first four rows — amlint re-implements those so you get one
-tool with unified JSON/SARIF/diff/tree output instead of needing the Go binary too, not
-because amtool misses them. Run `amlint list` to see exactly which of the 35 checks
-duplicate amtool and which don't; `amlint explain <code>` says so for any individual check.
-
-On the last row: `amtool config routes test` already lets you test one alert's routing
-interactively — that part isn't new either. What it doesn't have is a way to run a whole
-suite of these as regression tests from a file, in CI, without a live Alertmanager. That's
-what `amlint test` adds; `amlint route` is the single-alert version, showing the matched
-routes and the `group_by` and timings each one inherits.
-
-## 35 checks — 15 of them amtool can't do
-
-See [all checks](checks/index.md) for the full list, and which column each falls in.
-
+The routing and inhibition simulation is
+[checked in CI against real Alertmanager releases](fidelity.md), so `amlint route` and
+`amlint test` give the same answers Alertmanager would.
