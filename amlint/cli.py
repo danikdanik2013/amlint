@@ -28,6 +28,7 @@ except ImportError:
 
 from rich.console import Console
 from rich.markup import escape
+from rich.padding import Padding
 from rich.rule import Rule
 from rich.syntax import Syntax
 from rich.table import Table
@@ -35,8 +36,8 @@ from rich.text import Text
 from rich.tree import Tree
 
 from .config import load_project_config
-from .linter import ERROR, INFO, WARN, _dict_items, lint
-from .simulate import simulate_route
+from .linter import ERROR, INFO, WARN, _dict_items, _scalar, lint
+from .routing import GROUP_BY_ALL, Router, RoutingError
 from .source import apply_source
 
 console = Console(highlight=False)
@@ -398,71 +399,208 @@ def _cmd_tree(args) -> int:
     return 0
 
 
+def _router(cfg: dict):
+    """Router for the config's route tree, or None after printing why it can't be built."""
+    try:
+        return Router(cfg.get("route"))
+    except RoutingError as e:
+        err_console.print(f"[red]Cannot simulate routing:[/red] {escape(str(e))}")
+        return None
+
+
+def _format_labels(labels: dict) -> str:
+    return ", ".join(f"{k}={v}" for k, v in labels.items()) if labels else "(no labels)"
+
+
+def _receivers_of(matches) -> list:
+    return [m.receiver for m in matches if m.receiver]
+
+
+_ROUTE_SETTINGS = (
+    "receiver", "group_by", "group_wait", "group_interval", "repeat_interval",
+    "mute_time_intervals", "active_time_intervals",
+)
+
+
+def _route_match_json(m) -> dict:
+    out = {"path": list(m.path)}
+    for key in _ROUTE_SETTINGS:
+        value = getattr(m.opts, key)
+        out[key] = list(value) if isinstance(value, tuple) else value
+    out["set_by"] = dict(m.opts.origin)
+    return out
+
+
+def _cmd_route(args) -> int:
+    labels = {}
+    for item in args.labels:
+        name, sep, value = item.partition("=")
+        if not sep or not name.strip():
+            err_console.print(
+                f"[red]Invalid label[/red] '{escape(item)}': expected label=value"
+            )
+            return 2
+        labels[name.strip()] = value
+
+    router = _router(load(args.config))
+    if router is None:
+        return 2
+    matches = router.match(labels)
+
+    if args.format == "json":
+        print(json.dumps({
+            "labels": labels,
+            "receivers": _receivers_of(matches),
+            "routes": [_route_match_json(m) for m in matches],
+        }, ensure_ascii=False, indent=2))
+        return 0
+
+    console.print()
+    console.print(f"  [bold]Labels[/bold]  {escape(_format_labels(labels))}")
+    for n, m in enumerate(matches, 1):
+        here = m.path[-1]
+        console.print()
+        prefix = f"[dim]{n}.[/dim] " if len(matches) > 1 else ""
+        console.print("  " + prefix + "[dim] → [/dim]".join(escape(p) for p in m.path))
+        grid = Table.grid(padding=(0, 3))
+        grid.add_column(style="dim", no_wrap=True)
+        grid.add_column()
+        grid.add_column(style="dim")
+        for key in _ROUTE_SETTINGS:
+            value = getattr(m.opts, key)
+            if key.endswith("_time_intervals") and not value:
+                continue
+            if key == "group_by" and value == (GROUP_BY_ALL,):
+                shown = "... (every label)"
+            elif key == "group_by":
+                shown = ", ".join(value) if value else "(none — one group for all alerts)"
+            elif isinstance(value, tuple):
+                shown = ", ".join(value)
+            else:
+                shown = value or "(none)"
+            origin = m.opts.origin.get(key)
+            if origin is None:
+                source = "Alertmanager default"
+            elif origin == here:
+                source = "set here"
+            else:
+                source = f"inherited from {origin}"
+            style = "bold" if key == "receiver" else ""
+            grid.add_row(key, Text(shown, style=style), source)
+        console.print(Padding(grid, (0, 0, 0, 4), expand=False))
+    console.print()
+    console.print(Rule(style="dim"))
+    receivers = _receivers_of(matches)
+    if receivers:
+        console.print(f"  Delivered to: [bold]{escape(', '.join(receivers))}[/bold]\n")
+    else:
+        console.print("  [yellow]No receiver: the alert would not be delivered.[/yellow]\n")
+    return 0
+
+
+_TEST_ASSERTIONS = ("expect", "receiver", "receivers", "drop")
+
+
+def _load_test_cases(path):
+    """The cases of a tests file: a top-level list, or a mapping with a 'tests:' list."""
+    doc = _read_yaml(path)
+    cases = doc.get("tests") if isinstance(doc, dict) else doc
+    return cases if isinstance(cases, list) else None
+
+
+def _run_test_case(router, i: int, case) -> dict:
+    if not isinstance(case, dict):
+        return {"name": f"test #{i + 1}", "labels": {}, "passed": False,
+                "error": "test case must be a mapping with labels: and expect:"}
+    name = str(case.get("name") or f"test #{i + 1}")
+    labels = case.get("labels") or {}
+    if not isinstance(labels, dict):
+        return {"name": name, "labels": {}, "passed": False,
+                "error": "labels: must be a mapping of label names to values"}
+    labels = {str(k): _scalar(v) for k, v in labels.items()}
+    if sum(k in case for k in _TEST_ASSERTIONS) != 1:
+        return {"name": name, "labels": labels, "passed": False,
+                "error": "test case must set exactly one of: expect, receiver, receivers, drop"}
+    if "drop" in case and case["drop"] is not True:
+        return {"name": name, "labels": labels, "passed": False,
+                "error": "drop: only accepts true — use expect: to list receivers"}
+
+    matches = router.match(labels)
+    actual = _receivers_of(matches)
+    ordered = False
+    if "expect" in case:
+        raw = case["expect"]
+        expected = [_scalar(r) for r in raw] if isinstance(raw, list) else (
+            [] if raw is None else [_scalar(raw)]
+        )
+    elif "receivers" in case:
+        expected = [_scalar(r) for r in case["receivers"] or []]
+        ordered = True
+    elif "receiver" in case:
+        expected = [_scalar(case["receiver"])]
+    else:
+        expected = []
+
+    missing = list((Counter(expected) - Counter(actual)).elements())
+    unexpected = list((Counter(actual) - Counter(expected)).elements())
+    passed = actual == expected if ordered else not missing and not unexpected
+    return {
+        "name": name, "labels": labels, "passed": passed,
+        "expected": ", ".join(expected) if expected else "(no receiver)",
+        "actual": ", ".join(actual) if actual else "(no receiver)",
+        "missing": missing, "unexpected": unexpected,
+        "routes": [m.path[-1] for m in matches],
+        "order_only": ordered and not passed and not missing and not unexpected,
+    }
+
+
+def _print_test_result(r: dict) -> None:
+    if r["passed"]:
+        console.print(f"  [bold green]✓[/bold green]  {escape(r['name'])}")
+        return
+    console.print(f"  [bold red]✗[/bold red]  {escape(r['name'])}")
+    if "error" in r:
+        console.print(f"     [red]{escape(r['error'])}[/red]")
+    else:
+        console.print(f"     [dim]labels:[/dim]    {escape(_format_labels(r['labels']))}")
+        console.print(f"     [dim]expected:[/dim]  {escape(r['expected'])}")
+        console.print(f"     [dim]actual:[/dim]    {escape(r['actual'])}")
+        for rcv in r["missing"]:
+            console.print(f"       [red]- {escape(rcv)}[/red]  [dim]expected, not delivered[/dim]")
+        for rcv in r["unexpected"]:
+            console.print(
+                f"       [green]+ {escape(rcv)}[/green]  [dim]delivered, not expected[/dim]"
+            )
+        if r["order_only"]:
+            console.print(
+                "       [dim]same receivers, different order (receivers: is "
+                "order-sensitive, expect: is not)[/dim]"
+            )
+        console.print(f"     [dim]routes:[/dim]    {escape(', '.join(r['routes']))}")
+    console.print()
+
+
 def _cmd_test(args) -> int:
-    cfg = load(args.config)
-    route = cfg.get("route")
-    if not route:
-        err_console.print("[red]No root 'route' defined.[/red]")
+    router = _router(load(args.config))
+    if router is None:
         return 2
 
-    tests_doc = _read_yaml(args.tests)  # not an Alertmanager config: validated below
-    cases = tests_doc.get("tests") if isinstance(tests_doc, dict) else None
-    if not isinstance(cases, list):
+    cases = _load_test_cases(args.tests)
+    if cases is None:
         err_console.print(
-            f"[red]Invalid test file:[/red] {args.tests} must have a top-level "
-            f"'tests:' list."
+            f"[red]Invalid test file:[/red] {args.tests} must be a list of test cases, "
+            f"or have a top-level 'tests:' list."
         )
         return 2
 
-    results = []
-    for i, case in enumerate(cases):
-        name = case.get("name") or f"test #{i + 1}"
-        labels = case.get("labels") or {}
-        keys_set = sum(k in case for k in ("receiver", "receivers", "drop"))
-        if keys_set != 1:
-            results.append({
-                "name": name, "labels": labels, "passed": False,
-                "error": "test case must set exactly one of: receiver, receivers, drop",
-            })
-            continue
-
-        actual = [r for r, _ in simulate_route(route, labels)]
-
-        if case.get("drop"):
-            expected_desc = "(no receiver)"
-            passed = len(actual) == 0
-        elif "receiver" in case:
-            expected_desc = case["receiver"]
-            passed = actual == [case["receiver"]]
-        else:
-            expected_list = list(case["receivers"])
-            expected_desc = ", ".join(expected_list)
-            passed = actual == expected_list
-
-        results.append({
-            "name": name, "labels": labels, "passed": passed,
-            "expected": expected_desc,
-            "actual": ", ".join(actual) if actual else "(no receiver)",
-        })
+    results = [_run_test_case(router, i, case) for i, case in enumerate(cases)]
 
     if args.format == "json":
         print(json.dumps(results, ensure_ascii=False, indent=2))
     else:
         console.print()
         for r in results:
-            if r["passed"]:
-                console.print(f"  [bold green]✓[/bold green]  {r['name']}")
-            else:
-                console.print(f"  [bold red]✗[/bold red]  {r['name']}")
-                if "error" in r:
-                    console.print(f"     [red]{r['error']}[/red]")
-                else:
-                    label_str = ", ".join(f"{k}={v}" for k, v in r["labels"].items())
-                    console.print(f"     expected: {r['expected']}")
-                    console.print(f"     actual:   {r['actual']}")
-                    if label_str:
-                        console.print(f"     labels:   {label_str}")
-                console.print()
+            _print_test_result(r)
         passed_n = sum(1 for r in results if r["passed"])
         failed_n = len(results) - passed_n
         console.print(Rule(style="dim"))
@@ -685,9 +823,15 @@ def main(argv=None):
     pt.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes when annotating the tree")
 
-    ptst = sub.add_parser("test", help="run routing simulation tests against a config")
+    pr = sub.add_parser("route", help="show which route(s) and receiver(s) a label set reaches")
+    pr.add_argument("config", help="path to alertmanager.yml, or - for stdin")
+    pr.add_argument("labels", nargs="*", metavar="label=value",
+                    help="alert labels, e.g. severity=critical team=infra")
+    pr.add_argument("--format", choices=["text", "json"], default="text")
+
+    ptst = sub.add_parser("test", help="run routing unit tests against a config")
     ptst.add_argument("config", help="path to alertmanager.yml")
-    ptst.add_argument("tests", help="path to a YAML file with a top-level 'tests:' list")
+    ptst.add_argument("tests", help="path to a YAML file with a list of test cases")
     ptst.add_argument("--format", choices=["text", "json"], default="text")
 
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
@@ -707,6 +851,8 @@ def main(argv=None):
         return _cmd_diff(args)
     if args.cmd == "tree":
         return _cmd_tree(args)
+    if args.cmd == "route":
+        return _cmd_route(args)
     if args.cmd == "test":
         return _cmd_test(args)
     if args.cmd == "init":

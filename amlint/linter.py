@@ -226,20 +226,43 @@ _GO_FLAGS_RE = re.compile(r"\(\?([a-zA-Z-]*)([:)])")
 _REPEAT_RE = re.compile(r"\{(\d+)(?:,(\d*))?\}")
 _MAX_REPEAT = 1000  # RE2 rejects larger repeat counts
 
+# Exact equivalents of RE2's ASCII-only Perl classes and POSIX classes, for matching.
+_PERL_CLASSES = {"d": "0-9", "w": "0-9A-Za-z_", "s": "\\t\\n\\f\\r "}
+_POSIX_CLASSES = {
+    "alnum": "0-9A-Za-z", "alpha": "A-Za-z", "ascii": "\\x00-\\x7f", "blank": "\\t ",
+    "cntrl": "\\x00-\\x1f\\x7f", "digit": "0-9", "graph": "!-~", "lower": "a-z",
+    "print": " -~", "punct": "!-/:-@\\[-`{-~", "space": "\\t\\n\\v\\f\\r ", "upper": "A-Z",
+    "word": "0-9A-Za-z_", "xdigit": "0-9A-Fa-f",
+}
 
-def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
+
+def _python_flags(go_flags: str) -> str:
+    """Go inline flags (imsU, optionally with -) as Python ones. U only swaps greedy
+    and lazy, which never changes whether a full-string match exists, so it is dropped."""
+    on, _, off = go_flags.replace("U", "").partition("-")
+    return on + ("-" + off if off else "")
+
+
+def _go_regex_to_python(pattern: str, exact: bool = False) -> Tuple[str, str]:
     """
-    Translate a Go RE2 pattern into Python `re` syntax for a compile check.
+    Translate a Go RE2 pattern into Python `re` syntax.
 
     Returns (python_pattern, unsupported). `unsupported` names the first construct
     Python accepts but RE2 rejects (lookarounds, backreferences, ...), or "" if none.
-    Go-only syntax (\\pL, \\z, \\x{..}, \\Q..\\E, [:alpha:], (?<name>), (?U)) is swapped
-    for an equivalent Python stand-in: the result is only compiled, never matched.
+
+    By default the result is only meant to be compiled: Go-only syntax (\\pL, \\z, \\x{..},
+    \\Q..\\E, [:alpha:], (?<name>), (?U)) is swapped for a Python stand-in and flags are
+    dropped. With exact=True the result matches what Go matches: flags are kept as scoped
+    groups, \\d \\w \\s and POSIX classes stay ASCII-only as in RE2, and constructs with
+    no exact Python equivalent (\\pL, [:^alpha:]) are reported in `unsupported`.
     """
     out: List[str] = []
     i, n = 0, len(pattern)
     in_class = False
     after_quantifier = False
+    # Python only allows flags at the very start, Go anywhere: a mid-pattern (?i) becomes
+    # (?i: ... ) closed at the end of its group, one entry per open scope per group level.
+    flag_scopes: List[List[str]] = [[]]
     while i < n:
         ch = pattern[i]
         nxt = pattern[i + 1:i + 2]
@@ -247,6 +270,8 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
 
         if ch == "\\" and nxt:
             if nxt in "pP":
+                if exact:
+                    return "", "Unicode character classes (\\p{...})"
                 end = pattern.find("}", i) + 1 if pattern[i + 2:i + 3] == "{" else i + 3
                 out.append("\\w")
                 i = end if end > 0 else n
@@ -270,6 +295,15 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
                 i += 1 + len(octal.group(0))
             elif nxt in "ZuUN":
                 return "", "the \\%s escape" % nxt
+            elif exact and nxt.lower() in _PERL_CLASSES:
+                chars = _PERL_CLASSES[nxt.lower()]
+                if not in_class:
+                    out.append(("[^%s]" if nxt.isupper() else "[%s]") % chars)
+                elif nxt.islower():
+                    out.append(chars)
+                else:
+                    return "", "negated classes (\\%s) inside [...]" % nxt
+                i += 2
             else:
                 out.append("\\Z" if nxt == "z" else "\\" + nxt)
                 i += 2
@@ -280,7 +314,13 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
             if ch == "[" and nxt == ":":
                 end = pattern.find(":]", i + 2)
                 if end >= 0:
-                    out.append("\\w")
+                    if exact:
+                        name = pattern[i + 2:end]
+                        if name not in _POSIX_CLASSES:
+                            return "", "the [:%s:] class" % name
+                        out.append(_POSIX_CLASSES[name])
+                    else:
+                        out.append("\\w")
                     i = end + 2
                     continue
             if ch == "]":
@@ -316,6 +356,7 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
             if ext[:1] == "<" or ext == "P<":
                 # named group: Go accepts (?<name>) and (?P<name>), Python only the latter
                 out.append("(?P<")
+                flag_scopes.append([])
                 i += 3 if ext[:1] == "<" else 4
                 continue
             flags = _GO_FLAGS_RE.match(pattern, i)
@@ -323,13 +364,29 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
                 bad = sorted(set(flags.group(1)) - set("imsU-"))
                 if bad:
                     return "", "the (?%s) flag" % "".join(bad)
-                # Flags never change whether a pattern compiles; drop them (Python lacks U
-                # and rejects global flags mid-pattern, Go allows both).
-                out.append("(?:" if flags.group(2) == ":" else "")
+                py_flags = _python_flags(flags.group(1)) if exact else ""
+                if flags.group(2) == ":":
+                    out.append("(?%s:" % py_flags)
+                    flag_scopes.append([])
+                elif py_flags:
+                    out.append("(?%s:" % py_flags)
+                    flag_scopes[-1].append("(?%s:" % py_flags)
+                # Without exact, flags are dropped: they never change whether a pattern
+                # compiles (Python lacks U and rejects global flags mid-pattern, Go allows both).
                 i = flags.end()
                 continue
 
-        if ch in "*+?":
+        if ch == "(":
+            flag_scopes.append([])
+        elif ch == ")" and len(flag_scopes) > 1:
+            out.append(")" * len(flag_scopes.pop()))
+        elif ch == "|":
+            # a flag scope must not swallow the alternation: a(?i)b|c is a(?i:b)|(?i:c)
+            out.append(")" * len(flag_scopes[-1]) + "|" + "".join(flag_scopes[-1]))
+            i += 1
+            after_quantifier = False
+            continue
+        elif ch in "*+?":
             if ch == "+" and after_quantifier:
                 return "", "possessive quantifiers (*+, ++, ?+)"
             # `?` right after a quantifier makes it lazy, which ends the quantifier
@@ -343,11 +400,17 @@ def _go_regex_to_python(pattern: str) -> Tuple[str, str]:
                 i = rep.end()
                 after_quantifier = True
                 continue
+            if exact:
+                # Go reads a { that starts no valid repeat as a literal; Python may not ({,3})
+                out.append("\\{")
+                i += 1
+                continue
 
         out.append(ch)
         after_quantifier = quantifier
         i += 1
 
+    out.append(")" * len(flag_scopes[0]))
     return "".join(out), ""
 
 

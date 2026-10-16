@@ -20,6 +20,22 @@
   (also caught by `amtool check-config`, marked so in `amlint list`)
 - Warning on stderr for unknown check codes in `--ignore`, `--only` and `severity:`, with a
   "did you mean" suggestion
+- `amlint route <config> label=value ...` — simulate routing for one label set: prints the
+  matched route path(s), the receiver(s), and the effective `group_by`, `group_wait`,
+  `group_interval`, `repeat_interval` (and time intervals) with the route each value comes
+  from; `--format json`
+- `amlint test`: a tests file can now be a plain list of cases, and `expect: [a, b]` asserts
+  the receivers in any order. A failing case shows which receivers are missing or unexpected
+  and which routes matched; JSON output adds `missing`, `unexpected` and `routes`
+
+### Changed
+- Routing simulation (`route`, `test`) moved to `amlint/routing.py`, replacing
+  `amlint/simulate.py`, and now mirrors Alertmanager's `dispatch/route.go` more closely:
+  `group_by` and timings are inherited, `group_by: []` resets grouping, `group_by: ['...']`
+  groups by every label, time intervals are not inherited
+- `amlint test` exits 2 when the config can't be simulated (a regex RE2 rejects, an
+  unparseable matcher, a malformed duration, matchers on the root route, a `\pL`-style
+  Unicode class) instead of guessing
 
 ### Changed
 - `empty-receiver` and `unused-receiver` report `where` as `receivers[<name>]` instead of
@@ -29,11 +45,14 @@
 - `amlint diff --format json` includes `line` and `column` for each finding.
 
 ### Fixed
-- `amlint test` (simulate.py) now matches the way Alertmanager does: regexes are anchored
-  (`severity=~"crit"` no longer matches `critical`), quoted values with escapes and
-  multi-matcher strings (`{a="1", b="2"}`) go through the linter's matcher parser, an
-  unparseable matcher no longer turns a route into a catch-all, and a missing label
-  compares as the empty string
+- `amlint test` matches labels the way Alertmanager does: regexes are fully anchored like
+  Alertmanager's `^(?:pattern)$` (`severity=~"crit"` no longer matches `critical` — suites
+  relying on the old substring match will now fail, which is what Alertmanager does too),
+  quoted values with escapes and multi-matcher strings (`{a="1", b="2"}`) go through the
+  linter's matcher parser, a missing label compares as the empty string, and numeric label
+  values (`code: 500`) compare as strings
+- `amlint test` evaluates regexes with Go RE2 semantics: `(?i)` flags apply, `\d` / `\w` /
+  `\s` are ASCII-only, POSIX classes (`[[:alpha:]]`) work
 - `amlint diff` text output dropped the `[code]` of each finding (Rich read it as markup)
 - Inhibition checks (`inhibit-no-equal`, `inhibit-same-match`, `circular-inhibition`) now read
   `source_matchers` / `target_matchers`; previously only `source_match` / `target_match` were seen
