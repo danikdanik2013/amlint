@@ -269,6 +269,7 @@ amlint for everything after "is it valid?".
 
 - [Documentation](https://danikdanik2013.github.io/amlint/)
 - [Playground](https://danikdanik2013.github.io/amlint/playground/)
-- [Changelog](https://github.com/danikdanik2013/amlint/blob/main/CHANGELOG.md)
+- [Changelog](https://github.com/danikdanik2013/amlint/blob/main/CHANGELOG.md) and
+  [roadmap](https://github.com/danikdanik2013/amlint/blob/main/ROADMAP.md)
 - [Contributing](https://github.com/danikdanik2013/amlint/blob/main/CONTRIBUTING.md), including how to run the tests
 - License: MIT

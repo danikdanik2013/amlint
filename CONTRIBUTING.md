@@ -3,7 +3,8 @@
 This is the short version: set up, run the tests, open a pull request. The full guide, with
 how to add a check, the tests against the real Alertmanager and the browser playground, is
 [docs/contributing.md](docs/contributing.md), also on the
-[docs site](https://danikdanik2013.github.io/amlint/contributing/).
+[docs site](https://danikdanik2013.github.io/amlint/contributing/). Looking for something to
+work on? See [ROADMAP.md](ROADMAP.md).
 
 ## Set up
 
