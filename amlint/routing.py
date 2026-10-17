@@ -270,6 +270,14 @@ class Router:
         """Every route's path, depth-first in definition order, the root first."""
         return [route.path for _, route in self._paths()]
 
+    def opts(self, path: str) -> Optional[RouteOpts]:
+        """Settings of the route at `path` (as paths() names it) after inheritance, the
+        ones an alert that ends there gets; None if the tree has no such route."""
+        for _, route in self._paths():
+            if route.path == path:
+                return route.opts
+        return None
+
     def match_partial(self, labels: Mapping[str, object],
                       unknown: Iterable[str]) -> Optional[List[RouteMatch]]:
         """match() for an alert known only in part: the labels named in `unknown` may have

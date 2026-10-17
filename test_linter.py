@@ -493,6 +493,19 @@ def test_amtool_classification_matches_known_codes():
     assert len(ALSO_CAUGHT_BY_AMTOOL) < len(EXPLAINS)
 
 
+def test_every_check_links_to_its_docs_section():
+    """docs_url (the link editors show next to a finding) needs DOCS_PAGE to name the
+    docs/checks page whose `## <code>` section documents the check."""
+    from amlint.explains import DOCS_PAGE, EXPLAINS, docs_url
+    assert set(DOCS_PAGE) == set(EXPLAINS)
+    docs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docs", "checks")
+    for code, page in DOCS_PAGE.items():
+        with open(os.path.join(docs, f"{page}.md")) as f:
+            assert re.search(rf"^## {re.escape(code)}$", f.read(), re.M), (code, page)
+        assert docs_url(code) == f"https://danikdanik2013.github.io/amlint/checks/{page}/#{code}"
+    assert docs_url("not-a-check") == "https://danikdanik2013.github.io/amlint/checks/"
+
+
 def test_msteams_with_webhook_url_ok():
     cfg = {
         "route": {"receiver": "a"},
@@ -1100,6 +1113,21 @@ def test_route_inherits_receiver_grouping_and_timings():
         "receiver": "route.routes[0]", "group_by": "route", "group_interval": "route",
         "group_wait": "route.routes[0]", "repeat_interval": leaf,
     }
+
+
+def test_router_opts_are_those_of_a_match_ending_there():
+    from amlint.routing import Router
+    route = {
+        "receiver": "default", "group_by": ["alertname"],
+        "routes": [{"match": {"team": "infra"}, "receiver": "infra", "group_wait": "10s",
+                    "routes": [{"match": {"severity": "critical"}}]}],
+    }
+    router = Router(route)
+    for labels in ({}, {"team": "infra"}, {"team": "infra", "severity": "critical"}):
+        [m] = router.match(labels)
+        assert router.opts(m.path[-1]) == m.opts
+    assert router.opts("route.routes[0]").origin["group_wait"] == "route.routes[0]"
+    assert router.opts("route.routes[1]") is None
 
 
 def test_route_defaults_when_nothing_set():
