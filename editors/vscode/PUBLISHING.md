@@ -5,14 +5,13 @@ the `.vsix` and keeps it as a workflow artifact. These are the steps for a maint
 
 ## Before the first release
 
-1. Release amlint with `amlint lsp` to PyPI first. The extension starts `amlint lsp`, and its
-   README and error message say "amlint 0.6.0 or newer". If that release gets another
-   version number, update both.
-2. Create the publisher `danikdanik2013` at https://marketplace.visualstudio.com/manage,
-   signed in with a Microsoft account. If you pick another publisher ID, change `publisher`
-   in `package.json`.
-3. Create a personal access token in Azure DevOps (https://dev.azure.com, User settings →
-   Personal access tokens): organization **All accessible organizations**, scope
+1. amlint 0.6.0, the first release with `amlint lsp`, is on PyPI. The extension's README
+   and error message ask for it.
+2. The publisher is `dpyly`: https://marketplace.visualstudio.com/manage/publishers/dpyly.
+   `publisher` in `package.json` must match it, or the Marketplace rejects the package.
+3. Only for publishing from the command line or CI, not for an upload by hand: create a
+   personal access token in Azure DevOps (https://dev.azure.com, User settings → Personal
+   access tokens): organization **All accessible organizations**, scope
    **Marketplace → Manage**.
 4. Optional: add a 128×128 PNG as `icon.png` and `"icon": "icon.png"` in `package.json`.
    The Marketplace shows a placeholder without one.
@@ -32,7 +31,7 @@ the `.vsix` and keeps it as a workflow artifact. These are the steps for a maint
 3. Publish that file, with the token from step 3 above:
 
    ```bash
-   npx vsce login danikdanik2013                          # once; asks for the token
+   npx vsce login dpyly                                   # once; asks for the token
    npx vsce publish --packagePath amlint-<version>.vsix
    ```
 
