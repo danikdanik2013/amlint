@@ -1,0 +1,97 @@
+{
+  "name": "amlint",
+  "displayName": "amlint: Alertmanager config linter",
+  "description": "Finds misrouted, unreachable and over-inhibited alerts in Prometheus Alertmanager configs as you type, and shows on hover where each route sends alerts.",
+  "version": "0.1.0",
+  "publisher": "danikdanik2013",
+  "license": "MIT",
+  "homepage": "https://danikdanik2013.github.io/amlint/editors/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danikdanik2013/amlint.git",
+    "directory": "editors/vscode"
+  },
+  "bugs": {
+    "url": "https://github.com/danikdanik2013/amlint/issues"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Linters"
+  ],
+  "keywords": [
+    "alertmanager",
+    "prometheus",
+    "alerting",
+    "yaml",
+    "lint",
+    "kubernetes",
+    "sre"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml"
+  ],
+  "main": "./out/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In an untrusted workspace, amlint.path is read only from your user settings.",
+      "restrictedConfigurations": [
+        "amlint.path"
+      ]
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "configuration": {
+      "title": "amlint",
+      "properties": {
+        "amlint.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Lint Alertmanager configs with amlint."
+        },
+        "amlint.path": {
+          "type": "string",
+          "default": "amlint",
+          "markdownDescription": "The `amlint` executable to run as `amlint lsp`. A name is looked up on `PATH`. `~` and `${workspaceFolder}` are expanded, for example `${workspaceFolder}/.venv/bin/amlint`."
+        },
+        "amlint.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Log the messages between VS Code and amlint to the amlint output channel."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "amlint.restart",
+        "title": "Restart Server",
+        "category": "amlint"
+      }
+    ]
+  },
+  "scripts": {
+    "check": "tsc -p ./ --noEmit",
+    "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --minify --sourcemap --outfile=out/extension.js",
+    "compile": "npm run check && npm run bundle",
+    "package": "vsce package --no-dependencies",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/vscode": "1.91.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  }
+}

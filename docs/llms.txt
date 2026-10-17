@@ -26,6 +26,7 @@ amlint tree alertmanager.yml                          # print the route tree
 amlint tree alertmanager.yml --format mermaid         # the route tree as a Mermaid flowchart
 amlint explain <check-code>                           # what a finding means and how to fix it
 amlint list                                           # all check codes
+amlint lsp                                            # language server; editors start it
 ```
 
 Output formats: text (default), `--format json`, `--format sarif` (GitHub Code Scanning), `--format github` (workflow annotations); `amlint diff --format markdown` for PR comments (with a Mermaid diagram of changed routes); `amlint tree --format mermaid` for a diagram of the whole tree. GitHub Action: `uses: danikdanik2013/amlint@v0.5.0`. Docker: `ghcr.io/danikdanik2013/amlint`. pre-commit hook id: `amlint`. A browser playground runs it client-side with no install: https://danikdanik2013.github.io/amlint/playground/. Claude Code plugin: `/plugin marketplace add danikdanik2013/amlint`, then `/plugin install amlint@amlint`.
@@ -35,6 +36,7 @@ Output formats: text (default), `--format json`, `--format sarif` (GitHub Code S
 - [Overview](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/index.md): what amlint is, what it catches, and how it compares to amtool
 - [Install](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/install.md): pip, Docker, Homebrew, pre-commit, shell completions
 - [Usage](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/usage.md): every command and flag (check, route, test, diff, tree, explain, list, init), project config and inline suppressions
+- [Editors](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/editors.md): findings as you type and hover on routes in VS Code, Neovim and Helix, via `amlint lsp`
 - [Kubernetes, Helm and Mimir](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/kubernetes.md): the input formats amlint detects and how AlertmanagerConfig resources are merged
 - [GitHub Action](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/github-action.md): inputs, PR annotations, SARIF and the routing-diff PR comment
 

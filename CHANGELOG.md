@@ -3,6 +3,15 @@
 ## [Unreleased]
 
 ### Added
+- `amlint lsp`, a language server for editors. It shows amlint's findings as you type, on
+  the lines `amlint check` reports, and links each check code to its docs. Hover on a route
+  shows its matchers, receiver, `group_by` and timings with where each comes from, and an
+  example alert that ends there. A quick fix adds an `# amlint: disable=` comment. It reads
+  every format `check` reads, uses `ignore` and `severity` from the project config, and stays
+  quiet on YAML files that aren't Alertmanager configs. No new dependencies. Setup for VS
+  Code, Neovim and Helix: https://danikdanik2013.github.io/amlint/editors/
+- A VS Code extension in `editors/vscode` that runs `amlint lsp`. It isn't on the Marketplace
+  yet: build it with `npm run package` there and install the `.vsix`.
 - `amlint tree --format mermaid` prints the route tree as a Mermaid flowchart, which GitHub,
   GitLab and MkDocs draw in Markdown. Each node shows its matchers, receiver and `continue`;
   routes with an error are red and routes with a warning yellow, with the check codes on

@@ -34,6 +34,7 @@ nav:
   - Home: index.md
   - Install: install.md
   - Usage: usage.md
+  - Editors: editors.md
   - Kubernetes & Mimir: kubernetes.md
   - Playground: playground/index.md
   - GitHub Action: github-action.md

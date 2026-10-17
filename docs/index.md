@@ -47,6 +47,7 @@ fix a finding, run `amlint explain <check>`, for example `amlint explain unreach
 | Catch routes for alerts that don't exist | `amlint check … --rules 'rules/*.yml'` | [Prometheus rules](checks/rules.md) |
 | Lint a Secret, Helm values or Mimir config | `amlint check alertmanager-secret.yaml` | [Kubernetes & Mimir](kubernetes.md) |
 | Get findings and a routing diff on every PR | the GitHub Action | [GitHub Action](github-action.md) |
+| See findings in your editor as you type | `amlint lsp`, started by the editor | [Editors](editors.md) |
 
 ## What it catches
 

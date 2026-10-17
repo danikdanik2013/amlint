@@ -21,7 +21,7 @@ CI runs these on Python 3.9 to 3.15:
 
 ```bash
 ruff check amlint/
-pytest test_linter.py test_formats.py -v
+pytest test_linter.py test_formats.py test_lsp.py -v
 ```
 
 - `test_linter.py` covers the checks and the CLI.
@@ -68,7 +68,9 @@ ALL_CHECKS = [
 **3. Explain it.** Add an entry for `your-rule-code` to `EXPLAINS` in
 [`amlint/explains.py`](https://github.com/danikdanik2013/amlint/blob/main/amlint/explains.py),
 with `level`, `summary`, `why`, `bad` and `good`. `amlint list` and `amlint explain` read it,
-and `--ignore` warns about codes that aren't there.
+and `--ignore` warns about codes that aren't there. Also add the code to `_DOCS_PAGES` in
+the same file, under the docs page you document it on (step 5): editors link each finding
+to that section.
 
 If Alertmanager refuses to load a config that your check flags, also add the code to
 `ALSO_CAUGHT_BY_AMTOOL` in the same file. The
@@ -103,7 +105,7 @@ section by that heading.
 
 - One check or one fix per pull request is easiest to review.
 - Include a test that fails without your change and passes with it.
-- `ruff check amlint/` and `pytest test_linter.py test_formats.py` pass.
+- `ruff check amlint/` and `pytest test_linter.py test_formats.py test_lsp.py` pass.
 - For a new check, add its docs (step 5 above).
 - Add a line to `CHANGELOG.md` under `## [Unreleased]`.
 - If you changed the docs, `mkdocs build --strict` passes (`pip install mkdocs-material`).

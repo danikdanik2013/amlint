@@ -32,6 +32,39 @@ ALSO_CAUGHT_BY_AMTOOL = {
     "sns-no-target",
 }
 
+# The docs page (docs/checks/<page>.md) with a section for each check, headed by its code.
+_DOCS_PAGES = {
+    "routing": (
+        "no-root-route", "invalid-root-route", "undefined-receiver", "groupby-ellipsis",
+        "bad-regex", "bad-matcher", "bad-match-label", "unreachable-route",
+        "route-match-collision", "shadowed-route", "stripped-brace", "useless-continue",
+        "deep-nesting",
+    ),
+    "receivers": (
+        "duplicate-receiver", "empty-receiver", "unused-receiver", "template-file-missing",
+        "email-no-smarthost", "webhook-no-url", "pagerduty-no-routing-key", "slack-no-api-url",
+        "opsgenie-no-api-key", "msteams-no-webhook-url", "telegram-no-bot-token",
+        "discord-no-webhook-url", "victorops-no-api-key", "wechat-no-corp-id", "sns-no-target",
+    ),
+    "inhibition": ("inhibit-no-equal", "circular-inhibition", "inhibit-same-match"),
+    "timing": (
+        "repeat-before-group", "wait-exceeds-interval", "undefined-time-interval",
+        "global-resolve-timeout-missing",
+    ),
+    "rules": (
+        "route-unknown-alertname", "inhibit-unknown-alertname", "alert-hits-default-receiver",
+    ),
+}
+DOCS_PAGE = {code: page for page, codes in _DOCS_PAGES.items() for code in codes}
+DOCS_BASE = "https://danikdanik2013.github.io/amlint/checks/"
+
+
+def docs_url(code: str) -> str:
+    """The check's section on the docs site, or the list of all checks."""
+    page = DOCS_PAGE.get(code)
+    return f"{DOCS_BASE}{page}/#{code}" if page else DOCS_BASE
+
+
 EXPLAINS = {
     "undefined-receiver": {
         "level": "error",

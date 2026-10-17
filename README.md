@@ -110,6 +110,7 @@ assistants can read [llms.txt](https://danikdanik2013.github.io/amlint/llms.txt)
 | Lint what you deploy to Kubernetes | `amlint check alertmanager-secret.yaml` or `kubectl kustomize deploy/ \| amlint check -` |
 | Learn what a check means and how to fix it | `amlint explain shadowed-route` |
 | See every check | `amlint list` |
+| See findings in VS Code, Neovim or Helix as you type | `amlint lsp`, started by the editor ([setup](https://danikdanik2013.github.io/amlint/editors/)) |
 
 Full guide: [usage docs](https://danikdanik2013.github.io/amlint/usage/).
 

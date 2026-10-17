@@ -1215,6 +1215,11 @@ def main(argv=None):
     pe = sub.add_parser("explain", help="show description and examples for a check code")
     pe.add_argument("code", help="check code to explain, e.g. undefined-receiver")
 
+    sub.add_parser("lsp", help="run a language server over stdio, for editors such as VS Code",
+                   description="Language Server Protocol server over stdin/stdout. Your "
+                               "editor starts it; it shows findings as you type and what a "
+                               "route does on hover.")
+
     if _ARGCOMPLETE:
         argcomplete.autocomplete(p)
 
@@ -1235,6 +1240,9 @@ def main(argv=None):
         return _cmd_list()
     if args.cmd == "explain":
         return _cmd_explain(args)
+    if args.cmd == "lsp":
+        from .lsp import main as lsp_main
+        lsp_main()  # ends the process
 
 
 if __name__ == "__main__":

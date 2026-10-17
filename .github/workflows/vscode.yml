@@ -1,0 +1,43 @@
+name: VS Code extension
+
+# Builds the extension in editors/vscode into a .vsix and keeps it as a workflow artifact.
+# It does not publish to the Marketplace: see editors/vscode/PUBLISHING.md.
+
+on:
+  push:
+    branches: [main]
+    paths: ["editors/vscode/**", ".github/workflows/vscode.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["editors/vscode/**", ".github/workflows/vscode.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check, bundle and package
+        run: npm run package
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: amlint-vscode
+          path: editors/vscode/*.vsix
+          if-no-files-found: error
