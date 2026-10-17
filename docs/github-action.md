@@ -48,7 +48,8 @@ findings; add `strict: true` to fail on WARN findings too.
 Set `diff-base` to the pull request's base commit. The action then compares your config with
 its version at that commit, using
 [`amlint diff --format markdown`](usage.md#markdown-report), and posts the result as one PR
-comment. Each push updates the same comment.
+comment. Each push updates the same comment. When routes changed, the comment includes a
+diagram of them.
 
 ```yaml
 # .github/workflows/alertmanager.yml

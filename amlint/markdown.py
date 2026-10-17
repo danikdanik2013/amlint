@@ -76,9 +76,11 @@ def _finding_rows(path: str, findings) -> List[List[str]]:
 
 
 def diff_report(old: str, new: str, added, fixed, unchanged: int,
-                rdiff=None, skipped: Optional[str] = None, routing: bool = True) -> str:
-    """The report: a summary line, routing changes, then new and fixed findings.
-    `old` / `new` are the file names shown in finding locations."""
+                rdiff=None, skipped: Optional[str] = None, routing: bool = True,
+                tree: Optional[str] = None) -> str:
+    """The report: a summary line, routing changes, the diagram of changed routes, then new
+    and fixed findings. `old` / `new` are the file names shown in finding locations, and
+    `tree` is the Mermaid source from `mermaid.changed_routes` (already escaped)."""
     summary = []
     if routing and rdiff is not None:
         n = len(rdiff.changes)
@@ -106,6 +108,11 @@ def diff_report(old: str, new: str, added, fixed, unchanged: int,
             out += ["#### Grouping and timings", ""]
             out += _table(["labels", "receiver", "setting", "before", "after"], settings,
                           "changed settings")
+    if routing and tree:
+        out += ["#### Changed routes", "",
+                "Green: added · yellow: changed · red, dashed: removed · grey: unchanged "
+                "routes, folded.", "",
+                "```mermaid", tree.rstrip("\n"), "```", ""]
     header = ["level", "check", "location", "message"]
     if added:
         out += ["#### New findings", ""]
