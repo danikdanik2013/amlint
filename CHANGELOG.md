@@ -1,6 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.5.0] - 2026-10-17
+
+Highlights:
+
+- **Reads the config the way you deploy it.** That covers Kubernetes Secrets and
+  ConfigMaps, kube-prometheus-stack values, Mimir/Cortex tenant configs, and
+  prometheus-operator `AlertmanagerConfig` resources merged like the operator does it.
+- **Browser playground.** Lint, route and diff a config without installing anything. The
+  config never leaves the page.
+- **Checked against real Alertmanager.** CI compares routing, inhibition and rejected configs
+  with Alertmanager 0.32.2, 0.33.1 and 0.34.1 on thousands of generated cases.
+- **New checks:** `shadowed-route` (it understands regex and negative matchers),
+  `bad-matcher`, `stripped-brace` and `bad-match-label`.
+- **Plainer docs and messages, and support for AI tools.** Docs and finding messages are
+  rewritten to say what actually goes wrong. There is `llms.txt` for AI assistants and a
+  Claude Code plugin.
 
 ### Added
 - A Claude Code plugin. Run `/plugin marketplace add danikdanik2013/amlint` and then
