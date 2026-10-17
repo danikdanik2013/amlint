@@ -34,6 +34,7 @@ newer syntax or add dependencies casually.
 | `playground/`, `docs/playground/` | browser playground (Pyodide) |
 | `docs/llms.txt`, `scripts/build_llms_full.py` | summary for AI assistants; `llms-full.txt` is generated in the docs workflow |
 | `editors/vscode/` | VS Code extension (TypeScript) that starts `amlint lsp`; `PUBLISHING.md` for the Marketplace |
+| `Formula/amlint.rb`, `scripts/bump_formula.py` | the Homebrew formula (this repository is the tap); the release workflow points it at each new sdist |
 | `.claude-plugin/`, `plugins/amlint/` | Claude Code marketplace and plugin; the skill that teaches Claude to use amlint |
 
 ## Commands
@@ -63,4 +64,7 @@ scripts/differential.sh                     # optional: compare with real Alertm
   and how to fix it. Every example must be true for the current CLI.
 - **Releases.** Bump `version` in `pyproject.toml`, move `[Unreleased]` to the new version
   in CHANGELOG.md, and push a `vX.Y.Z` tag. CI then publishes to PyPI and the Docker image,
-  and creates the GitHub release. After the release is on PyPI, update `Formula/amlint.rb`.
+  creates the GitHub release, and commits "Homebrew: amlint X.Y.Z" to main, which points
+  `Formula/amlint.rb` at the new sdist (`scripts/bump_formula.py`). That job fails when the
+  runtime dependencies in `pyproject.toml` changed: then refresh the formula's `resource`
+  blocks and its `# dependencies:` comment by hand.

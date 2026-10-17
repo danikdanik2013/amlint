@@ -6,6 +6,12 @@
 - The VS Code extension is on the Marketplace as [`dpyly.amlint`](https://marketplace.visualstudio.com/items?itemName=dpyly.amlint). Install it
   with `code --install-extension dpyly.amlint`; it needs amlint 0.6.0 or newer.
 
+### Changed
+- Pushing a `vX.Y.Z` tag now also updates the Homebrew formula: once the sdist is on PyPI,
+  the release workflow points `Formula/amlint.rb` at it and commits that to main, or opens
+  a PR if main is protected. It stops when the runtime dependencies changed, because the
+  formula's resource blocks then need a manual refresh.
+
 ## [0.6.0] - 2026-10-17
 
 Highlights:

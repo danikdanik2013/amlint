@@ -10,6 +10,11 @@ class Amlint < Formula
   depends_on "libyaml"
   depends_on "python@3.12"
 
+  # The release workflow updates url and sha256 above (scripts/bump_formula.py), never the
+  # resources. They are made for these runtime dependencies in pyproject.toml; when those
+  # change, the workflow stops until the resources and this line are updated by hand.
+  # dependencies: pyyaml>=5.1, rich>=13
+
   resource "markdown-it-py" do
     url "https://files.pythonhosted.org/packages/06/ff/7841249c247aa650a76b9ee4bbaeae59370dc8bfd2f6c01f3630c35eb134/markdown_it_py-4.2.0.tar.gz"
     sha256 "04a21681d6fbb623de53f6f364d352309d4094dd4194040a10fd51833e418d49"
