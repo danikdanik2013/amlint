@@ -35,6 +35,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.tree import Tree
 
+from . import mermaid
 from .config import load_project_config
 from .formats import FORMATS, MATCHER_STRATEGIES, FormatError, apply_locations, load_input
 from .goyaml import AlertmanagerLoader
@@ -414,6 +415,10 @@ def _cmd_tree(args) -> int:
     if not isinstance(route, dict):
         err_console.print("[red]No root 'route' defined.[/red]")
         return 2
+
+    if args.format == "mermaid":
+        print(mermaid.route_tree(route, findings), end="")
+        return 0
 
     by_path: dict = {}
     for f in findings:
@@ -994,8 +999,10 @@ def _cmd_diff(args):
         return 1 if added else 0
 
     if args.format == "markdown":
+        tree = None if args.no_routing else mermaid.changed_routes(old_cfg.get("route"),
+                                                                   new_cfg.get("route"))
         print(diff_report(_display(args.old), _display(args.new), added, fixed, unchanged,
-                          rdiff, skipped, routing=not args.no_routing), end="")
+                          rdiff, skipped, routing=not args.no_routing, tree=tree), end="")
         return 1 if added else 0
 
     if not added and not fixed:
@@ -1177,6 +1184,8 @@ def main(argv=None):
     pt.add_argument("file", help="path to alertmanager.yml, or - for stdin")
     pt.add_argument("--ignore", action="append", metavar="CODE",
                     help="skip findings with these codes when annotating the tree")
+    pt.add_argument("--format", choices=["text", "mermaid"], default="text",
+                    help="mermaid prints a Mermaid flowchart, which GitHub renders in Markdown")
 
     pr = sub.add_parser("route", parents=[inputs],
                         help="show which route(s) and receiver(s) a label set reaches")

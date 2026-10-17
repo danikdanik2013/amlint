@@ -3808,7 +3808,9 @@ def test_cli_diff_markdown_changed_routes(tmp_path):
            "| `alertname, cluster` |" in out
     assert "| `team=infra` (+1 similar) | `infra-slack` | `group_wait` | `30s` | `10s` |" in out
     assert "findings" not in out.split("\n", 3)[3]  # no findings sections
-    assert out.endswith("|\n") and not out.endswith("\n\n")
+    assert "#### Changed routes\n" in out
+    assert "<br/>receiver: pagerduty-db → infra-slack\"]" in out
+    assert out.endswith("```\n") and not out.endswith("\n\n")
 
 
 def test_cli_diff_markdown_no_changes_is_one_line(tmp_path):
@@ -3836,7 +3838,8 @@ def test_cli_diff_markdown_caps_tables(tmp_path):
     rows = [line for line in out.splitlines() if line.startswith("| `team=")]
     assert len(rows) == 50
     assert rows[0] == "| `team=t0` | `r0` | `r0-renamed` |"
-    assert out.endswith("-renamed` |\n\n…and 10 more label sets\n")
+    assert "-renamed` |\n\n…and 10 more label sets\n\n#### Changed routes\n" in out
+    assert "…and 21 more changed routes" in out  # the diagram is capped too
 
 
 def test_cli_diff_markdown_findings_with_locations(tmp_path):
@@ -4346,3 +4349,114 @@ def test_rules_codes_listed_and_explained(capsys):
     for code in sorted(RULE_CODES):
         assert main(["explain", code]) == 0
         assert "--rules" in capsys.readouterr().out
+
+
+# ── Mermaid: tree --format mermaid and the diagram of changed routes ──
+
+def test_mermaid_route_tree_nodes_edges_and_findings():
+    from amlint import mermaid
+    from amlint.linter import INFO, Finding
+    route = {"receiver": "default", "routes": [
+        {"matchers": ['team="db"'], "receiver": "db", "continue": True,
+         "routes": [{"match": {"severity": "critical"}}]},
+        {"receiver": "catch-all"},
+    ]}
+    findings = [Finding(WARN, "unreachable-route", "...", "route.routes[1]"),
+                Finding(INFO, "deep-nesting", "...", "route.routes[1]")]
+    out = mermaid.route_tree(route, findings)
+    assert out.startswith("flowchart LR\n")
+    assert '    r["(root)<br/>→ default"]' in out
+    assert '    r_0["{team=#34;db#34;}<br/>→ db<br/>continue"]' in out
+    assert '    r_0_0["{severity=#34;critical#34;}<br/>→ (inherited)"]' in out
+    assert '    r_1["(catch-all)<br/>→ catch-all<br/>⚠ deep-nesting, unreachable-route"]' in out
+    assert "    r --> r_0\n" in out and "    r_0 --> r_0_0\n" in out
+    assert "    class r_1 warn\n" in out
+
+
+def test_mermaid_escapes_config_text():
+    from amlint import mermaid
+    nasty = 'x"<b>@me</b>`#&;\nend'
+    out = mermaid.route_tree({"receiver": nasty, "routes": [{"matchers": ['a="1"']}]})
+    labels = re.findall(r'\["(.*)"\]', out)
+    assert labels and all(not set('"<>&`').intersection(label.replace("<br/>", ""))
+                          for label in labels)
+    assert "x#34;#60;b#62;@me#60;/b#62;#96;#35;#38;; end" in out  # newline became a space
+    assert "`" not in out  # can't close the ```mermaid fence of a PR comment
+
+
+def test_mermaid_route_tree_is_capped():
+    from amlint import mermaid
+    route = {"receiver": "d", "routes": [{"matchers": [f'n="{i}"'], "receiver": "d"}
+                                         for i in range(mermaid.MAX_NODES + 9)]}
+    out = mermaid.route_tree(route)
+    assert out.count('["') == mermaid.MAX_NODES + 1  # and the "more" node
+    assert '    more["…and 10 more routes"]' in out
+
+
+@pytest.mark.parametrize("old,new", [
+    ({"continue": False}, {}),                                   # false is the default
+    ({"group_by": ["a", "b"]}, {"group_by": ["b", "a"]}),        # order doesn't matter
+    ({"group_wait": "5m"}, {"group_wait": "300s"}),              # same duration
+    ({"matchers": ['team="db"']}, {"match": {"team": "db"}}),    # same matcher
+])
+def test_mermaid_changed_routes_none_when_routing_is_the_same(old, new):
+    from amlint import mermaid
+    child = {"matchers": ['team="db"'], "receiver": "a"}
+    old_route = {"receiver": "d", "routes": [{**child, **old}]}
+    new_child = {**child, **new}
+    if "match" in new:
+        del new_child["matchers"]
+    assert mermaid.changed_routes(old_route, {"receiver": "d", "routes": [new_child]}) is None
+    assert mermaid.changed_routes(old_route, old_route) is None
+
+
+def test_mermaid_changed_routes_added_changed_removed():
+    from amlint import mermaid
+    old = {"receiver": "d", "routes": [
+        {"matchers": ['team="db"'], "receiver": "db-slack",
+         "routes": [{"matchers": ['severity="critical"'], "receiver": "db-pager"}]},
+        {"matchers": ['team="web"'], "receiver": "web"},
+        {"matchers": ['team="infra"'], "receiver": "infra"},
+    ]}
+    new = {"receiver": "d", "routes": [
+        {"matchers": ['team="new"'], "receiver": "new"},          # inserted on top
+        {"matchers": ['team="db"'], "receiver": "db-slack",
+         "routes": [{"matchers": ['severity="critical"'], "receiver": "db-slack"}]},
+        {"matchers": ['team="infra"'], "receiver": "infra"},      # web removed above it
+    ]}
+    out = mermaid.changed_routes(old, new)
+    assert '    r_0["{team=#34;new#34;}<br/>→ new"]' in out
+    assert "    class r_0 added\n" in out
+    # the db route is drawn only as context for its changed child
+    assert '    r_1["{team=#34;db#34;}<br/>→ db-slack"]' in out
+    assert "receiver: db-pager → db-slack" in out and "    class r_1_0 changed\n" in out
+    assert '    x_1["{team=#34;web#34;}<br/>→ web<br/>removed"]' in out
+    assert "    r -.-> x_1\n" in out and "    class x_1 removed\n" in out
+    # infra shifted, but kept its place among its siblings: folded, not changed
+    assert "infra" not in out and '    r_same["1 unchanged route"]' in out
+
+
+def test_mermaid_changed_routes_reordering_matters():
+    from amlint import mermaid
+    a = {"matchers": ['team="a"'], "receiver": "a"}
+    b = {"matchers": ['team="b"'], "receiver": "b"}
+    out = mermaid.changed_routes({"receiver": "d", "routes": [a, b]},
+                                 {"receiver": "d", "routes": [b, a]})
+    assert "position: 2 → 1" in out and "position: 1 → 2" in out
+
+
+def test_cli_tree_format_mermaid(capsys):
+    broken = os.path.join(os.path.dirname(os.path.abspath(__file__)), "broken.yml")
+    assert main(["tree", broken, "--format", "mermaid"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("flowchart LR\n")
+    assert "⚠ unreachable-route" in out and "✖ undefined-receiver" in out
+    assert "class r_0 warn" in out
+
+
+def test_cli_diff_markdown_no_diagram_without_route_changes(tmp_path):
+    old_path, new_path = _write_diff_pair(tmp_path, _DB_ROUTE)
+    assert "mermaid" not in _markdown_diff(old_path, new_path)[1]
+    old_path, new_path = _write_diff_pair(tmp_path, {**_DB_ROUTE, "receiver": "slack-db"})
+    assert "```mermaid\nflowchart LR\n" in _markdown_diff(old_path, new_path)[1]
+    assert "mermaid" not in _markdown_diff(old_path, new_path, "--no-routing")[1]

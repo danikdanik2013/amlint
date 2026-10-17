@@ -12,6 +12,22 @@
   Code, Neovim and Helix: https://danikdanik2013.github.io/amlint/editors/
 - A VS Code extension in `editors/vscode` that runs `amlint lsp`. It isn't on the Marketplace
   yet: build it with `npm run package` there and install the `.vsix`.
+- `amlint tree --format mermaid` prints the route tree as a Mermaid flowchart, which GitHub,
+  GitLab and MkDocs draw in Markdown. Each node shows its matchers, receiver and `continue`;
+  routes with an error are red and routes with a warning yellow, with the check codes on
+  the node. Stops after 150 routes.
+- `amlint diff --format markdown`, and so the GitHub Action's PR comment, adds a
+  **Changed routes** diagram when routes were added (green), changed (yellow, with what
+  changed) or removed (red, dashed). The routes above them are drawn for context, and
+  unchanged siblings fold into one node. Routes are paired by their matchers, so inserting
+  a route doesn't make the ones below it look changed; reordering does, because the first
+  match wins. Stops after 40 routes.
+- Text from the config is written as Mermaid entity codes in both, so a receiver name can't
+  break the diagram or add HTML to the comment.
+
+### Changed
+- PyPI classifiers add `Typing :: Typed` (the package ships `py.typed`) and
+  `Programming Language :: Python :: 3 :: Only`.
 
 ## [0.5.0] - 2026-10-17
 

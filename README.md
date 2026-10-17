@@ -105,6 +105,7 @@ assistants can read [llms.txt](https://danikdanik2013.github.io/amlint/llms.txt)
 | Write unit tests for routing | `amlint test alertmanager.yml tests.yml` |
 | See what a change does to routing | `amlint diff old.yml new.yml` |
 | Look at the route tree | `amlint tree alertmanager.yml` |
+| Draw the route tree as a Mermaid diagram | `amlint tree alertmanager.yml --format mermaid` |
 | Catch routes for alerts that don't exist | `amlint check alertmanager.yml --rules 'rules/*.yml'` |
 | Lint what you deploy to Kubernetes | `amlint check alertmanager-secret.yaml` or `kubectl kustomize deploy/ \| amlint check -` |
 | Learn what a check means and how to fix it | `amlint explain shadowed-route` |

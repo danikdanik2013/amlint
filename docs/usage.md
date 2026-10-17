@@ -258,9 +258,40 @@ below the tree.
 | Flag | What it does |
 |------|--------------|
 | `--ignore CODE` | Don't mark these checks on the tree. Comma-separate the codes or repeat the flag |
+| `--format mermaid` | Print a [Mermaid](#tree-mermaid) flowchart instead of the text tree |
 | `--input-format`, `--matcher-strategy` | As for [`check`](#check) |
 
 **Good to know:** `tree` exits `0` even when it marks problems. Use `check` to fail CI.
+
+### Draw the tree as a diagram { #tree-mermaid }
+
+`--format mermaid` prints the tree as a [Mermaid](https://mermaid.js.org) flowchart. Put it in
+a ` ```mermaid ` block and GitHub, GitLab and MkDocs draw it:
+
+```bash
+amlint tree broken.yml --format mermaid
+```
+
+```
+flowchart LR
+    r["(root)<br/>→ default-team<br/>✖ groupby-ellipsis"]
+    r_0["(catch-all)<br/>→ catch-all-team<br/>⚠ unreachable-route"]
+    r --> r_0
+    r_1["{severity=#34;critical#34;}<br/>→ pager-team<br/>✖ undefined-receiver"]
+    r --> r_1
+    r_2["{service=~#34;auth([#34;}<br/>→ default-team<br/>✖ bad-regex"]
+    r --> r_2
+    classDef error fill:#ffebe9,stroke:#cf222e,color:#1f2328
+    class r,r_1,r_2 error
+    classDef warn fill:#fff8c5,stroke:#9a6700,color:#1f2328
+    class r_0 warn
+```
+
+- Each node shows the matchers, the receiver and `continue`. Routes with an error are red,
+  routes with a warning are yellow, and the check codes are on the node.
+- Text from the config is written as Mermaid entity codes (`#34;` is a quote), so a receiver
+  name can't break the diagram.
+- A tree with more than 150 routes stops there, with `…and N more routes`.
 
 ## See where an alert goes { #route }
 
@@ -638,7 +669,7 @@ with the same simulation as [`route`](#route), and lists the ones that come out 
 amlint diff main.yml alertmanager.yml --format markdown
 ```
 
-```markdown
+````markdown
 ### amlint diff
 
 **2 routing changes** · **1 new finding** · 1 fixed · 1 unchanged · 6 label sets checked
@@ -655,6 +686,21 @@ amlint diff main.yml alertmanager.yml --format markdown
 | --- | --- | --- | --- | --- |
 | `team=infra` (+1 similar) | `infra-slack` | `group_wait` | `30s` | `10s` |
 
+#### Changed routes
+
+Green: added · yellow: changed · red, dashed: removed · grey: unchanged routes, folded.
+
+```mermaid
+flowchart LR
+    r["(root)<br/>→ default"]
+    r_0["{team=#34;infra#34;}<br/>→ infra-slack<br/>group_wait: unset → 10s"]
+    r --> r_0
+    r_1["{team=#34;db#34;, severity=#34;critical#34;}<br/>→ db-slack<br/>receiver: db-pager → db-slack"]
+    r --> r_1
+    classDef changed fill:#fff8c5,stroke:#9a6700,color:#1f2328
+    class r_0,r_1 changed
+```
+
 #### New findings
 
 | level | check | location | message |
@@ -666,11 +712,16 @@ amlint diff main.yml alertmanager.yml --format markdown
 | level | check | location | message |
 | --- | --- | --- | --- |
 | ✖ error | `undefined-receiver` | `main.yml:6:7` (`route.routes[1]`) | Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config. |
-```
+````
 
 - The summary line always comes first. Each table appears only when it has rows, so an
   unchanged config gives just the heading and the summary.
 - `(+1 similar)` means one more label set with exactly the same change.
+- **Changed routes** is a Mermaid diagram, which GitHub draws in the comment. It shows the
+  routes that were added, removed or changed, with what changed, and the routes above them.
+  Unchanged siblings fold into one grey node. Routes are matched by their matchers, so a
+  route inserted at the top doesn't make every route below it look changed, but a new
+  order of the same routes does: the first match wins. It stops after 40 routes.
 - New findings point into the new file, fixed ones into the old file.
 - Each table stops after 50 rows with `…and N more`, so a large config can't produce a huge
   comment.
