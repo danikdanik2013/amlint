@@ -1,6 +1,15 @@
 # Changelog
 
-## [Unreleased]
+## [0.6.0] - 2026-10-17
+
+Highlights:
+
+- **amlint in your editor.** `amlint lsp` is a language server: findings as you type, a
+  hover on each route that shows where its alerts go, and quick fixes that add
+  `# amlint: disable=` comments. Setup for VS Code, Neovim and Helix is on the new Editors
+  page. A VS Code extension is in `editors/vscode`; it isn't on the Marketplace yet.
+- **Route diagrams.** `amlint tree --format mermaid` draws the route tree, and the GitHub
+  Action's PR comment shows the routes a change adds, changes or removes as a diagram.
 
 ### Added
 - `amlint lsp`, a language server for editors. It shows amlint's findings as you type, on
