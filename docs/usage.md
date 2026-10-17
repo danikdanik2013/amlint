@@ -1,39 +1,118 @@
 # Usage
 
-## check
+amlint finds mistakes in an Alertmanager config before they cost you a missed page. It also
+shows where a given alert ends up, runs routing tests in CI, and shows how a change reroutes
+alerts.
 
-Validate one or more config files:
+## In 60 seconds
+
+```bash
+amlint check alertmanager.yml                                # find mistakes
+amlint route alertmanager.yml team=infra severity=critical   # where does this alert go?
+amlint test alertmanager.yml routing-tests.yml               # run your routing tests
+amlint diff main.yml alertmanager.yml                        # what does this change break or reroute?
+```
+
+| Command | Use it to |
+|---------|-----------|
+| [`check`](#check) | find mistakes in one or more configs |
+| [`tree`](#tree) | print the routing tree with problems marked on it |
+| [`route`](#route) | see where an alert with given labels goes |
+| [`test`](#test) | run routing unit tests from a file |
+| [`diff`](#diff) | compare two configs: new and fixed findings, and alerts that now go elsewhere |
+| [`list`](#list), [`explain`](#explain) | see every check, or read about one |
+| [`init`](#init) | print a minimal valid config to start from |
+| `amlint --version` | print the installed version |
+
+## Find mistakes in a config { #check }
+
+`check` reviews the whole config: routes (the tree of label conditions, called matchers, that
+decides where each alert goes), receivers (named notification targets, such as a Slack
+channel), inhibit rules (rules that mute some alerts while a related alert fires), timings
+and integration settings.
 
 ```bash
 amlint check alertmanager.yml
-amlint check prod.yml staging.yml    # multiple files
-cat alertmanager.yml | amlint check -  # stdin
+amlint check prod.yml staging.yml        # several files
+cat alertmanager.yml | amlint check -    # stdin
 ```
 
-**Options:**
+```
+  ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:6:7  ·  route.routes[1]
+     Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped.
 
-| flag | description |
-|------|-------------|
-| `--strict` | Exit non-zero on WARN as well as ERROR |
-| `--format json` | Machine-readable JSON output |
-| `--format sarif` | GitHub Code Scanning SARIF output |
-| `--format github` | GitHub Actions annotations (`::error file=...,line=...::`) |
-| `--ignore CODE` | Skip findings with these codes; repeat or comma-separate |
-| `--only CODE` | Show only findings with these codes; repeat or comma-separate |
-| `--exit-zero` | Always exit 0 regardless of findings; useful for informational CI runs |
-| `--rules GLOB` | Also check routes and inhibit rules against these Prometheus rule files; quote the glob, repeat for more ([details](#checking-against-prometheus-rules)) |
-| `--input-format FORMAT` | What the file is: `auto` (default, detected), `alertmanager`, `secret`, `helm`, `mimir` or `alertmanagerconfig` ([details](kubernetes.md)) |
-| `--matcher-strategy STRATEGY` | `alertmanagerConfigMatcherStrategy` for AlertmanagerConfig resources: `OnNamespace`, `OnNamespaceExceptForAlertmanagerNamespace` or `None` |
+  ℹ  INFO   [global-resolve-timeout-missing]  ·  alertmanager.yml:1:1  ·  global
+     global.resolve_timeout is not set. Alertmanager defaults to 5m — set it explicitly so the intent is clear and reviewable.
 
-`diff`, `tree`, `route` and `test` take `--input-format` and `--matcher-strategy` too.
+────────────────────────────────────────
+  ✖ 1 error  ·  ℹ 1 info
+```
 
-**Kubernetes, Helm and Mimir** — besides a plain `alertmanager.yml`, amlint reads a
-Kubernetes Secret or ConfigMap holding `alertmanager.yaml`, kube-prometheus-stack Helm
-values, a Mimir or Cortex tenant config, and prometheus-operator `AlertmanagerConfig`
-resources, which it merges the way the operator does. Findings point at the line in the
-file you passed. See [Kubernetes & Mimir](kubernetes.md).
+Each finding shows:
 
-**Project config** — amlint loads config automatically. Two options (first found wins):
+- its level: `ERROR`, `WARN` or `INFO`. By default only `ERROR` fails the run.
+- the check code. `amlint explain <code>` tells you why it matters and how to fix it.
+- `file:line:col`, which most terminals and editors turn into a link.
+- the config path: `route.routes[1]` is the second child of the top-level route.
+
+**Options**
+
+| Flag | What it does |
+|------|--------------|
+| `--strict` | Exit `1` on WARN findings too, not only ERROR |
+| `--exit-zero` | Always exit `0` when the config could be read, whatever amlint finds. For report-only CI runs |
+| `--ignore CODE` | Skip these checks. Comma-separate the codes or repeat the flag |
+| `--only CODE` | Report only these checks. Comma-separate the codes or repeat the flag |
+| `--format FORMAT` | `text` (default), `json`, `sarif` ([Code Scanning](#sarif-github-code-scanning)) or `github` ([PR annotations](#github-annotations)) |
+| `--rules GLOB` | Also check against your Prometheus alerting rules. Quote the glob; repeat the flag for more ([details](#checking-against-prometheus-rules)) |
+| `--input-format FORMAT` | What the file is: `auto` (default, detected), `alertmanager`, `secret`, `helm`, `mimir` or `alertmanagerconfig` ([details](#kubernetes-helm-and-mimir)) |
+| `--matcher-strategy STRATEGY` | `alertmanagerConfigMatcherStrategy` for `AlertmanagerConfig` resources: `OnNamespace`, `OnNamespaceExceptForAlertmanagerNamespace` or `None`. Default: the one on the Alertmanager resource in the input, else `OnNamespace` |
+
+**Good to know**
+
+- The line is where that part of the config starts: the `- ` entry of a route, receiver or
+  inhibit rule, or a key such as `global:`. If the part is missing (no `global:` block), the
+  finding points at the nearest part that exists. JSON and SARIF carry the same line and
+  column.
+- With several files, text output has one section per file.
+- A misspelled code in `--ignore`, `--only` or a [config file](#project-config) prints a
+  warning with a "did you mean" suggestion instead of being silently ignored.
+
+### Kubernetes, Helm and Mimir
+
+Besides a plain `alertmanager.yml`, amlint reads a Kubernetes Secret or ConfigMap holding
+`alertmanager.yaml`, kube-prometheus-stack Helm values, a Mimir or Cortex tenant config, and
+prometheus-operator `AlertmanagerConfig` resources, which it merges the way the operator
+does. It detects the format; `--input-format` overrides that. Findings point at the line in
+the file you passed. `diff`, `tree`, `route` and `test` take `--input-format` and
+`--matcher-strategy` too. See [Kubernetes & Mimir](kubernetes.md).
+
+### Get JSON output { #json-output }
+
+```bash
+amlint check alertmanager.yml --format json
+```
+
+The output is a list with one object per finding:
+
+```json
+{
+  "file": "alertmanager.yml",
+  "line": 6,
+  "column": 7,
+  "level": "error",
+  "code": "undefined-receiver",
+  "message": "Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped.",
+  "where": "route.routes[1]"
+}
+```
+
+`level` is `error`, `warn` or `info`. `file` is `-` for stdin.
+
+### Set defaults for a repo { #project-config }
+
+amlint reads settings from `.amlint.yml` (or `.amlint.yaml`) in the directory you run it
+from. If there is none, it reads `[tool.amlint]` from `pyproject.toml` in that directory.
 
 === ".amlint.yml"
     ```yaml
@@ -57,29 +136,19 @@ file you passed. See [Kubernetes & Mimir](kubernetes.md).
     unused-receiver = "error"
     ```
 
-`.amlint.yml` takes priority over `pyproject.toml` if both exist.
-`--ignore` on the CLI merges with the `ignore:` list from the config file.
+| Key | What it does | Used by |
+|-----|--------------|---------|
+| `ignore` | Checks to skip, added to any `--ignore` codes | `check`, `diff`, `tree` |
+| `strict` | Same as `--strict` | `check` |
+| `severity` | Sets a check's level to `error`, `warn` or `info` | `check`, `diff`, `tree` |
 
-### Locations
+**Good to know:** amlint doesn't look in parent directories or next to the config file. Only
+the first file found is read, so `pyproject.toml` is ignored when `.amlint.yml` exists.
 
-Every finding points at a line in the file. Text output prints it as `file:line:col`, which
-terminals and editors turn into a jump link:
+### Silence one finding in the config { #inline-suppressions }
 
-```
-  ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:10:7  ·  route.routes[1]
-     Route references receiver 'pager-team' which is not defined in receivers. ...
-```
-
-The line is the start of the part of the config the finding is about: the `- ` entry for a
-route, receiver or inhibit rule, the key for things like `route` or `global`. When that part
-doesn't exist in the file (`global-resolve-timeout-missing` with no `global:` block), the
-finding points at the nearest enclosing part that does. JSON and SARIF output carry the same
-line and column; stdin (`-`) works the same way.
-
-### Inline suppressions
-
-Turn a check off for one spot with a comment, so the exception and its reason live next to
-the config instead of in a global `ignore:` list:
+Turn a check off for one spot with a comment. The exception and its reason then live next to
+the config, not in a global `ignore:` list:
 
 ```yaml
 # amlint: disable-file=global-resolve-timeout-missing
@@ -97,20 +166,23 @@ receivers:
   - name: blackhole
 ```
 
-| comment | where | suppresses |
-|---------|-------|------------|
+| Comment | Where | Silences |
+|---------|-------|----------|
 | `# amlint: disable=code1,code2` | at the end of a line | those codes for findings on that line |
 | `# amlint: disable=code1,code2` | on a line of its own | those codes for findings on the next line of YAML (other comment lines in between are fine) |
 | `# amlint: disable-file=code1,code2` | in the comment block at the top of the file, before any YAML | those codes for the whole file |
 
-A finding's line is the one shown in the output. Unknown codes get the same "did you mean"
-warning as `--ignore`, and a `disable-file` comment further down the file is ignored with a
-warning. Suppressions also apply to `diff` and `tree`.
+**Good to know**
 
-### Checking against Prometheus rules
+- A finding's line is the one shown in the output.
+- An unknown code gets the same "did you mean" warning as `--ignore`. A `disable-file`
+  comment further down the file is ignored, with a warning.
+- Suppressions also apply to `diff` and `tree`.
 
-On its own, amlint only sees the Alertmanager config. Give it your alerting rules and it
-also checks that the routes and inhibit rules match alerts that actually exist:
+### Check routes against your Prometheus rules { #checking-against-prometheus-rules }
+
+On its own, amlint only sees the Alertmanager config. Give it your alerting rules with
+`--rules`, and it also checks that routes and inhibit rules match alerts that actually exist:
 
 ```bash
 amlint check alertmanager.yml --rules 'rules/*.yml'
@@ -118,198 +190,37 @@ amlint check alertmanager.yml --rules 'rules/**/*.yml' --rules 'manifests/*-prom
 ```
 
 ```
-  ⚠  WARN   [route-unknown-alertname]  ·  alertmanager.yml:4:7  ·  route.routes[0]
-     Route matches alertname 'HighCpuUsage', which no alerting rule in the --rules files
-     produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source,
-     this branch is dead.
+  ⚠  WARN   [route-unknown-alertname]  ·  alertmanager.yml:7:7  ·  route.routes[0]
+     Route matches alertname 'HighCpuUsage', which no alerting rule in the --rules files produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source, this branch is dead.
 ```
 
-`--rules` takes Prometheus rule files (`groups:`) and prometheus-operator `PrometheusRule`
-manifests (`spec.groups:`); recording rules are skipped. Quote the glob: unquoted, the
-shell expands it and every file after the first is read as an Alertmanager config (amlint
-warns when a config looks like a rule file). `**` matches subdirectories. It adds three
-checks:
+`--rules` adds three checks:
 
-| code | level | what it catches |
+| Code | Level | What it catches |
 |------|-------|-----------------|
-| [`route-unknown-alertname`](checks/rules.md#route-unknown-alertname) | warn | route matches an `alertname` no rule produces (typo, renamed or removed rule), with a "did you mean" |
-| [`inhibit-unknown-alertname`](checks/rules.md#inhibit-unknown-alertname) | warn | the same for inhibit rule source and target matchers |
-| [`alert-hits-default-receiver`](checks/rules.md#alert-hits-default-receiver) | info | based on their static labels, alerts match no child route and go to the root receiver (one finding per `severity=…` etc.) |
+| [`route-unknown-alertname`](checks/rules.md#route-unknown-alertname) | warn | A route matches an `alertname` no rule produces (typo, renamed or removed rule), with a "did you mean" |
+| [`inhibit-unknown-alertname`](checks/rules.md#inhibit-unknown-alertname) | warn | The same for an inhibit rule's source and target matchers |
+| [`alert-hits-default-receiver`](checks/rules.md#alert-hits-default-receiver) | info | Based on their static labels, alerts match no child route and go to the root receiver (one finding per `severity=…` etc.) |
 
-amlint knows only what the rule file says: `alertname` plus the rule's `labels:`. At
-runtime alerts also get the labels of their PromQL series and Prometheus'
-`external_labels`, so messages say "based on static rule labels", a templated label value
-counts as unknown, and a result that depends on an unknown label is skipped rather than
-guessed. [Prometheus rules checks](checks/rules.md) has the details.
+**Good to know**
 
-### Exit codes
+- `--rules` reads Prometheus rule files (`groups:`) and prometheus-operator `PrometheusRule`
+  manifests (`spec.groups:`). Recording rules are skipped. `**` matches subdirectories.
+- Quote the glob. Unquoted, the shell expands it, and the extra files are either rejected as
+  unknown arguments or linted as Alertmanager configs, depending on where `--rules` sits.
+  amlint warns when a config looks like a rule file.
+- A glob that matches no files, a directory instead of a glob, or a rule file that doesn't
+  parse exits `2`. If the files hold no alerting rules, amlint warns and skips the three
+  checks.
+- amlint only knows `alertname` and the rule's `labels:`. Real alerts also get labels from
+  their PromQL series and Prometheus' `external_labels`, so a templated label value counts as
+  unknown, and a result that depends on an unknown label is skipped rather than guessed. See
+  [Prometheus rules checks](checks/rules.md).
 
-| code | meaning |
-|------|---------|
-| `0` | No issues (or only WARN/INFO without `--strict`) |
-| `1` | One or more ERROR found (or WARN with `--strict`) |
-| `2` | File not found or YAML parse error, also in a `--rules` file, or a `--rules` glob that matches no files |
+## See the routing tree { #tree }
 
-### JSON output
-
-```bash
-amlint check alertmanager.yml --format json
-```
-
-```json
-[
-  {
-    "file": "alertmanager.yml",
-    "line": 10,
-    "column": 7,
-    "level": "error",
-    "code": "undefined-receiver",
-    "message": "Route references receiver 'pager' which is not defined...",
-    "where": "route.routes[1]"
-  }
-]
-```
-
-`file` is `-` for stdin. `amlint diff --format json` adds `line` and `column` to each
-finding too: from the new file for `added`, from the old one for `fixed`.
-
-## diff
-
-Show what changed between two configs. Useful in CI to catch regressions on PRs:
-
-```bash
-amlint diff main.yml feature-branch.yml
-```
-
-```
-  FIXED  Route references receiver 'pager-team'...
-  ↳ route.routes[1]  [undefined-receiver]
-
-  NEW    match_re for 'service' does not compile...
-  ↳ route.routes[3]  [bad-regex]
-
-  1 fixed · 1 new · 4 unchanged
-```
-
-Exits `1` if any **new** findings appeared (regressions), `0` otherwise.
-
-### Routing changes
-
-After the findings, `diff` compares how the two configs route alerts — the same simulation
-as [`route`](#route), run against both files with the same label sets:
-
-```
-───────────────────────────── Routing ─────────────────────────────
-
-  team=infra
-    infra-slack  group_wait   30s → 10s
-    and 5 more label sets with the same change
-
-  team=db, severity=critical
-    receivers   pagerduty-db → slack-db
-    and 2 more label sets with the same change
-
-  2 routing changes  · 18 label sets checked
-```
-
-A label set shows up when its receivers change, or when a receiver it reaches gets a
-different `group_by`, `group_wait`, `group_interval`, `repeat_interval` or time intervals.
-Edits that still deliver every alert the same way (`match:` rewritten as `matchers:`,
-siblings reordered that never match the same alert) don't.
-
-The label sets come from the matchers of both configs: for every label, the values used
-with `=` and `!=`, a few strings each `=~` / `!~` regex fully matches, and the label being
-absent. Small configs get every combination. Larger ones get, for every route, a label set
-that reaches it and one that stops on it, then single-label variations of those, spread
-evenly over the routes and capped at 5000 label sets — the summary says when the cap was
-hit. Label sets with exactly the same change are folded into one, shown with the smallest
-label set.
-
-Routing changes are informational: they don't change the exit code, since a PR that edits
-routing usually means to. If either config can't be simulated (see [`route`](#route)), the
-section says why and the findings diff still runs. `--no-routing` skips the comparison.
-With `--format json`, a `routing` key holds `checked`, `truncated` and `changes` — each
-with the `labels`, the `differences`, the full `old` / `new` routes, and how many `similar`
-label sets were folded into it — or `skipped` with the reason.
-
-An empty old file (`/dev/null`, or a config that is new in a PR) counts as no config at
-all: every finding is new, none is fixed, and every label set's receivers were `(none)`
-before.
-
-### Markdown report
-
-`--format markdown` prints a compact report meant for a pull-request comment:
-
-```bash
-amlint diff main.yml alertmanager.yml --format markdown
-```
-
-```markdown
-### amlint diff
-
-**2 routing changes** · **1 new finding** · 0 fixed · 4 unchanged · 18 label sets checked
-
-#### Receivers
-
-| labels | before | after |
-| --- | --- | --- |
-| `team=db, severity=critical` | `pagerduty-db` | `slack-db` |
-
-#### Grouping and timings
-
-| labels | receiver | setting | before | after |
-| --- | --- | --- | --- | --- |
-| `team=infra` (+5 similar) | `infra-slack` | `group_wait` | `30s` | `10s` |
-
-#### New findings
-
-| level | check | location | message |
-| --- | --- | --- | --- |
-| ✖ error | `undefined-receiver` | `alertmanager.yml:12:7` (`route.routes[1]`) | Route references receiver 'pager-team' which is not defined in receivers. Alerts matched here will be dropped. |
-```
-
-The summary line always comes first. The tables and finding sections only appear when
-there is something in them, so an unchanged config gives just the heading and the summary.
-`(+5 similar)` means five more label sets with exactly the same change. New findings point
-into the new file and fixed ones into the old file. Each table stops after 50 rows with
-`…and N more`, so a large config can't produce a huge comment. The output is deterministic,
-and names from the config are escaped, so a receiver called `@team` doesn't ping anyone.
-Exit codes are the same as for text output.
-
-The [GitHub Action](github-action.md#routing-diff-as-a-pr-comment) posts this report as a
-PR comment and keeps it up to date.
-
-**Options:**
-
-| flag | description |
-|------|-------------|
-| `--format json` | Machine-readable output |
-| `--format markdown` | Compact report for a PR comment |
-| `--no-routing` | Compare findings only |
-
-### In CI (PR check)
-
-```yaml
-- name: Check for regressions
-  run: |
-    git show origin/main:alertmanager.yml > /tmp/main.yml
-    amlint diff /tmp/main.yml alertmanager.yml
-```
-
-To get the routing diff as a PR comment, use the GitHub Action's
-[`diff-base`](github-action.md#routing-diff-as-a-pr-comment) input.
-
-## init
-
-Generate a minimal valid `alertmanager.yml` to start from:
-
-```bash
-amlint init > alertmanager.yml
-```
-
-## tree
-
-Print the route tree with matchers, receivers, and any routing-related issues inline — a fast way to see how alerts flow without opening the YAML:
+`tree` prints the route tree with problems marked inline, so you can see how alerts flow
+without reading the YAML:
 
 ```bash
 amlint tree alertmanager.yml
@@ -317,30 +228,45 @@ cat alertmanager.yml | amlint tree -   # stdin
 ```
 
 ```
-✖  (root)  →  default-team  (groupby-ellipsis)
-├── ⚠  (catch-all)  →  catch-all-team  (unreachable-route)
-├── ✖  {severity=critical}  →  pager-team  (undefined-receiver)
-└── ✖  {service=~auth([}  →  default-team  (bad-regex)
+   (root)  →  default
+├──    {team="infra"}  →  infra-slack  [continue]
+├── ⚠  (catch-all)  →  catch-all  (unreachable-route)
+└── ✖  {severity="critical"}  →  pager-team  (undefined-receiver)
 
-  4 routing issues flagged above — run 'amlint check alertmanager.yml' for full details.
-  6 more issues outside routing (receivers, global, timing) — run 'amlint check alertmanager.yml' for full details.
+  2 routing issues flagged above — run 'amlint check alertmanager.yml' for full details.
+
+  2 more issues outside routing (receivers, global, timing) — run 'amlint check alertmanager.yml' for full details.
 ```
 
-Each node shows its matchers, the receiver it routes to, `[continue]` when set, and — if any routing check
-(`undefined-receiver`, `unreachable-route`, `route-match-collision`, `bad-regex`, `groupby-ellipsis`, and similar)
-fired on that node — an icon and the offending code(s). Findings outside the route tree (receiver config, global
-settings, timing) are counted separately since they don't map to a specific node.
+Each line is one route:
 
-**Options:**
+- its matchers, or `(catch-all)` if it has none,
+- `→` the receiver it sends to, or `(inherited)` if it doesn't set one,
+- `[continue]` when the route has `continue: true`, which tells Alertmanager to keep checking
+  the next sibling routes after this one matches,
+- the level icon and check codes when a routing check (`undefined-receiver`,
+  `unreachable-route`, `route-match-collision`, `bad-regex`, `groupby-ellipsis` and similar)
+  fired on that route.
 
-| flag | description |
-|------|-------------|
-| `--ignore CODE` | Skip these codes when annotating the tree (comma-separated or repeat) |
+Findings that don't belong to one route (receivers, global settings, timing) are counted
+below the tree.
 
-## route
+**Options**
 
-Show where one alert goes: which route(s) it matches, which receiver(s) it is delivered
-to, and the `group_by` and timings it ends up with after inheritance.
+| Flag | What it does |
+|------|--------------|
+| `--ignore CODE` | Don't mark these checks on the tree. Comma-separate the codes or repeat the flag |
+| `--input-format`, `--matcher-strategy` | As for [`check`](#check) |
+
+**Good to know:** `tree` exits `0` even when it marks problems. Use `check` to fail CI.
+
+## See where an alert goes { #route }
+
+`route` simulates Alertmanager's routing for one alert. It shows which routes the alert
+matches, which receivers get it, and the grouping and timings it ends up with: `group_by`
+(the labels Alertmanager uses to batch alerts into one notification), `group_wait` (how long
+it waits before sending the first notification for a new batch), `group_interval` and
+`repeat_interval`.
 
 ```bash
 amlint route alertmanager.yml team=infra severity=critical alertname=DiskFull
@@ -363,52 +289,63 @@ amlint route alertmanager.yml team=infra severity=critical alertname=DiskFull
     group_interval    5m                   Alertmanager default
     repeat_interval   4h                   Alertmanager default
 
+────────────────────────────────────────
   Delivered to: infra-pager, pager
 ```
 
-Here `route.routes[0]` has `continue: true`, so after the alert lands on its critical
-child, `route.routes[1]` is checked too and matches as well. `mute_time_intervals` and
-`active_time_intervals` are shown when the matched route sets them.
+Here `route.routes[0]` has `continue: true`. So after the alert reaches its critical child,
+`route.routes[1]` is checked too, and matches as well. The last column says where each value
+comes from. `mute_time_intervals` and `active_time_intervals` show up when the matched route
+sets them.
 
-The simulation follows Alertmanager's own `dispatch/route.go`:
+Pass labels as `label=value`. With no labels, amlint routes an alert that has none. Unlike
+`amtool config routes test`, `route` also shows the effective grouping and timings and where
+each comes from, and it needs no Go binary.
 
-- Routes are checked depth-first, children in definition order. A child matches when all
-  of its matchers match. The first matching child ends the search at its level, unless it
-  has `continue: true`. A route none of whose children match is itself the match — a
-  matched parent with a matched child does not also fire.
-- `receiver`, `group_by`, `group_wait`, `group_interval` and `repeat_interval` are
-  inherited from the parent, starting from Alertmanager's defaults (30s / 5m / 4h).
-  `group_by: []` resets grouping to none, `group_by: ['...']` groups by every label.
-  Time intervals are not inherited: each route has only its own.
-- A label the alert doesn't have matches as the empty string, so `env!="prod"` matches an
-  alert without `env`, and `env=""` matches it too.
-- Regexes are fully anchored, like Alertmanager's `^(?:pattern)$`: `service=~"api"`
-  matches `api`, not `api-gateway`. They follow Go RE2: `(?i)` flags, ASCII-only `\d`,
-  `\w`, `\s` and POSIX classes such as `[[:alpha:]]` all behave as in Alertmanager.
+**How amlint matches**, following Alertmanager:
 
-Matchers are parsed the way Alertmanager parses them, quirks included: see
-[Verified against Alertmanager](fidelity.md), which also covers how this simulation is
-tested against Alertmanager itself.
+- Routes are checked depth-first, children in order. A route matches when all its matchers
+  match. The first matching child ends the search at its level, unless it has
+  `continue: true`. If no child matches, the parent itself is the match.
+- `receiver`, `group_by` and the timings are inherited from the parent. Alertmanager's
+  defaults are 30s / 5m / 4h. `group_by: []` means no grouping, and `group_by: ['...']`
+  groups by every label. Time intervals are not inherited: each route has only its own.
+- A label the alert doesn't have matches as the empty string. So `env!="prod"` and `env=""`
+  both match an alert without `env`.
+- Regexes are fully anchored: `service=~"api"` matches `api`, not `api-gateway`. They follow
+  Go RE2, as in Alertmanager: `(?i)` flags, ASCII-only `\d`, `\w`, `\s`, and POSIX classes
+  such as `[[:alpha:]]`.
+- Matchers are parsed the way Alertmanager parses them, quirks included.
+  [Verified against Alertmanager](fidelity.md) shows how this is tested against
+  Alertmanager itself.
 
-Configs Alertmanager would refuse to load (a regex RE2 rejects, a malformed duration,
-matchers on the root route) exit `2` with the route that causes it. So does a regex with
-Unicode classes (`\pL`), which Python can't evaluate the way Go does — check those with
-`amtool config routes test`.
+**Options**
 
-`--format json` prints the receivers, and for every matched route its path, effective
-settings, and `set_by`: which route set each value (a value missing from `set_by` is
-Alertmanager's default).
+| Flag | What it does |
+|------|--------------|
+| `--firing 'label=value,...'` | Another alert firing at the same time. Repeat for more alerts. Shows whether an inhibit rule mutes this alert ([details](#inhibition)) |
+| `--format json` | JSON output. `text` is the default |
+| `--input-format`, `--matcher-strategy` | As for [`check`](#check) |
 
-`amtool config routes test` also takes a label set and prints the receivers it reaches.
-`amlint route` also shows the effective `group_by` and timings and which route each one
-comes from, and needs no Go binary.
+`--format json` prints `labels`, `receivers`, and for every matched route its `path`, the
+effective settings, and `set_by`: the route that set each value. A value missing from
+`set_by` is Alertmanager's default. It also has `firing`, `inhibited` and `inhibited_by`
+(`rule`, `line`, `column`, and the `source` alert that matched).
 
-### Inhibition
+**Limits**
 
-`--firing` adds another alert that is firing at the same time, as comma-separated
-`label=value` pairs (quote a value that contains a comma: `summary="a, b"`). Repeat the flag
-for more alerts. amlint then checks the config's `inhibit_rules` and shows the rule that
-mutes the alert, if any:
+- A config Alertmanager would refuse to load exits `2` and names the route at fault: a regex
+  RE2 rejects, a malformed duration, matchers on the root route. So does a label that isn't
+  `label=value`.
+- A regex with Unicode classes such as `\pL` also exits `2`, since amlint can't evaluate it
+  the way Go does. Check those routes with `amtool config routes test`.
+
+### Check whether an alert is muted { #inhibition }
+
+`--firing` adds another alert that fires at the same time, as comma-separated `label=value`
+pairs. Quote a value that contains a comma: `summary="a, b"`. Repeat the flag for more
+alerts. amlint then checks the config's `inhibit_rules` and shows the rule that mutes
+(inhibits) the alert, if any:
 
 ```bash
 amlint route alertmanager.yml alertname=DiskFull instance=db-1 team=infra \
@@ -421,46 +358,41 @@ amlint route alertmanager.yml alertname=DiskFull instance=db-1 team=infra \
 
   route → route.routes[0]
     receiver          infra-slack          set here
-    ...
+    group_by          alertname, cluster   inherited from route
+    group_wait        10s                  set here
+    group_interval    5m                   Alertmanager default
+    repeat_interval   4h                   Alertmanager default
 
-  Inhibited by inhibit_rules[1]  ·  alertmanager.yml:31:5
+────────────────────────────────────────
+  Inhibited by inhibit_rules[1]  ·  alertmanager.yml:42:5
      while firing: alertname=NodeDown, instance=db-1
   Routed to: infra-slack, but no notification is sent while it is inhibited.
 ```
 
-The evaluation follows Alertmanager's `inhibit/inhibit.go`. The alert is inhibited when, for
-some rule:
+The alert is muted when, for some rule:
 
 - the alert matches the rule's `target_matchers`,
 - a firing alert matches its `source_matchers`, and
-- every label in `equal` has the same value on both alerts. A label missing on both sides
-  counts as equal, since Alertmanager compares missing labels as `""`.
+- every label in `equal` has the same value on both alerts. A label missing on both counts
+  as equal, since Alertmanager compares missing labels as `""`.
 
-If the alert matches the `source_matchers` as well, firing alerts that also match both sides
-don't count. An alert therefore never inhibits itself, and alerts on both sides of a rule
-don't inhibit each other. A firing alert still inhibits when it is inhibited or silenced
-itself, as in Alertmanager. Rules are checked in order, and the first one that applies is
-shown.
+**Good to know**
 
-`source_matchers` / `target_matchers` and the older `source_match` / `source_match_re` /
-`target_match` / `target_match_re` both work, with the same anchored Go RE2 regexes as
-routing. Inhibition doesn't change routing: the alert still lands on the same routes, but
-Alertmanager sends no notification for it. A rule amlint can't evaluate exits `2`, but only
-when `--firing` is given. With `--format json` the output adds `firing`, `inhibited` and
-`inhibited_by` (`rule`, `line`, `column`, and the `source` alert that matched).
+- An alert never mutes itself, and alerts that match both sides of a rule don't mute each
+  other.
+- A firing alert still mutes others when it is muted or silenced itself, as in Alertmanager.
+- Rules are checked in order. The first one that applies is shown.
+- `source_matchers` / `target_matchers` and the older `source_match` / `source_match_re` /
+  `target_match` / `target_match_re` both work, with the same anchored RE2 regexes as routes.
+- Muting doesn't change routing: the alert lands on the same routes, but Alertmanager sends
+  no notification for it.
+- An inhibit rule amlint can't evaluate exits `2`, but only when you pass `--firing`.
 
-**Options:**
+## Test your routing { #test }
 
-| flag | description |
-|------|-------------|
-| `--firing 'label=value,...'` | Another alert firing at the same time; repeatable. Shows whether an inhibit rule mutes this alert |
-| `--format json` | Machine-readable output |
-
-## test
-
-Unit tests for your routing tree: for each set of alert labels, assert which receivers the
-alert reaches. Runs entirely against the local config file, with the same simulation as
-[`route`](#route) — no live Alertmanager or Go toolchain needed:
+`test` runs unit tests for your routing tree. For each set of alert labels, you state which
+receivers the alert must reach. It uses the same simulation as [`route`](#route), against
+the local file: no running Alertmanager or Go toolchain needed.
 
 ```bash
 amlint test alertmanager.yml routing-tests.yml
@@ -482,23 +414,62 @@ amlint test alertmanager.yml routing-tests.yml
   expect: [default]
 ```
 
-`expect:` lists the receivers the alert must reach, in any order: no more, no fewer.
-`name:` is optional. Each case sets exactly one of:
+```
+  ✓  critical infra alerts page infra and the on-call
+  ✓  warning infra alerts go to slack only
+  ✓  unrelated alerts aren't swallowed
+────────────────────────────────────────
+  3 passed
+```
 
-| key | asserts |
-|-----|---------|
-| `expect: [a, b]` | alert reaches exactly these receivers, in any order |
-| `receiver: name` | alert reaches exactly this one receiver |
-| `receivers: [a, b]` | alert reaches exactly these receivers, in this order (`continue: true` fan-out follows definition order) |
-| `drop: true` | alert reaches no receiver at all |
+Each case has `labels:`, an optional `name:`, and exactly one of these assertions:
 
-Files from amlint 0.3.0, with the cases under a top-level `tests:` key, still work.
+| Key | Passes when the alert reaches |
+|-----|-------------------------------|
+| `expect: [a, b]` | exactly these receivers, in any order |
+| `receiver: name` | exactly this one receiver |
+| `receivers: [a, b]` | exactly these receivers, in this order (`continue: true` fan-out follows definition order) |
+| `drop: true` | no receiver at all |
 
-### Inhibition in tests
+The cases can also sit under a top-level `tests:` key.
 
-A case can list `firing:`, the label sets of other alerts firing at the same time, and
-assert `inhibited: true` or `inhibited: false`. The alert is checked against the config's
-`inhibit_rules` the same way [`route --firing`](#inhibition) does:
+A failing case shows what differs, and which routes the alert matched. Had the second case
+said `expect: [infra-slack, pager]`:
+
+```
+  ✓  critical infra alerts page infra and the on-call
+  ✗  warning infra alerts go to slack only
+     labels:    team=infra, severity=warning
+     expected:  infra-slack, pager
+     actual:    infra-slack
+       - pager  expected, not delivered
+     routes:    route.routes[0]
+
+────────────────────────────────────────
+  1 failed  ·  1 passed
+```
+
+`test` exits `1` if any case fails, and `2` if the config can't be simulated (see
+[`route`](#route)) or the tests file isn't a list of cases.
+
+**Options**
+
+| Flag | What it does |
+|------|--------------|
+| `--coverage` | List the routes no case reaches, with `file:line:col`, and the coverage percentage ([details](#coverage)) |
+| `--fail-under N` | Exit `1` if route coverage is below N% (0 to 100). Turns on `--coverage` |
+| `--format json` | JSON output. `text` is the default |
+| `--input-format`, `--matcher-strategy` | As for [`check`](#check) |
+
+`--format json` gives one object per case, with `passed`, `expected`, `actual`, `missing`,
+`unexpected`, the matched `routes`, and the inhibition fields (`firing`,
+`expected_inhibited`, `inhibited`, `inhibited_by`). A malformed case has `error` instead.
+
+### Test inhibition { #inhibition-in-tests }
+
+A case can list `firing:`, the labels of other alerts firing at the same time, and assert
+`inhibited: true` or `inhibited: false`. amlint checks it the same way as
+[`route --firing`](#inhibition):
 
 ```yaml
 - name: disk alerts are muted while their node is down
@@ -515,10 +486,10 @@ assert `inhibited: true` or `inhibited: false`. The alert is checked against the
   expect: [db-slack]       # firing: without inhibited: expects inhibited: false
 ```
 
-`inhibited:` goes alongside the receiver assertion, which still checks routing, or on its
-own. With `firing:` and no `inhibited:`, the case expects the alert not to be inhibited. A
-case that fails on inhibition names the rule. Had the second case listed `NodeDown` on
-`db-1`:
+- `inhibited:` goes next to a receiver assertion, which still checks routing, or on its own.
+- With `firing:` and no `inhibited:`, the case expects the alert not to be muted.
+- A case that fails on inhibition names the rule. Had the second case listed `NodeDown` on
+  `db-1`:
 
 ```
   ✗  another node's outage doesn't mute it
@@ -527,35 +498,13 @@ case that fails on inhibition names the rule. Had the second case listed `NodeDo
      expected:  db-slack
      actual:    db-slack
      inhibited: expected no, actual yes
-       by inhibit_rules[1]  ·  alertmanager.yml:31:5  ·  while firing: alertname=NodeDown, instance=db-1
+       by inhibit_rules[1]  ·  alertmanager.yml:42:5  ·  while firing: alertname=NodeDown, instance=db-1
      routes:    route.routes[2]
 ```
 
-A failing case shows what differs, and which routes the alert matched. Had the second
-case said `expect: [infra-slack, pager]`:
+### Measure route coverage { #coverage }
 
-```
-  ✓  critical infra alerts page infra and the on-call
-  ✗  warning infra alerts go to slack only
-     labels:    team=infra, severity=warning
-     expected:  infra-slack, pager
-     actual:    infra-slack
-       - pager  expected, not delivered
-     routes:    route.routes[0]
-
-  1 failed  ·  1 passed
-```
-
-Exit code `1` if any case fails — same CI story as `check` — and `2` if the config can't
-be simulated (see [`route`](#route)). `--format json` gives, per case, `passed`,
-`expected`, `actual`, `missing`, `unexpected`, the matched `routes`, and `firing`,
-`expected_inhibited`, `inhibited` and `inhibited_by`. `expected` is `null` for a case that
-only asserts `inhibited:`.
-
-### Coverage
-
-`--coverage` lists the routes that no case reaches, so you can see what the suite doesn't
-test:
+`--coverage` lists the routes no case reaches, so you can see what your tests miss:
 
 ```bash
 amlint test alertmanager.yml routing-tests.yml --coverage
@@ -565,27 +514,25 @@ amlint test alertmanager.yml routing-tests.yml --coverage
   ✓  critical infra alerts page infra and the on-call
   ✓  warning infra alerts go to slack only
   ✓  unrelated alerts aren't swallowed
-
+────────────────────────────────────────
   3 passed
 
   Route coverage  4 of 6 routes  ·  66.7%
   Not matched by any test case:
-    route.routes[2]             alertmanager.yml:13:7    {team="db"}  →  db-slack
-    route.routes[2].routes[0]   alertmanager.yml:16:11   {severity="critical"}  →  db-pager
+    route.routes[2]             alertmanager.yml:18:7    {team="db"}  →  db-slack
+    route.routes[2].routes[0]   alertmanager.yml:21:11   {severity="critical"}  →  db-pager
 ```
 
-A route is covered when a case's alert went through it. That includes the parents of the
-route the alert lands on, and every branch of a `continue: true` fan-out. Cases that fail
-still count. Malformed ones don't, since they aren't routed. The root route counts too.
+- A route is covered when a case's alert passes through it: the route it lands on, that
+  route's parents, and every branch of a `continue: true` fan-out. The root route counts too.
+- Failing cases count. Malformed ones don't, since they aren't routed.
+- Some routes can't be covered. Above, `route.routes[2].routes[0]` is unreachable:
+  `route.routes[1]` takes every critical alert first. A case for
+  `{team: db, severity: critical}` shows it going to `pager`.
+- `--fail-under N` exits `1` when coverage is below N%. The percentage is rounded to one
+  decimal before the comparison, and is only 100 when every route is covered.
 
-A route that no label set can reach stays uncovered. Above, `route.routes[2].routes[0]`
-can't be covered: `route.routes[1]` takes every critical alert first. Adding a case for
-`{team: db, severity: critical}` shows it going to `pager`.
-
-`--fail-under N` exits `1` when coverage is below N% (it turns on `--coverage` by itself),
-so CI can require a minimum. The percentage is rounded to one decimal before the
-comparison, and is only 100 when every route is covered. With `--format json` and coverage,
-the output is an object instead of a list:
+With `--format json` and coverage on, the output is an object instead of a list:
 
 ```json
 {
@@ -593,85 +540,151 @@ the output is an object instead of a list:
   "coverage": {
     "routes": 6, "covered": 4, "percent": 66.7, "fail_under": 90.0,
     "uncovered": [
-      {"path": "route.routes[2]", "line": 13, "column": 7},
-      {"path": "route.routes[2].routes[0]", "line": 16, "column": 11}
+      {"path": "route.routes[2]", "line": 18, "column": 7},
+      {"path": "route.routes[2].routes[0]", "line": 21, "column": 11}
     ]
   }
 }
 ```
 
-`amtool config routes test` checks one alert at a time from the command line; `amlint test`
-runs a whole suite from a file, in CI, without the Go binary.
+## Review a config change { #diff }
 
-**Options:**
-
-| flag | description |
-|------|-------------|
-| `--format json` | Machine-readable output |
-| `--coverage` | List the routes no case reaches, with `file:line:col`, and the coverage percentage |
-| `--fail-under N` | Exit 1 if route coverage is below N% (implies `--coverage`) |
-
-## list
-
-Print all check codes with their level and a one-line description:
+`diff` compares two versions of a config, old first. It shows the findings the change fixed
+or added, and the alerts it routes differently. Use it on pull requests to catch
+regressions.
 
 ```bash
-amlint list
+amlint diff main.yml alertmanager.yml
 ```
 
-## explain
+```
+  FIXED  [undefined-receiver]  ·  main.yml:6:7  ·  route.routes[1]
+     Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped.
 
-Show a detailed description, why it matters, and bad/good examples for any check code:
+  NEW    [empty-receiver]  ·  alertmanager.yml:15:5  ·  receivers[db-slack]
+     Receiver 'db-slack' has no integration configured (no slack_configs, pagerduty_configs, webhook_configs, etc.). Alerts sent here will be silently dropped.
+
+────────────────────────────────────────
+  1 fixed  ·  1 new  ·  1 unchanged
+
+──────────────── Routing ────────────────
+
+  team=infra
+    infra-slack  group_wait   30s → 10s
+    and 1 more label set with the same change
+
+  team=db, severity=critical
+    receivers   db-pager → db-slack
+
+  2 routing changes  · 6 label sets checked
+```
+
+`diff` exits `1` if the new config has any **new** finding, and `0` otherwise.
+
+**Options**
+
+| Flag | What it does |
+|------|--------------|
+| `--format FORMAT` | `text` (default), `json`, or `markdown` ([PR comment](#markdown-report)) |
+| `--no-routing` | Compare findings only; skip the routing comparison |
+| `--ignore CODE` | Skip these checks. Comma-separate the codes or repeat the flag |
+| `--only CODE` | Consider only these checks. Comma-separate the codes or repeat the flag |
+| `--input-format`, `--matcher-strategy` | As for [`check`](#check) |
+
+`--format json` gives the `added` and `fixed` findings (lines from the new file for `added`,
+the old one for `fixed`), the `unchanged` count, and a `routing` object: `checked`,
+`truncated` and `changes` (each with `labels`, `differences`, the full `old` / `new` routes
+and the number of `similar` label sets), or `skipped` with the reason.
+
+**Good to know**
+
+- A finding counts as unchanged when its code and config path (such as `route.routes[1]`)
+  are the same in both files. Moving a route can show its findings as fixed and new.
+- An empty old file (`/dev/null`, or a config that is new in a PR) counts as no config at
+  all: every finding is new, none is fixed, and every label set's receivers were `(none)`
+  before.
+
+### Routing changes { #routing-changes }
+
+After the findings, `diff` sends the same label sets (sample alerts) through both configs,
+with the same simulation as [`route`](#route), and lists the ones that come out differently.
+
+- A label set shows up when its receivers change, or when a receiver it reaches gets a
+  different `group_by`, `group_wait`, `group_interval`, `repeat_interval` or time intervals.
+- Edits that still deliver every alert the same way don't show up: `match:` rewritten as
+  `matchers:`, or reordered siblings that never match the same alert.
+- Label sets with exactly the same change are folded into one, shown with the smallest label
+  set.
+- Routing changes don't affect the exit code, since a PR that edits routing usually means
+  to.
+- If either config can't be simulated (see [`route`](#route)), the section says why, and the
+  findings diff still runs.
+
+??? note "How amlint picks the label sets"
+    The label sets come from the matchers of both configs: for every label, the values used
+    with `=` and `!=`, a few strings each `=~` / `!~` regex fully matches, and the label
+    being absent. Small configs get every combination. Larger ones get, for every route, a
+    label set that reaches it and one that stops on it, then single-label variations of
+    those, spread evenly over the routes and capped at 5000 label sets. The summary says
+    when the cap was hit.
+
+### Post the diff as a PR comment { #markdown-report }
+
+`--format markdown` prints a compact report for a pull-request comment:
 
 ```bash
-amlint explain undefined-receiver
-amlint explain inhibit-no-equal
+amlint diff main.yml alertmanager.yml --format markdown
 ```
 
-Useful for onboarding new team members or understanding an unfamiliar finding.
+```markdown
+### amlint diff
 
-## --version
+**2 routing changes** · **1 new finding** · 1 fixed · 1 unchanged · 6 label sets checked
 
-```bash
-amlint --version
+#### Receivers
+
+| labels | before | after |
+| --- | --- | --- |
+| `team=db, severity=critical` | `db-pager` | `db-slack` |
+
+#### Grouping and timings
+
+| labels | receiver | setting | before | after |
+| --- | --- | --- | --- | --- |
+| `team=infra` (+1 similar) | `infra-slack` | `group_wait` | `30s` | `10s` |
+
+#### New findings
+
+| level | check | location | message |
+| --- | --- | --- | --- |
+| ⚠ warning | `empty-receiver` | `alertmanager.yml:15:5` (`receivers[db-slack]`) | Receiver 'db-slack' has no integration configured (no slack\_configs, pagerduty\_configs, webhook\_configs, etc.). Alerts sent here will be silently dropped. |
+
+#### Fixed findings
+
+| level | check | location | message |
+| --- | --- | --- | --- |
+| ✖ error | `undefined-receiver` | `main.yml:6:7` (`route.routes[1]`) | Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped. |
 ```
 
-### GitHub annotations
+- The summary line always comes first. Each table appears only when it has rows, so an
+  unchanged config gives just the heading and the summary.
+- `(+1 similar)` means one more label set with exactly the same change.
+- New findings point into the new file, fixed ones into the old file.
+- Each table stops after 50 rows with `…and N more`, so a large config can't produce a huge
+  comment.
+- The output is deterministic. Names from the config are escaped, so a receiver called
+  `@team` doesn't ping anyone.
+- Exit codes are the same as for text output.
 
-`--format github` prints [workflow commands](https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions)
-that GitHub turns into annotations on the PR diff, with no SARIF upload and no Code
-Scanning needed:
+The [GitHub Action](github-action.md#routing-diff-as-a-pr-comment) posts this report as a PR
+comment and keeps it up to date.
 
-```yaml
-- name: Lint Alertmanager config
-  run: amlint check alertmanager.yml --strict --format github
-```
+## Run amlint in CI { #ci-integration }
 
-```
-::error file=alertmanager.yml,line=10,col=7,title=amlint undefined-receiver::Route references receiver 'pager-team' ... (route.routes[1])
-::warning file=alertmanager.yml,line=8,col=7,title=amlint unreachable-route::Catch-all route ... (route.routes[0])
-```
+The [GitHub Action](github-action.md) does all of this for GitHub with a few inputs. To run
+the CLI yourself:
 
-ERROR becomes `::error`, WARN `::warning` and INFO `::notice`. Paths are made relative to
-`$GITHUB_WORKSPACE`, so annotations land on the right file even when you pass an absolute
-path. Exit codes are the same as for text output.
-
-### SARIF (GitHub Code Scanning)
-
-SARIF output lets GitHub show findings as annotations directly on the PR diff, on the line
-each finding points at — no plugins required:
-
-```yaml
-- name: Run amlint
-  run: amlint check alertmanager.yml --format sarif > results.sarif
-
-- name: Upload to GitHub Code Scanning
-  uses: github/codeql-action/upload-sarif@v3
-  with:
-    sarif_file: results.sarif
-```
-
-## CI integration
+### Fail the build on findings
 
 ```yaml
 # .github/workflows/alertmanager.yml
@@ -686,4 +699,104 @@ jobs:
       - uses: actions/checkout@v7
       - run: pip install amlint
       - run: amlint check alertmanager.yml --strict
+```
+
+`--strict` fails the build on WARN findings too. For a report that never fails the build,
+use `--exit-zero` instead.
+
+### Exit codes { #exit-codes }
+
+| Command | `0` | `1` | `2` |
+|---------|-----|-----|-----|
+| `check` | No ERROR findings (WARN and INFO pass unless `--strict`) | An ERROR finding, or a WARN with `--strict` | Input can't be read (see below) |
+| `diff` | No new findings | A new finding | Input can't be read |
+| `test` | Every case passes and coverage meets `--fail-under` | A case fails, or coverage is below `--fail-under` | Input can't be read, the config can't be simulated, or the tests file isn't a list of cases |
+| `route` | The alert was routed, delivered or not | — | Input can't be read, the config can't be simulated, or a label isn't `label=value` |
+| `tree` | Always, findings or not | — | No root route, or input can't be read |
+
+"Input can't be read" means: file not found, YAML that doesn't parse, a file that isn't an
+Alertmanager config in the format given or detected, or, for `check --rules`, a glob that
+matches no files or a rule file that can't be read. `--exit-zero` turns `1` into `0`, but
+not `2`.
+
+### Annotate the PR diff { #github-annotations }
+
+`--format github` prints
+[workflow commands](https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions)
+that GitHub shows as annotations on the PR diff. You don't need SARIF or Code Scanning:
+
+```yaml
+- name: Lint Alertmanager config
+  run: amlint check alertmanager.yml --strict --format github
+```
+
+```
+::error file=alertmanager.yml,line=6,col=7,title=amlint undefined-receiver::Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped. (route.routes[1])
+::notice file=alertmanager.yml,line=1,col=1,title=amlint global-resolve-timeout-missing::global.resolve_timeout is not set. Alertmanager defaults to 5m — set it explicitly so the intent is clear and reviewable. (global)
+```
+
+ERROR becomes `::error`, WARN `::warning` and INFO `::notice`. Paths are made relative to
+`$GITHUB_WORKSPACE`, so annotations land on the right file even when you pass an absolute
+path. Exit codes are the same as for text output.
+
+### Upload to GitHub Code Scanning { #sarif-github-code-scanning }
+
+SARIF output lets GitHub Code Scanning show findings on the PR diff, on the line each finding
+points at. The job needs the `security-events: write` permission:
+
+```yaml
+- name: Run amlint
+  run: amlint check alertmanager.yml --format sarif --exit-zero > results.sarif
+
+- name: Upload to GitHub Code Scanning
+  uses: github/codeql-action/upload-sarif@v4
+  with:
+    sarif_file: results.sarif
+```
+
+`--exit-zero` keeps the upload step running when amlint finds errors. Fail the build in a
+separate `amlint check` step.
+
+### Catch regressions on a PR { #in-ci-pr-check }
+
+```yaml
+- name: Check for regressions
+  run: |
+    git show origin/main:alertmanager.yml > /tmp/main.yml
+    amlint diff /tmp/main.yml alertmanager.yml
+```
+
+To get the routing diff as a PR comment, use the GitHub Action's
+[`diff-base`](github-action.md#routing-diff-as-a-pr-comment) input.
+
+## Look up a check
+
+### List all checks { #list }
+
+```bash
+amlint list
+```
+
+Prints every check code with its level, a one-line description, and a ✓ in the `amtool`
+column when `amtool check-config` catches it too. Those are configs Alertmanager refuses to
+load. The rest load fine but don't behave as intended. Details for each check are in
+[Checks](checks/index.md).
+
+### Explain one check { #explain }
+
+```bash
+amlint explain undefined-receiver
+amlint explain inhibit-no-equal
+```
+
+Shows the check's level, whether amtool catches it, why it matters, and a bad and a fixed
+example. Useful when a finding is unfamiliar, or for onboarding. An unknown code exits `2`
+and lists the valid ones.
+
+## Start a new config { #init }
+
+`init` prints a minimal valid `alertmanager.yml` to start from:
+
+```bash
+amlint init > alertmanager.yml
 ```

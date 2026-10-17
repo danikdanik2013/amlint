@@ -88,8 +88,15 @@ runs:
     - name: Run amlint check (SARIF)
       if: inputs.sarif == 'true'
       shell: bash
+      env:
+        AMLINT_CONFIG: ${{ inputs.config-path }}
+        AMLINT_IGNORE: ${{ inputs.ignore }}
+        AMLINT_ONLY: ${{ inputs.only }}
       run: |
-        amlint check "${{ inputs.config-path }}" --format sarif --exit-zero > amlint-results.sarif
+        set -- check "$AMLINT_CONFIG" --format sarif --exit-zero
+        if [ -n "$AMLINT_IGNORE" ]; then set -- "$@" --ignore "$AMLINT_IGNORE"; fi
+        if [ -n "$AMLINT_ONLY" ]; then set -- "$@" --only "$AMLINT_ONLY"; fi
+        amlint "$@" > amlint-results.sarif
 
     - name: Upload SARIF to Code Scanning
       if: inputs.sarif == 'true'

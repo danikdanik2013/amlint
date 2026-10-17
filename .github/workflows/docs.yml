@@ -33,6 +33,10 @@ jobs:
       - name: Build the playground
         run: python playground/build.py
 
+      # All pages in one file for AI assistants, published next to the hand-written docs/llms.txt
+      - name: Build llms-full.txt
+        run: python scripts/build_llms_full.py
+
       - name: Build the site
         run: mkdocs build --strict
 

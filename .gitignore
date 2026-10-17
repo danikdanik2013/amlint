@@ -8,6 +8,9 @@ build/
 
 # Playground: made by playground/build.py, and its npm packages
 docs/playground/dist/
+
+# Made by scripts/build_llms_full.py in the docs workflow
+docs/llms-full.txt
 playground/node_modules/
 
 # Tests

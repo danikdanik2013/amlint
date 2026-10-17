@@ -1,0 +1,17 @@
+{
+  "name": "amlint",
+  "description": "Claude Code plugin for amlint, the Prometheus Alertmanager config linter",
+  "owner": {
+    "name": "danikdanik2013",
+    "url": "https://github.com/danikdanik2013"
+  },
+  "plugins": [
+    {
+      "name": "amlint",
+      "source": "./plugins/amlint",
+      "description": "Teaches Claude to lint Alertmanager configs, trace where alerts go and test routing with the amlint CLI",
+      "category": "devops",
+      "tags": ["alertmanager", "prometheus", "linter", "monitoring"]
+    }
+  ]
+}

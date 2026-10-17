@@ -1,385 +1,541 @@
 # Routing checks
 
-## undefined-receiver
+These checks catch two kinds of routing mistakes: a routing tree Alertmanager refuses to
+load, and routes that load fine but never get the alerts you meant for them.
 
-**Level:** error
+A **route** is a node in the `route:` tree. Its **matchers** (label conditions such as
+`severity="critical"`, written under `matchers:`, `match:` or `match_re:`) pick alerts, and
+its **receiver** (a named entry under `receivers:`) gets them. Routes in the same `routes:`
+list are **siblings**: Alertmanager tries them top to bottom and stops at the first match,
+unless that route sets **`continue: true`** ("keep trying the siblings below me").
 
-A route references a receiver that is not defined in `receivers:`. Alerts matched by this route will be silently dropped.
-
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-      routes:
-        - match: {team: infra}
-          receiver: pager-team   # not defined below!
-    receivers:
-      - name: default
-        slack_configs: [...]
-    ```
-
-=== "Fixed"
-    ```yaml
-    route:
-      receiver: default
-      routes:
-        - match: {team: infra}
-          receiver: pager-team
-    receivers:
-      - name: default
-        slack_configs: [...]
-      - name: pager-team         # add the missing receiver
-        pagerduty_configs: [...]
-    ```
+To see where a given alert ends up, run
+[`amlint route alertmanager.yml team=infra severity=critical`](../usage.md#route).
 
 ---
 
 ## no-root-route
 
-**Level:** error
+**Level:** error · **amtool:** also catches it
 
-The config has no root `route` at all. Alertmanager will refuse to start.
+**What goes wrong:** The config has no `route:` key, so there is no routing tree.
 
-=== "Bad"
-    ```yaml
-    receivers:
-      - name: default
-        slack_configs: [...]
-    ```
+```yaml title="Bad"
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://alerts.example.com/hook
+```
 
-=== "Fixed"
-    ```yaml
-    route:
-      receiver: default
-    receivers:
-      - name: default
-        slack_configs: [...]
-    ```
+**What Alertmanager does:** Refuses to load the config: `no routes provided`.
+
+**How to fix:** Add a root route that names the receiver every alert falls back to.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://alerts.example.com/hook
+```
 
 ---
 
 ## invalid-root-route
 
-**Level:** error
+**Level:** error · **amtool:** also catches it
 
-The root route breaks a rule Alertmanager enforces when loading the config: it must name a
-`receiver`, and must not have matchers, `continue`, `mute_time_intervals` or
-`active_time_intervals`. Alertmanager will refuse to start.
+**What goes wrong:** The root route (the top-level `route:`, which every alert enters)
+breaks one of Alertmanager's rules for it. It must name a `receiver`, and it can't have
+matchers, `continue: true`, `mute_time_intervals` or `active_time_intervals`.
 
-=== "Bad"
-    ```yaml
-    route:
-      matchers: [team="infra"]   # root route must match everything
-      routes:
-        - matchers: [severity="critical"]
-          receiver: pager
-    ```
+```yaml title="Bad"
+route:
+  matchers: [team="infra"]   # the root route must match every alert
+  routes:                    # ...and it has no receiver
+    - matchers: [severity="critical"]
+      receiver: pager
+```
 
-=== "Fixed"
-    ```yaml
-    route:
-      receiver: default          # required fallback receiver
-      routes:
-        - matchers: [team="infra"]
-          receiver: infra
-        - matchers: [severity="critical"]
-          receiver: pager
-    ```
+**What Alertmanager does:** Refuses to load the config, with an error such as
+`root route must specify a default receiver` or `root route must not have any matchers`.
+amlint reports every broken rule at once.
 
----
+**How to fix:** Give the root route a receiver. Move matchers and time intervals down to a
+child route.
 
-## bad-regex
-
-**Level:** error
-
-A regex matcher fails to compile, or uses syntax that Go RE2 — the engine Alertmanager uses —
-does not support: lookahead/lookbehind, backreferences, possessive quantifiers, atomic groups.
-Regexes in routes (`match_re`, `matchers`) and in inhibit rules (`source_match_re`,
-`target_match_re`, `source_matchers`, `target_matchers`) are all checked.
-
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-      routes:
-        - match_re:
-            service: "auth(["    # unclosed character class
-          receiver: team
-    ```
-
-=== "Fixed"
-    ```yaml
-        - match_re:
-            service: "auth(.*)"  # valid regex
-          receiver: team
-    ```
+```yaml title="Fixed"
+route:
+  receiver: default          # gets every alert no child route matches
+  routes:
+    - matchers: [team="infra", severity="critical"]
+      receiver: pager
+```
 
 ---
 
-## bad-matcher
+## undefined-receiver
 
-**Level:** error
+**Level:** error · **amtool:** also catches it
 
-A `matchers:` entry that Alertmanager can't parse, so it refuses to load the config
-(`bad matcher format`, or `matcher value contains unescaped double quote`). Alertmanager
-reads each entry with its classic matcher parser, and with the UTF-8 parser only when the
-classic one fails. This check fires when both fail. Entries in routes (`matchers`) and in
-inhibit rules (`source_matchers`, `target_matchers`) are all checked. Common causes:
+**What goes wrong:** A route names a receiver that isn't defined under `receivers:`.
 
-- an empty matcher between two commas: `a=b,,c=d`
-- a stray double quote: `a=b"c`
-- a comma in a bare value, which splits the entry: `a=b, c=~x{1,2}`
-- a quoted label name (`"service.name"=...`). Alertmanager then reads the whole entry with
-  the UTF-8 parser, where values are Go strings. `"x.y"="a\.b"` is an error there, since
-  `\.` is no Go escape, and a bare value can't hold a backslash or a brace
-  (`"x.y"=~\d+`).
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers: [team="infra"]
+      receiver: pager-team   # not defined below
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://alerts.example.com/hook
+```
 
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-      routes:
-        - matchers:
-            - 'service=api,,env=prod'        # empty matcher between the commas
-            - '"service.name"=~"api\.v2"'   # quoted label name: \. is not a Go escape
-          receiver: team
-    ```
+**What Alertmanager does:** Refuses to load the config:
+`undefined receiver "pager-team" used in route`.
 
-=== "Fixed"
-    ```yaml
-        - matchers:
-            - 'service="api", env="prod"'
-            - '"service.name"=~"api\\.v2"'  # Go string: \\ is one backslash
-          receiver: team
-    ```
+**How to fix:** Define the receiver, or correct the name to one that exists.
 
----
-
-## bad-match-label
-
-**Level:** error
-
-A `match:` or `match_re:` key that isn't a classic label name: a letter or underscore, then
-letters, digits and underscores (`[a-zA-Z_][a-zA-Z0-9_]*`). Alertmanager refuses to load
-the config (`invalid label name "k8s.ns"`), even though `matchers:` takes dotted and other
-UTF-8 names when they're quoted. Inhibit rules' `source_match`, `source_match_re`,
-`target_match` and `target_match_re` are checked too. The finding writes the `matchers:`
-(or `source_matchers:` / `target_matchers:`) entry to use instead, with the name and value
-quoted as Alertmanager reads them.
-
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-      routes:
-        - match:
-            k8s.namespace: payments   # not a classic label name
-          receiver: payments
-    ```
-
-=== "Fixed"
-    ```yaml
-        - matchers:
-            - '"k8s.namespace"="payments"'   # quoted: any UTF-8 name
-          receiver: payments
-    ```
-
----
-
-## stripped-brace
-
-**Level:** warn
-
-A bare (unquoted) value at the end of a `matchers:` entry ends in `}`, and the entry doesn't
-start with `{`. Alertmanager's classic parser strips one trailing `}` from every entry,
-braces or not. So `code=~[0-9]{3}` is the regex `[0-9]{3`, which matches the text `1{3` and
-not `123`. The config loads and `amtool check-config` accepts it. The route just never
-matches what you meant. Quote the value, or wrap the whole entry in braces.
-
-=== "Bad"
-    ```yaml
-    route:
-      receiver: default
-      routes:
-        - matchers:
-            - code=~[0-9]{3}        # the regex is [0-9]{3: matches "1{3", not "123"
-          receiver: http-errors
-    ```
-
-=== "Fixed"
-    ```yaml
-        - matchers:
-            - code=~"[0-9]{3}"      # quoted: the regex is [0-9]{3}
-          receiver: http-errors
-    # or: - '{code=~[0-9]{3}}'
-    ```
-
----
-
-## unreachable-route
-
-**Level:** warn
-
-A catch-all route — no `match`, `match_re`, or `matchers`, or only `label=~".*"` matchers — with `continue: false` appears before sibling routes. All subsequent siblings are unreachable — they will never receive alerts.
-
-=== "Bad"
-    ```yaml
-    routes:
-      - receiver: default          # catch-all, continue defaults to false
-      - match: {severity: critical}
-        receiver: pager            # unreachable!
-    ```
-
-=== "Fixed"
-    ```yaml
-    routes:
-      - match: {severity: critical}
-        receiver: pager            # specific first
-      - receiver: default          # catch-all last
-    ```
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers: [team="infra"]
+      receiver: pager-team
+receivers:
+  - name: default
+    webhook_configs:
+      - url: http://alerts.example.com/hook
+  - name: pager-team         # added
+    pagerduty_configs:
+      - routing_key: <integration-key>
+```
 
 ---
 
 ## groupby-ellipsis
 
-**Level:** error
+**Level:** error · **amtool:** also catches it
 
-`group_by` contains `...` (group by all labels) alongside explicit labels. Alertmanager refuses to load the config: `amtool check-config` fails with "cannot have wildcard group_by (`...`) and other labels at the same time".
+**What goes wrong:** A route's `group_by` (the labels that decide which alerts share one
+notification) lists `'...'` next to label names. `'...'` already means "group by every
+label".
 
-=== "Bad"
-    ```yaml
-    route:
-      group_by: ['...', alertname, cluster]  # rejected: '...' plus explicit labels
-    ```
+```yaml title="Bad"
+route:
+  receiver: default
+  group_by: ['...', alertname, cluster]
+```
 
-=== "Fixed"
-    ```yaml
-    route:
-      group_by: ['...']     # or list only the labels you want
-    ```
+**What Alertmanager does:** Refuses to load the config:
+``cannot have wildcard group_by (`...`) and other labels at the same time``.
+
+**How to fix:** Keep either `'...'` or the label names, not both.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  group_by: [alertname, cluster]   # or: ['...']
+```
 
 ---
 
-## useless-continue
+## bad-regex
 
-**Level:** info
+**Level:** error · **amtool:** also catches it
 
-A route has `continue: true` but it is the last sibling — there are no subsequent routes to continue to, so the flag has no effect.
+**What goes wrong:** A regex matcher (`=~` or `!~`) doesn't compile, or uses syntax that
+Go's RE2 engine, which Alertmanager uses, doesn't have: lookahead or lookbehind,
+backreferences, possessive quantifiers, atomic groups, or a repeat count over 1000. amlint
+checks regexes in routes and in inhibition rules.
 
-=== "Bad"
-    ```yaml
-    routes:
-      - match: {env: prod}
-        receiver: team
-        continue: true     # last sibling, no effect
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - service=~"(?!test-).*"   # lookahead: RE2 has none
+      receiver: team
+```
+
+**What Alertmanager does:** Refuses to load the whole config
+(`error parsing regexp: invalid or unsupported Perl syntax`), so no route works, not just
+this one.
+
+**How to fix:** Rewrite the regex in RE2 syntax. To exclude values, use a negative matcher
+(`!~`) instead of a lookahead.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - service!~"test-.*"       # every service not starting with test-
+      receiver: team
+```
+
+---
+
+## bad-matcher
+
+**Level:** error · **amtool:** also catches it
+
+**What goes wrong:** An entry under `matchers:` (or `source_matchers:` / `target_matchers:`
+in an inhibition rule) is not a matcher Alertmanager can parse. Common causes:
+
+- an empty matcher between two commas: `a=b,,c=d`
+- a stray double quote: `a=b"c`
+- a comma in a bare (unquoted) value, which splits the entry: `a=b, c=~x{1,2}`
+- a quoted label name, such as `"service.name"=...`, followed by a value that isn't a valid
+  Go string: `"x.y"="a\.b"` (`\.` is not a Go escape), or a bare value with a backslash or
+  brace (`"x.y"=~\d+`)
+
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - 'service=api,,env=prod'        # empty matcher between the commas
+        - '"service.name"=~"api\.v2"'   # \. is not a Go escape
+      receiver: team
+```
+
+**What Alertmanager does:** Refuses to load the config (`bad matcher format: ...` or
+`matcher value contains unescaped double quote: ...`). It reads each entry with its classic
+parser, and with its UTF-8 parser only if the classic one fails. amlint flags the entries
+both parsers reject.
+
+**How to fix:** Write each matcher as `label="value"` (or `!=`, `=~`, `!~`), with one comma
+between matchers. A quoted label name sends the whole entry to the UTF-8 parser, where
+values are Go strings: quote the value and double each backslash.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - 'service="api", env="prod"'
+        - '"service.name"=~"api\\.v2"'  # \\ is one backslash in a Go string
+      receiver: team
+```
+
+---
+
+## bad-match-label
+
+**Level:** error · **amtool:** also catches it
+
+**What goes wrong:** A key under `match:` or `match_re:` isn't a classic label name: a
+letter or underscore, then letters, digits and underscores (`[a-zA-Z_][a-zA-Z0-9_]*`).
+Inhibition rules' `source_match`, `target_match` and their `_re` forms are checked too.
+Names like `k8s.namespace` only work in `matchers:`, quoted.
+
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - match:
+        k8s.namespace: payments   # not a classic label name
+      receiver: payments
+```
+
+**What Alertmanager does:** Refuses to load the config:
+`invalid label name "k8s.namespace"`.
+
+**How to fix:** Move the matcher to `matchers:` (or `source_matchers:` /
+`target_matchers:`) and quote the label name. For a child route or an inhibition rule, the
+amlint finding spells out the entry to use.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - '"k8s.namespace"="payments"'   # quoted: any UTF-8 name works
+      receiver: payments
+```
+
+---
+
+## unreachable-route
+
+**Level:** warn · **amtool:** doesn't catch it
+
+**What goes wrong:** A catch-all route (no matchers, or only `label=~".*"` matchers) without
+`continue: true` sits above other siblings. It takes every alert, so the siblings below it
+never get any.
+
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - receiver: team-slack       # no matchers: matches every alert
+    - matchers: [severity="critical"]
+      receiver: pager            # never reached
+```
+
+**What Alertmanager does:** Loads the config. Every alert goes to `team-slack` and stops
+there, so `pager` never gets an alert.
+
+**How to fix:** Put the catch-all last. If every alert should reach the catch-all *and* the
+routes below it, give it `continue: true`.
+
+=== "Catch-all last"
+
+    ```yaml title="Fixed"
+    route:
+      receiver: default
+      routes:
+        - matchers: [severity="critical"]
+          receiver: pager
+        - receiver: team-slack
     ```
 
-=== "Fixed"
-    ```yaml
-    routes:
-      - match: {env: prod}
-        receiver: team
-        # remove continue: true, or add a sibling after this route
+=== "Notify both"
+
+    ```yaml title="Fixed"
+    route:
+      receiver: default
+      routes:
+        - receiver: team-slack
+          continue: true         # keep trying the routes below
+        - matchers: [severity="critical"]
+          receiver: pager
     ```
 
 ---
 
 ## route-match-collision
 
-**Level:** warn
+**Level:** warn · **amtool:** doesn't catch it
 
-Two sibling routes have identical matchers. Alertmanager evaluates siblings in order and stops at the first match — the second route with the same matchers will never receive any alerts.
+**What goes wrong:** Two sibling routes have identical matchers, and the first one has no
+`continue: true`. Different spellings of the same matcher count as identical:
+`match: {team: infra}` and `matchers: [team="infra"]`.
 
-=== "Bad"
-    ```yaml
-    routes:
-      - match: {team: infra, severity: critical}
-        receiver: pager
-      - match: {team: infra, severity: critical}   # identical — dead code
-        receiver: slack-infra
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers: [team="infra", severity="critical"]
+      receiver: pager
+    - matchers: [team="infra", severity="critical"]   # same matchers
+      receiver: infra-slack                            # never reached
+```
+
+**What Alertmanager does:** Loads the config. Every matching alert stops at the first
+route, so `infra-slack` never gets an alert.
+
+**How to fix:** If both receivers should get these alerts, add `continue: true` to the
+first route. Otherwise, give the second route different matchers, or remove it.
+
+=== "Notify both"
+
+    ```yaml title="Fixed"
+    route:
+      receiver: default
+      routes:
+        - matchers: [team="infra", severity="critical"]
+          receiver: pager
+          continue: true         # keep trying the routes below
+        - matchers: [team="infra", severity="critical"]
+          receiver: infra-slack
     ```
 
-=== "Fixed — use continue"
-    ```yaml
-    routes:
-      - match: {team: infra, severity: critical}
-        receiver: pager
-        continue: true          # pass to next sibling too
-      - match: {team: infra, severity: critical}
-        receiver: slack-infra
-    ```
+=== "Different matchers"
 
-=== "Fixed — distinct matchers"
-    ```yaml
-    routes:
-      - match: {team: infra, severity: critical}
-        receiver: pager
-      - match: {team: infra, severity: warning}    # different severity
-        receiver: slack-infra
+    ```yaml title="Fixed"
+    route:
+      receiver: default
+      routes:
+        - matchers: [team="infra", severity="critical"]
+          receiver: pager
+        - matchers: [team="infra", severity="warning"]
+          receiver: infra-slack
     ```
 
 ---
 
 ## shadowed-route
 
-**Level:** warn
+**Level:** warn · **amtool:** doesn't catch it
 
-Every alert this route matches also matches an earlier sibling without `continue: true`. Alertmanager tries siblings in order and stops at the first match, so this route never receives alerts.
-
-amlint compares the label values each matcher allows, not just how it is written. The later route is never reached in each of these pairs:
+**What goes wrong:** An earlier sibling without `continue: true` matches every alert this
+route matches, even though their matchers differ. amlint compares the label values each
+matcher allows, not how it's written. In each pair below, the earlier route hides the later
+one:
 
 - `severity=~"warning|critical"` before `severity="critical"`: `critical` matches the regex
 - `team!="db"` before `team="infra"`: `infra` is not `db`
-- `alertname=~"Kube.*"` before `alertname=~"KubePod.*"`: every `KubePod…` name starts with `Kube`
+- `alertname=~"Kube.*"` before `alertname=~"KubePod.*"`: every `KubePod…` name starts with
+  `Kube`
 - `service!~"db-.*"` before `service=~"api-[0-9]+"`: no `api-…` name starts with `db-`
-- `team=~"|infra"` before `team=""`: a missing label is the empty string, as in Alertmanager
-- `severity="critical"` before `severity="critical", team="infra"`: the earlier route asks for less
+- `team=~"|infra"` before `team=""`: a missing label counts as the empty string, as in
+  Alertmanager
+- `severity="critical"` before `severity="critical", team="infra"`: the earlier route asks
+  for less
 
-Labels the earlier sibling doesn't mention never stop it from matching. Every alert that reaches the siblings has also matched their parent routes, so the parents' matchers count too: under a parent with `env="prod"`, a child with `env=~"prod|staging", severity="critical"` catches every alert of a later sibling that requires `severity="critical"`.
+Parent routes count too, because every alert that reaches the siblings matched their
+parents. Under a parent with `env="prod"`, a sibling with
+`env=~"prod|staging", severity="critical"` hides a later sibling with `severity="critical"`.
 
-Regexes are compared exactly, with the same RE2 semantics as [`amlint route`](../usage.md#route) and [`amlint test`](../usage.md#test). Only routes amlint can prove dead are reported: a regex with case folding (`(?i)`), word boundaries or anchors in the middle of the pattern, or one too large to compare, keeps the check silent, even when the route is in fact dead. Label values are taken to contain no newline where a matcher is just `label=~".*"`, as in [`unreachable-route`](#unreachable-route).
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers: [severity=~"warning|critical"]
+      receiver: ops
+    - matchers: [severity="critical"]   # never reached
+      receiver: pager
+```
 
-=== "Bad"
-    ```yaml
-    routes:
-      - matchers: [severity=~"warning|critical"]
-        receiver: ops
-      - matchers: [severity="critical"]   # never reached
-        receiver: pager
+**What Alertmanager does:** Loads the config. Critical alerts match the first route and
+stop there, so `pager` never gets them.
+
+**How to fix:** Put the narrower route first. If both receivers should get the alerts, give
+the broader route `continue: true` instead.
+
+=== "Narrower first"
+
+    ```yaml title="Fixed"
+    route:
+      receiver: default
+      routes:
+        - matchers: [severity="critical"]
+          receiver: pager
+        - matchers: [severity=~"warning|critical"]
+          receiver: ops
     ```
 
-=== "Fixed — specific first"
-    ```yaml
-    routes:
-      - matchers: [severity="critical"]   # more specific first
-        receiver: pager
-      - matchers: [severity=~"warning|critical"]
-        receiver: ops
+=== "Notify both"
+
+    ```yaml title="Fixed"
+    route:
+      receiver: default
+      routes:
+        - matchers: [severity=~"warning|critical"]
+          receiver: ops
+          continue: true         # keep trying the routes below
+        - matchers: [severity="critical"]
+          receiver: pager
     ```
 
-=== "Fixed — use continue"
-    ```yaml
-    routes:
-      - matchers: [severity=~"warning|critical"]
-        receiver: ops
-        continue: true          # pass to next sibling too
-      - matchers: [severity="critical"]
-        receiver: pager
-    ```
+**Limits:** amlint reports only routes it can prove dead. It stays silent when a regex uses
+case folding (`(?i)`), word boundaries (`\b`), anchors anywhere but the very start or end,
+or is too large to compare, even if the route is in fact dead. Each dead route gets one
+finding: identical matchers are [`route-match-collision`](#route-match-collision), and a
+catch-all sibling is [`unreachable-route`](#unreachable-route).
 
-!!! note
-    Each dead route is reported by one check. Identical matchers are
-    [`route-match-collision`](#route-match-collision), and a catch-all sibling (no matchers, or
-    only `label=~".*"`) is [`unreachable-route`](#unreachable-route); `shadowed-route` reports
-    every other earlier sibling that provably catches all of a route's alerts.
+---
+
+## stripped-brace
+
+**Level:** warn · **amtool:** doesn't catch it
+
+**What goes wrong:** A bare (unquoted) value at the end of a `matchers:` entry ends in `}`,
+and the entry doesn't start with `{`. Alertmanager drops that `}`. Entries in routes and in
+inhibition rules' `source_matchers` / `target_matchers` are checked.
+
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - code=~[0-9]{3}      # Alertmanager reads the regex as [0-9]{3
+      receiver: http-errors
+```
+
+**What Alertmanager does:** Loads the config. Its classic matcher parser strips one trailing
+`}` from every entry, braces or not. The regex here becomes `[0-9]{3`, which matches the
+text `1{3` and not `123`, so the route never matches the alerts you meant.
+
+**How to fix:** Quote the value, or wrap the whole entry in braces.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - code=~"[0-9]{3}"    # or: '{code=~[0-9]{3}}'
+      receiver: http-errors
+```
+
+---
+
+## useless-continue
+
+**Level:** info · **amtool:** doesn't catch it
+
+**What goes wrong:** The last route in a `routes:` list has `continue: true`. No sibling
+comes after it, so the flag does nothing.
+
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers: [env="prod"]
+      receiver: team
+      continue: true           # last sibling: nothing to continue to
+```
+
+**What Alertmanager does:** Ignores the flag. `continue` only passes the alert on to later
+siblings in the same `routes:` list, never to the routes after the parent.
+
+**How to fix:** Remove `continue: true`. If you meant alerts to also reach the routes after
+the parent, set `continue: true` on the parent instead.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers: [env="prod"]
+      receiver: team
+```
 
 ---
 
 ## deep-nesting
 
-**Level:** info
+**Level:** info · **amtool:** doesn't catch it
 
-The routing tree is more than 5 levels deep. Very deeply nested configs are hard to read, debug, and maintain.
+**What goes wrong:** The routing tree goes more than 5 levels below the root route. That
+is hard to read, review and debug.
 
-!!! tip
-    Consider flattening the routing tree using `matchers` with multiple conditions instead of nested routes.
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers: [env="prod"]
+      routes:
+        - matchers: [region="eu"]
+          routes:
+            - matchers: [team="infra"]
+              routes:
+                - matchers: [service="db"]
+                  routes:
+                    - matchers: [severity="critical"]
+                      routes:
+                        - matchers: [component="disk"]   # level 6
+                          receiver: db-pager
+```
+
+**What Alertmanager does:** Routes alerts as usual. It has no depth limit.
+
+**How to fix:** Flatten the tree. One route with several matchers replaces a chain of
+single-matcher routes.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - env="prod"
+        - region="eu"
+        - team="infra"
+        - service="db"
+        - severity="critical"
+        - component="disk"
+      receiver: db-pager
+```

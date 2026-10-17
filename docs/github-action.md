@@ -1,7 +1,8 @@
 # GitHub Action
 
-amlint ships as a composite GitHub Action, so you don't need to write the `pip install` /
-`amlint check` steps yourself.
+Run amlint on every push and pull request with one workflow step. Findings show up as
+annotations on the pull request diff, the job fails on errors, and the action can post a
+comment that shows which alerts a change routes differently.
 
 ## Quickstart
 
@@ -16,38 +17,38 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: danikdanik2013/amlint@v0.4.1
+      - uses: danikdanik2013/amlint@v0.5.0
         with:
           config-path: alertmanager.yml
-          strict: true
 ```
 
-Findings show up as annotations on the PR diff, on the line each one points at, and the job
-fails on ERROR-level findings (or WARN too, with `strict: true`).
+Each finding becomes an annotation on the line it points at. The job fails on ERROR
+findings; add `strict: true` to fail on WARN findings too.
+
+`config-path` can be a plain `alertmanager.yml` or any file from
+[Kubernetes & Mimir](kubernetes.md): a Secret, Helm values, a Mimir config or
+`AlertmanagerConfig` resources. amlint detects the format from the content.
 
 ## Inputs
 
-| input | required | default | description |
-|-------|----------|---------|-------------|
-| `config-path` | yes | — | Path to the `alertmanager.yml` file to lint |
-| `strict` | no | `false` | Exit non-zero on WARN as well as ERROR |
-| `ignore` | no | `""` | Comma-separated check codes to skip |
-| `only` | no | `""` | Comma-separated check codes to run exclusively |
-| `version` | no | `""` (latest) | Pin a specific amlint version, e.g. `0.4.1` |
-| `format` | no | `github` | `github`: findings become PR annotations. `text`: the console report in the job log |
-| `sarif` | no | `false` | Also upload findings to GitHub Code Scanning as SARIF |
-| `diff-base` | no | `""` | Git ref to compare `config-path` against; posts the routing diff as a PR comment (see below) |
-| `github-token` | no | `github.token` | Token used to post the routing diff comment |
+| Input | Default | What it does |
+|---|---|---|
+| `config-path` | required | The file to lint (one file) |
+| `strict` | `false` | Fail on WARN as well as ERROR (`--strict`) |
+| `ignore` | `""` | Comma-separated check codes to skip (`--ignore`) |
+| `only` | `""` | Comma-separated check codes to run, and no others (`--only`) |
+| `format` | `github` | `github`: findings become annotations. `text`: the console report in the job log |
+| `sarif` | `false` | Also upload findings to GitHub code scanning as SARIF ([below](#with-code-scanning-annotations)) |
+| `diff-base` | `""` | Git ref to compare `config-path` against; posts the routing diff as a PR comment ([below](#routing-diff-as-a-pr-comment)) |
+| `github-token` | `github.token` | Token used to post the routing diff comment |
+| `version` | `""` (latest) | amlint version to install from PyPI, e.g. `0.5.0` ([below](#pinning-a-version)) |
 
-`format`, `diff-base` and `github-token` are new in v0.4.1.
+## Post the routing diff on pull requests { #routing-diff-as-a-pr-comment }
 
-## Routing diff as a PR comment
-
-Set `diff-base` to the pull request's base commit, and the action compares the config with
-its version there using [`amlint diff --format markdown`](usage.md#markdown-report). The
-report goes into one PR comment: a summary line, the label sets whose receivers changed
-(labels | before | after), changed `group_by` and timings, and new and fixed findings with
-their `file:line:col`. Each push updates the same comment instead of adding a new one.
+Set `diff-base` to the pull request's base commit. The action then compares your config with
+its version at that commit, using
+[`amlint diff --format markdown`](usage.md#markdown-report), and posts the result as one PR
+comment. Each push updates the same comment.
 
 ```yaml
 # .github/workflows/alertmanager.yml
@@ -66,17 +67,19 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # the base commit has to be in the checkout
-      - uses: danikdanik2013/amlint@v0.4.1
+      - uses: danikdanik2013/amlint@v0.5.0
         with:
           config-path: alertmanager.yml
           diff-base: ${{ github.event.pull_request.base.sha }}
 ```
 
-The comment looks like this:
+The comment has a summary line, then the label sets (combinations of alert labels) whose
+receivers changed, changed `group_by` and timings, and new and fixed findings with their
+`file:line:col`. Sections with nothing in them are left out. For example:
 
 > ### amlint diff
 >
-> **2 routing changes** · no new findings · 0 fixed · 4 unchanged · 6 label sets checked
+> **2 routing changes** · no new findings · 0 fixed · 0 unchanged · 6 label sets checked
 >
 > #### Receivers
 >
@@ -92,33 +95,43 @@ The comment looks like this:
 >
 > <sub>Compared with `alertmanager.yml` at 3f2c1a9d8e7b. Updated on every push.</sub>
 
+`(+1 similar)` means one more label set has exactly the same change.
+
 How it behaves:
 
-- It runs only on `pull_request` (and `pull_request_target`) events. On a push, `diff-base`
-  is empty and the step is skipped without a message.
-- The comment is found by the hidden marker `<!-- amlint-routing-diff -->` it starts with,
-  and is created or updated through the GitHub REST API with `curl`. No third-party actions.
-- If the config doesn't exist at the base, it is new in the PR. The diff runs against an
-  empty config, so every finding is new and every receiver shows `(none)` before.
-- If the config is the same as at the base and there is no comment yet, nothing is posted.
-  An earlier comment is still updated, so it doesn't go stale after a revert.
-- The report is also written to the job summary. That's where to look on pull requests from
-  forks, whose `GITHUB_TOKEN` is read-only: the comment can't be posted, and the step logs a
-  warning instead of failing.
-- The routing diff is informational and never fails the job. If the base commit isn't in the
-  checkout, the step fails and says how to fix it. `fetch-depth: 0` is the simplest fix;
-  fetching just the base commit works too:
+- **Pull requests only.** It runs on `pull_request` and `pull_request_target` events. On
+  other events, such as a push, the step is skipped.
+- **One comment.** The comment starts with a hidden `<!-- amlint-routing-diff -->` marker,
+  which is how the action finds it again. It posts with `curl` and the GitHub REST API, with
+  no third-party actions.
+- **New config.** If the file doesn't exist at the base commit, it is new in the PR. The
+  diff runs against an empty config, so every finding is new and every receiver was
+  `(none)` before.
+- **No change.** If the file is the same as at the base and there is no comment yet,
+  nothing is posted. An existing comment is still updated, so it doesn't go stale after a
+  revert.
+- **Job summary.** The report is also written to the job summary. Look there on pull
+  requests from forks: their `GITHUB_TOKEN` is read-only, so the comment can't be posted,
+  and the step logs a warning instead of failing.
+- **Never fails on findings.** The routing diff is informational. If `amlint diff` can't
+  read a config, the step logs a warning and posts nothing.
+- **Needs the base commit.** If the base commit isn't in the checkout, the step fails and
+  says how to fix it. `fetch-depth: 0` is the simplest fix. Fetching only the base commit
+  works too:
 
-  ```yaml
-      - uses: actions/checkout@v7
-      - run: git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }}
-  ```
+    ```yaml
+          - uses: actions/checkout@v7
+          - run: git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }}
+    ```
 
 - `ignore` and `only` apply to the findings in the comment too.
+- A report longer than GitHub allows in a comment is cut at 65,000 characters. Run
+  `amlint diff` locally for the rest.
 
-## With Code Scanning annotations
+## Upload to code scanning { #with-code-scanning-annotations }
 
-Requires Code Scanning enabled on the repo (on by default for public repos):
+To also see findings in the repository's **Security** tab, turn on `sarif`. The repository
+needs GitHub code scanning (free for public repositories).
 
 ```yaml
 jobs:
@@ -129,28 +142,43 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v7
-      - uses: danikdanik2013/amlint@v0.4.1
+      - uses: danikdanik2013/amlint@v0.5.0
         with:
           config-path: alertmanager.yml
           sarif: true
 ```
 
-Findings then also show up in the repository's Security tab, in addition to the job failing
-on ERROR-level findings. SARIF upload happens even if the check step finds issues, so
-annotations appear on the same run that fails. To get only the Code Scanning annotations, set
-`format: text` as well.
+- The SARIF upload runs even when the check finds problems, so code scanning shows them on
+  the same run that fails.
+- The job still fails on ERROR findings. To get code scanning annotations only, without the
+  `github` format's annotations, also set `format: text`.
+- `ignore` and `only` apply to the SARIF upload too.
 
-## Pinning a version
+## Pin the amlint version { #pinning-a-version }
 
-Use `version` to pin amlint itself independently of the action tag — useful if you want the
-action's argument-handling to stay current while freezing the linter's rule set:
+By default the action installs the latest amlint from PyPI, so a new release with new
+checks can start failing your build. To choose when you upgrade, set `version`:
 
 ```yaml
-      - uses: danikdanik2013/amlint@v0.4.1
+      - uses: danikdanik2013/amlint@v0.5.0
         with:
           config-path: alertmanager.yml
-          version: '0.4.1'
+          version: '0.5.0'
 ```
 
-`diff-base` runs `amlint diff --format markdown`, which is new in amlint 0.4.1, so don't pin
-`version` below `0.4.1`.
+Don't pin below `0.4.1`: the default `format: github` needs `0.4.0`, and `diff-base` needs
+`0.4.1`. The formats on the [Kubernetes & Mimir](kubernetes.md) page need `0.5.0` or later.
+
+## Limits
+
+- `config-path` takes one file. To lint several, add a step per file.
+- There are no inputs for `--input-format`, `--matcher-strategy` or `--rules`. If you need
+  them, install amlint and run it yourself:
+
+    ```yaml
+          - uses: actions/setup-python@v7
+            with:
+              python-version: '3.12'
+          - run: pip install amlint
+          - run: amlint check values.yaml --input-format helm --format github
+    ```
