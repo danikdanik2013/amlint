@@ -22,6 +22,7 @@ amlint diff main.yml alertmanager.yml                        # what does this ch
 | [`diff`](#diff) | compare two configs: new and fixed findings, and alerts that now go elsewhere |
 | [`list`](#list), [`explain`](#explain) | see every check, or read about one |
 | [`init`](#init) | print a minimal valid config to start from |
+| [`lsp`](#lsp) | show findings in your editor as you type |
 | `amlint --version` | print the installed version |
 
 ## Find mistakes in a config { #check }
@@ -138,9 +139,9 @@ from. If there is none, it reads `[tool.amlint]` from `pyproject.toml` in that d
 
 | Key | What it does | Used by |
 |-----|--------------|---------|
-| `ignore` | Checks to skip, added to any `--ignore` codes | `check`, `diff`, `tree` |
+| `ignore` | Checks to skip, added to any `--ignore` codes | `check`, `diff`, `tree`, `lsp` |
 | `strict` | Same as `--strict` | `check` |
-| `severity` | Sets a check's level to `error`, `warn` or `info` | `check`, `diff`, `tree` |
+| `severity` | Sets a check's level to `error`, `warn` or `info` | `check`, `diff`, `tree`, `lsp` |
 
 **Good to know:** amlint doesn't look in parent directories or next to the config file. Only
 the first file found is read, so `pyproject.toml` is ignored when `.amlint.yml` exists.
@@ -177,7 +178,8 @@ receivers:
 - A finding's line is the one shown in the output.
 - An unknown code gets the same "did you mean" warning as `--ignore`. A `disable-file`
   comment further down the file is ignored, with a warning.
-- Suppressions also apply to `diff` and `tree`.
+- Suppressions also apply to `diff`, `tree` and the [editor](#lsp), which can add the
+  comment for you.
 
 ### Check routes against your Prometheus rules { #checking-against-prometheus-rules }
 
@@ -768,6 +770,28 @@ separate `amlint check` step.
 
 To get the routing diff as a PR comment, use the GitHub Action's
 [`diff-base`](github-action.md#routing-diff-as-a-pr-comment) input.
+
+## See findings in your editor { #lsp }
+
+`amlint lsp` is a language server. Your editor starts it and shows amlint's findings as you
+type, on the lines `amlint check` reports. You don't run it yourself.
+
+- **Findings** come from the editor buffer, so you don't have to save first. Each check code
+  links to its docs.
+- **Hover on a route** shows its matchers, receiver, `group_by` and timings, where each
+  value comes from, and an example alert that ends there. It is the same simulation as
+  [`route`](#route).
+- **Quick fixes** add `# amlint: disable=<code>` to the line, or
+  `# amlint: disable-file=<code>` to the top of the file.
+
+It reads every format `check` reads. YAML files without an Alertmanager config, such as
+Kubernetes manifests, get no findings.
+
+`ignore` and `severity` come from the [project config](#project-config) in the workspace
+folder, or next to the file when it isn't in one. The `--rules` checks don't run in the
+editor.
+
+Setup for VS Code, Neovim and Helix: [Editors](editors.md).
 
 ## Look up a check
 

@@ -21,7 +21,7 @@ CI runs these on Python 3.9 to 3.15:
 
 ```bash
 ruff check amlint/
-pytest test_linter.py test_formats.py -v
+pytest test_linter.py test_formats.py test_lsp.py -v
 ```
 
 If you change routing, inhibition or how configs are read, also run the differential tests
@@ -32,9 +32,10 @@ against a real Alertmanager: `scripts/differential.sh`. See
 
 - One check or one fix per pull request is easiest to review.
 - Include a test that fails without your change and passes with it.
-- `ruff check amlint/` and `pytest test_linter.py test_formats.py` pass.
+- `ruff check amlint/` and `pytest test_linter.py test_formats.py test_lsp.py` pass.
 - For a new check, follow [Add a check](docs/contributing.md#how-to-add-a-new-check): the
-  function, `ALL_CHECKS`, `EXPLAINS`, a test, and its docs under `docs/checks/`.
+  function, `ALL_CHECKS`, `EXPLAINS` and `_DOCS_PAGES`, a test, and its docs under
+  `docs/checks/`.
 - Add a line to `CHANGELOG.md` under `## [Unreleased]`.
 
 ## More

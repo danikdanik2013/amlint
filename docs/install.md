@@ -46,6 +46,11 @@ repos:
 
 The hook runs on files whose names end in `alertmanager.yml` or `alertmanager.yaml`.
 
+## Editors
+
+To see findings in VS Code, Neovim or Helix as you type, install amlint as above, then
+set up your editor: see [Editors](editors.md).
+
 ## AI coding assistants
 
 **Claude Code:** add the plugin. It teaches Claude to run amlint when you ask it to check an
