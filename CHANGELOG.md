@@ -7,10 +7,18 @@
   with `code --install-extension dpyly.amlint`; it needs amlint 0.6.0 or newer.
 
 ### Changed
+- SARIF output links each rule to its check's section in the docs (`helpUri`), not to the
+  list of all checks.
 - Pushing a `vX.Y.Z` tag now also updates the Homebrew formula: once the sdist is on PyPI,
   the release workflow points `Formula/amlint.rb` at it and commits that to main, or opens
   a PR if main is protected. It stops when the runtime dependencies changed, because the
   formula's resource blocks then need a manual refresh.
+
+### Fixed
+- Text output dropped square brackets taken from the config. Finding messages in `check`
+  and `diff`, the route tree in `tree` and some error messages read text such as
+  `env=~[a-z]{3}` or a receiver named `[dev] team` as Rich markup, so `[a-z]` and `[dev]`
+  disappeared. JSON, SARIF, GitHub annotations and the editor were not affected.
 
 ## [0.6.0] - 2026-10-17
 
