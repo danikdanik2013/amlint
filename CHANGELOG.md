@@ -16,6 +16,10 @@
 - Text from the config is written as Mermaid entity codes in both, so a receiver name can't
   break the diagram or add HTML to the comment.
 
+### Changed
+- PyPI classifiers add `Typing :: Typed` (the package ships `py.typed`) and
+  `Programming Language :: Python :: 3 :: Only`.
+
 ## [0.5.0] - 2026-10-17
 
 Highlights:
