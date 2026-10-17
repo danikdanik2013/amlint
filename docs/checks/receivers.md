@@ -115,7 +115,8 @@ Quote `'null'`. Unquoted, YAML reads `null` as no value, not as the name `null`.
 
 **Limits:** amlint knows these integrations: `email`, `pagerduty`, `slack`, `opsgenie`,
 `victorops`, `webhook`, `wechat`, `sns`, `msteams`, `msteamsv2`, `telegram`, `discord`,
-`pushover`, `webex`, `jira`, `rocketchat` and `incidentio` (each as `<name>_configs`). It
+`pushover`, `webex`, `jira`, `rocketchat`, `incidentio` and `mattermost` (each as
+`<name>_configs`). It
 reports a receiver that uses only some other key as empty.
 
 ---

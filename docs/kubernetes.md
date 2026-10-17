@@ -102,7 +102,7 @@ $ amlint check values.yaml
 note: values.yaml:2: alertmanager.config is merged over the kube-prometheus-stack 92.10.1 defaults, as Helm merges values: global, inhibit_rules, templates, route.routes come from the chart
 
   ✖  ERROR  [undefined-receiver]  ·  values.yaml:3:5  ·  route.routes[0]
-     Route references receiver 'null' which is not defined in receivers. Alerts matched here will be dropped.
+     Route references receiver 'null' which is not defined in receivers. Alertmanager refuses to load this config.
 
 ──────────────────────────────────────────────────────────────────────────────
   ✖ 1 error

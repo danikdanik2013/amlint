@@ -395,7 +395,7 @@ def check_undefined_receivers(cfg):
             out.append(Finding(
                 ERROR, "undefined-receiver",
                 f"Route references receiver '{rcv}' which is not defined in receivers. "
-                f"Alerts matched here will be dropped.",
+                f"Alertmanager refuses to load this config.",
                 path,
             ))
     return out
@@ -452,8 +452,9 @@ def check_dead_inhibitions(cfg):
             if src_eq[key] == tgt_eq[key]:
                 out.append(Finding(
                     INFO, "inhibit-same-match",
-                    f"Source and target matchers both have '{key}={src_eq[key]}'. "
-                    f"Check that the rule is not silencing its own source alert.",
+                    f"Source and target matchers both have '{key}={src_eq[key]}'. An alert that "
+                    f"matches both sides never mutes another alert that matches both, so "
+                    f"unless other matchers tell the two sides apart, this rule mutes nothing.",
                     where,
                 ))
     return out
@@ -957,7 +958,7 @@ def check_duplicate_receivers(cfg):
             out.append(Finding(
                 ERROR, "duplicate-receiver",
                 f"Receiver '{name}' is defined more than once. "
-                f"The second definition will be silently ignored.",
+                f"Alertmanager refuses to load this config.",
                 f"receivers[{i}]",  # by index: by name would point at the first definition
             ))
         seen.add(name)
@@ -970,7 +971,7 @@ _INTEGRATION_KEYS = {
     "victorops_configs", "webhook_configs", "wechat_configs", "sns_configs",
     "msteams_configs", "msteamsv2_configs", "telegram_configs", "discord_configs",
     "pushover_configs", "webex_configs", "jira_configs", "rocketchat_configs",
-    "incidentio_configs",
+    "incidentio_configs", "mattermost_configs",
 }
 
 # Names that say "drop these on purpose" (kube-prometheus routes Watchdog/InfoInhibitor to "null")
@@ -1019,7 +1020,7 @@ def check_undefined_time_intervals(cfg):
                     out.append(Finding(
                         ERROR, "undefined-time-interval",
                         f"{key} references '{name}' which is not defined in time_intervals. "
-                        f"Alertmanager will reject this config at runtime.",
+                        f"Alertmanager refuses to load this config.",
                         path,
                     ))
     return out
@@ -1039,7 +1040,8 @@ def check_timing(cfg):
                 WARN, "repeat-before-group",
                 f"repeat_interval ({_describe_timing(ri, path)}) is shorter than "
                 f"group_interval ({_describe_timing(gi, path)}). "
-                f"Alertmanager will send repeats before the group has a chance to fire.",
+                f"Alertmanager re-sends only when it flushes a group, once per group_interval, "
+                f"so repeats come every group_interval, not every repeat_interval.",
                 path,
             ))
     return out
@@ -1122,7 +1124,8 @@ def check_group_wait(cfg):
                 WARN, "wait-exceeds-interval",
                 f"group_wait ({_describe_timing(gw, path)}) is longer than "
                 f"group_interval ({_describe_timing(gi, path)}). "
-                f"Subsequent alerts will fire before the initial group has a chance to form.",
+                f"The first notification for a new group then takes longer than any later "
+                f"update to it; group_wait is usually the shorter of the two.",
                 path,
             ))
     return out
@@ -1163,7 +1166,8 @@ def check_email_smarthost(cfg: dict) -> List[Finding]:
                 out.append(Finding(
                     ERROR, "email-no-smarthost",
                     f"email_configs entry in receiver '{r.get('name')}' has no 'smarthost' "
-                    f"and global.smtp_smarthost is not set. Emails cannot be sent.",
+                    f"and global.smtp_smarthost is not set. "
+                    f"Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].email_configs[{i}]",
                 ))
     return out
@@ -1179,7 +1183,7 @@ def check_webhook_no_url(cfg: dict) -> List[Finding]:
                 out.append(Finding(
                     ERROR, "webhook-no-url",
                     f"webhook_configs[{i}] in receiver '{name}' has no 'url' or 'url_file'. "
-                    f"Alerts sent here will fail to deliver.",
+                    f"Alertmanager refuses to load this config.",
                     f"receivers[{name}].webhook_configs[{i}]",
                 ))
     return out
@@ -1196,8 +1200,9 @@ def check_pagerduty_no_routing_key(cfg: dict) -> List[Finding]:
             if not has_key:
                 out.append(Finding(
                     ERROR, "pagerduty-no-routing-key",
-                    f"pagerduty_configs[{i}] in receiver '{r.get('name')}' has no 'routing_key' or "
-                    f"'routing_key_file'. PagerDuty alerts cannot be sent.",
+                    f"pagerduty_configs[{i}] in receiver '{r.get('name')}' has no 'routing_key', "
+                    f"'routing_key_file', 'service_key' or 'service_key_file'. "
+                    f"Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].pagerduty_configs[{i}]",
                 ))
     return out
@@ -1224,7 +1229,7 @@ def check_slack_no_api_url(cfg: dict) -> List[Finding]:
                     ERROR, "slack-no-api-url",
                     f"slack_configs[{i}] in receiver '{r.get('name')}' has no 'api_url' or "
                     f"'api_url_file', and global.slack_api_url is not set. "
-                    f"Slack notifications cannot be sent.",
+                    f"Alertmanager refuses to load this config.",
                     where,
                 ))
     return out
@@ -1242,7 +1247,7 @@ def check_opsgenie_no_api_key(cfg: dict) -> List[Finding]:
                     ERROR, "opsgenie-no-api-key",
                     f"opsgenie_configs[{i}] in receiver '{r.get('name')}' has no 'api_key' or "
                     f"'api_key_file', and global.opsgenie_api_key is not set. "
-                    f"OpsGenie alerts cannot be sent.",
+                    f"Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].opsgenie_configs[{i}]",
                 ))
     return out
@@ -1257,7 +1262,7 @@ def check_msteams_no_webhook_url(cfg: dict) -> List[Finding]:
                 out.append(Finding(
                     ERROR, "msteams-no-webhook-url",
                     f"msteams_configs[{i}] in receiver '{r.get('name')}' has no 'webhook_url' or "
-                    f"'webhook_url_file'. MS Teams notifications cannot be sent.",
+                    f"'webhook_url_file'. Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].msteams_configs[{i}]",
                 ))
     return out
@@ -1379,8 +1384,8 @@ def check_global_resolve_timeout(cfg: dict) -> List[Finding]:
     if not (cfg.get("global") or {}).get("resolve_timeout"):
         out.append(Finding(
             INFO, "global-resolve-timeout-missing",
-            "global.resolve_timeout is not set. Alertmanager defaults to 5m — "
-            "set it explicitly so the intent is clear and reviewable.",
+            "global.resolve_timeout is not set, so Alertmanager uses 5m. It only applies to "
+            "alerts sent without an end time; Prometheus always sets one.",
             "global",
         ))
     return out
@@ -1395,7 +1400,7 @@ def check_telegram_no_bot_token(cfg: dict) -> List[Finding]:
                 out.append(Finding(
                     ERROR, "telegram-no-bot-token",
                     f"telegram_configs[{i}] in receiver '{r.get('name')}' has no 'bot_token' or "
-                    f"'bot_token_file'. Telegram messages cannot be sent.",
+                    f"'bot_token_file'. Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].telegram_configs[{i}]",
                 ))
     return out
@@ -1410,7 +1415,7 @@ def check_discord_no_webhook_url(cfg: dict) -> List[Finding]:
                 out.append(Finding(
                     ERROR, "discord-no-webhook-url",
                     f"discord_configs[{i}] in receiver '{r.get('name')}' has no 'webhook_url' or "
-                    f"'webhook_url_file'. Discord notifications cannot be sent.",
+                    f"'webhook_url_file'. Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].discord_configs[{i}]",
                 ))
     return out
@@ -1428,7 +1433,7 @@ def check_victorops_no_api_key(cfg: dict) -> List[Finding]:
                     ERROR, "victorops-no-api-key",
                     f"victorops_configs[{i}] in receiver '{r.get('name')}' has no 'api_key' or "
                     f"'api_key_file', and global.victorops_api_key is not set. "
-                    f"VictorOps alerts cannot be sent.",
+                    f"Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].victorops_configs[{i}]",
                 ))
     return out
@@ -1444,7 +1449,8 @@ def check_wechat_no_corp_id(cfg: dict) -> List[Finding]:
                 out.append(Finding(
                     ERROR, "wechat-no-corp-id",
                     f"wechat_configs[{i}] in receiver '{r.get('name')}' has no 'corp_id', and "
-                    f"global.wechat_api_corp_id is not set. WeChat messages cannot be sent.",
+                    f"global.wechat_api_corp_id is not set. "
+                    f"Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].wechat_configs[{i}]",
                 ))
     return out
@@ -1453,8 +1459,8 @@ def check_wechat_no_corp_id(cfg: dict) -> List[Finding]:
 # CHECK 28: sns_configs missing all of topic_arn / phone_number / target_arn
 def check_sns_no_target(cfg: dict) -> List[Finding]:
     """
-    SNS requires exactly one destination: a topic ARN, a phone number (SMS),
-    or a mobile platform endpoint ARN. None set means AWS rejects the publish call.
+    SNS needs a destination: a topic ARN, a phone number (SMS) or a mobile platform
+    endpoint ARN. Alertmanager refuses to load an sns_configs entry with none of them.
     """
     out: List[Finding] = []
     for r in _receivers(cfg):
@@ -1463,8 +1469,8 @@ def check_sns_no_target(cfg: dict) -> List[Finding]:
                 out.append(Finding(
                     ERROR, "sns-no-target",
                     f"sns_configs[{i}] in receiver '{r.get('name')}' has none of 'topic_arn', "
-                    f"'phone_number', or 'target_arn' set. Exactly one is required — "
-                    f"AWS will reject the publish call.",
+                    f"'phone_number', or 'target_arn' set. Set one of them; "
+                    f"Alertmanager refuses to load this config.",
                     f"receivers[{r.get('name')}].sns_configs[{i}]",
                 ))
     return out

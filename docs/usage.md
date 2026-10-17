@@ -39,10 +39,10 @@ cat alertmanager.yml | amlint check -    # stdin
 
 ```
   ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:6:7  ·  route.routes[1]
-     Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped.
+     Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config.
 
   ℹ  INFO   [global-resolve-timeout-missing]  ·  alertmanager.yml:1:1  ·  global
-     global.resolve_timeout is not set. Alertmanager defaults to 5m — set it explicitly so the intent is clear and reviewable.
+     global.resolve_timeout is not set, so Alertmanager uses 5m. It only applies to alerts sent without an end time; Prometheus always sets one.
 
 ────────────────────────────────────────
   ✖ 1 error  ·  ℹ 1 info
@@ -102,7 +102,7 @@ The output is a list with one object per finding:
   "column": 7,
   "level": "error",
   "code": "undefined-receiver",
-  "message": "Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped.",
+  "message": "Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config.",
   "where": "route.routes[1]"
 }
 ```
@@ -559,7 +559,7 @@ amlint diff main.yml alertmanager.yml
 
 ```
   FIXED  [undefined-receiver]  ·  main.yml:6:7  ·  route.routes[1]
-     Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped.
+     Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config.
 
   NEW    [empty-receiver]  ·  alertmanager.yml:15:5  ·  receivers[db-slack]
      Receiver 'db-slack' has no integration configured (no slack_configs, pagerduty_configs, webhook_configs, etc.). Alerts sent here will be silently dropped.
@@ -663,7 +663,7 @@ amlint diff main.yml alertmanager.yml --format markdown
 
 | level | check | location | message |
 | --- | --- | --- | --- |
-| ✖ error | `undefined-receiver` | `main.yml:6:7` (`route.routes[1]`) | Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped. |
+| ✖ error | `undefined-receiver` | `main.yml:6:7` (`route.routes[1]`) | Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config. |
 ```
 
 - The summary line always comes first. Each table appears only when it has rows, so an
@@ -731,8 +731,8 @@ that GitHub shows as annotations on the PR diff. You don't need SARIF or Code Sc
 ```
 
 ```
-::error file=alertmanager.yml,line=6,col=7,title=amlint undefined-receiver::Route references receiver 'db-pager' which is not defined in receivers. Alerts matched here will be dropped. (route.routes[1])
-::notice file=alertmanager.yml,line=1,col=1,title=amlint global-resolve-timeout-missing::global.resolve_timeout is not set. Alertmanager defaults to 5m — set it explicitly so the intent is clear and reviewable. (global)
+::error file=alertmanager.yml,line=6,col=7,title=amlint undefined-receiver::Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config. (route.routes[1])
+::notice file=alertmanager.yml,line=1,col=1,title=amlint global-resolve-timeout-missing::global.resolve_timeout is not set, so Alertmanager uses 5m. It only applies to alerts sent without an end time; Prometheus always sets one. (global)
 ```
 
 ERROR becomes `::error`, WARN `::warning` and INFO `::notice`. Paths are made relative to
