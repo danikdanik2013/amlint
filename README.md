@@ -187,7 +187,7 @@ and reject the same configs. The few known differences are listed on that page.
 - uses: actions/checkout@v7
   with:
     fetch-depth: 0
-- uses: danikdanik2013/amlint@v0.6.0
+- uses: danikdanik2013/amlint@v0.6.1
   with:
     config-path: alertmanager.yml
     strict: true
@@ -208,7 +208,7 @@ alerts now reach different receivers and which findings are new or fixed. It nee
 ```yaml
 repos:
   - repo: https://github.com/danikdanik2013/amlint
-    rev: v0.6.0
+    rev: v0.6.1
     hooks:
       - id: amlint        # runs on files ending in alertmanager.yml or alertmanager.yaml
 ```

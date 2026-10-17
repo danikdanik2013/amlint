@@ -78,7 +78,7 @@ reasoning about it by hand, and quote its output.
 
   `--coverage` lists routes that no test reaches, and `--fail-under 90` fails below 90%
   route coverage.
-- **CI:** suggest the GitHub Action (`uses: danikdanik2013/amlint@v0.6.0`, with
+- **CI:** suggest the GitHub Action (`uses: danikdanik2013/amlint@v0.6.1`, with
   `config-path:` and `strict: true`) or `amlint check <file> --strict --format github`.
 
 ## Limits

@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: danikdanik2013/amlint@v0.6.0
+      - uses: danikdanik2013/amlint@v0.6.1
         with:
           config-path: alertmanager.yml
 ```
@@ -41,7 +41,7 @@ findings; add `strict: true` to fail on WARN findings too.
 | `sarif` | `false` | Also upload findings to GitHub code scanning as SARIF ([below](#with-code-scanning-annotations)) |
 | `diff-base` | `""` | Git ref to compare `config-path` against; posts the routing diff as a PR comment ([below](#routing-diff-as-a-pr-comment)) |
 | `github-token` | `github.token` | Token used to post the routing diff comment |
-| `version` | `""` (latest) | amlint version to install from PyPI, e.g. `0.6.0` ([below](#pinning-a-version)) |
+| `version` | `""` (latest) | amlint version to install from PyPI, e.g. `0.6.1` ([below](#pinning-a-version)) |
 
 ## Post the routing diff on pull requests { #routing-diff-as-a-pr-comment }
 
@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # the base commit has to be in the checkout
-      - uses: danikdanik2013/amlint@v0.6.0
+      - uses: danikdanik2013/amlint@v0.6.1
         with:
           config-path: alertmanager.yml
           diff-base: ${{ github.event.pull_request.base.sha }}
@@ -143,7 +143,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v7
-      - uses: danikdanik2013/amlint@v0.6.0
+      - uses: danikdanik2013/amlint@v0.6.1
         with:
           config-path: alertmanager.yml
           sarif: true
@@ -161,10 +161,10 @@ By default the action installs the latest amlint from PyPI, so a new release wit
 checks can start failing your build. To choose when you upgrade, set `version`:
 
 ```yaml
-      - uses: danikdanik2013/amlint@v0.6.0
+      - uses: danikdanik2013/amlint@v0.6.1
         with:
           config-path: alertmanager.yml
-          version: '0.6.0'
+          version: '0.6.1'
 ```
 
 Don't pin below `0.4.1`: the default `format: github` needs `0.4.0`, and `diff-base` needs

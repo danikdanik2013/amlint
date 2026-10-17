@@ -1,17 +1,10 @@
 # Roadmap
 
-Where amlint is going after 0.6.0, release by release. This is a plan, not a promise: items
+Where amlint is going after 0.6.1, release by release. This is a plan, not a promise: items
 can move between releases or drop out. Want to work on one? Open an issue first, so two
 people don't build the same thing.
 
 Last updated: 2026-10-17.
-
-## 0.6.1: fixes
-
-- **Messages lose text in square brackets.** Text output prints finding messages as Rich
-  markup, so `env=~[a-z]{3}` shows up as `env=~{3}`. JSON, SARIF and the editor are fine.
-- **SARIF links to the check.** `helpUri` points at the list of all checks. Point it at the
-  check's own section instead, as the editor already does (`docs_url()` in `explains.py`).
 
 ## 0.7: the editor as the main tool
 

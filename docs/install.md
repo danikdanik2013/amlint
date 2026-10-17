@@ -19,7 +19,7 @@ No Python needed. Mount the folder with your config and pass its path inside the
 docker run --rm -v "$PWD":/cfg ghcr.io/danikdanik2013/amlint check /cfg/alertmanager.yml
 ```
 
-Releases are tagged by version (`0.6.0`) and minor version (`0.6`); `latest` follows the main branch.
+Releases are tagged by version (`0.6.1`) and minor version (`0.6`); `latest` follows the main branch.
 
 ## Homebrew
 
@@ -39,7 +39,7 @@ Check the config on every commit. Add this to `.pre-commit-config.yaml`:
 ```yaml
 repos:
   - repo: https://github.com/danikdanik2013/amlint
-    rev: v0.6.0
+    rev: v0.6.1
     hooks:
       - id: amlint
 ```
