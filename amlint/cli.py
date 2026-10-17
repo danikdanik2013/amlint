@@ -112,7 +112,7 @@ def _read(path) -> str:
     if path == "-":
         return sys.stdin.read()
     if not os.path.exists(path):
-        err_console.print(f"[red]File not found:[/red] {path}")
+        err_console.print(f"[red]File not found:[/red] {escape(str(path))}")
         sys.exit(2)
     with open(path) as f:
         return f.read()
@@ -125,7 +125,8 @@ def _read_yaml(path, content=None, loader=yaml.SafeLoader):
     try:
         return yaml.load(content, Loader=loader)
     except yaml.YAMLError as e:
-        err_console.print(f"[red]Failed to parse YAML[/red] ({path}): {e}")
+        err_console.print(f"[red]Failed to parse YAML[/red] ({escape(str(path))}): "
+                          f"{escape(str(e))}")
         sys.exit(2)
 
 
@@ -137,7 +138,7 @@ def load(path, content=None):
         return {}
     if not isinstance(cfg, dict):
         err_console.print(
-            f"[red]Not an Alertmanager config[/red] ({path}): "
+            f"[red]Not an Alertmanager config[/red] ({escape(str(path))}): "
             f"top level must be a mapping, got {type(cfg).__name__}"
         )
         sys.exit(2)
@@ -195,7 +196,7 @@ def _location(path, f) -> str:
 
 def _print_findings(findings, path, label=None):
     if label:
-        console.print(Rule(f"[bold]{label}[/bold]", style="dim"))
+        console.print(Rule(f"[bold]{escape(label)}[/bold]", style="dim"))
 
     if not findings:
         console.print("\n  [bold green]✓[/bold green]  No issues found.\n")
@@ -211,7 +212,7 @@ def _print_findings(findings, path, label=None):
         if f.where:
             header.append(f"  ·  {f.where}", style="dim")
         console.print(header, soft_wrap=True)  # keep file:line:col in one piece
-        console.print(f"     {f.msg}")
+        console.print(f"     {escape(f.msg)}")
         console.print()
 
     errs  = sum(1 for f in findings if f.level == ERROR)
@@ -231,11 +232,10 @@ def _print_findings(findings, path, label=None):
 
 
 _SARIF_LEVEL = {ERROR: "error", WARN: "warning", INFO: "note"}
-_DOCS_BASE = "https://danikdanik2013.github.io/amlint/checks/"
 
 
 def _to_sarif(all_findings, version: str) -> dict:
-    from .explains import EXPLAINS
+    from .explains import EXPLAINS, docs_url
 
     def pascal(code: str) -> str:
         return "".join(w.capitalize() for w in code.split("-"))
@@ -248,7 +248,7 @@ def _to_sarif(all_findings, version: str) -> dict:
             "defaultConfiguration": {
                 "level": _SARIF_LEVEL.get(e["level"].split()[0], "note")
             },
-            "helpUri": f"{_DOCS_BASE}",
+            "helpUri": docs_url(code),
         }
         for code, e in EXPLAINS.items()
     ]
@@ -428,12 +428,12 @@ def _cmd_tree(args) -> int:
 
     def label_for(node: dict, path: str) -> str:
         parts = _format_matchers(node)
-        piece = "{" + ", ".join(parts) + "}" if parts else (
+        piece = escape("{" + ", ".join(parts) + "}") if parts else (
             "(catch-all)" if path != "route" else "(root)"
         )
         rcv = node.get("receiver")
         if rcv:
-            piece += f"  →  [bold]{rcv}[/bold]"
+            piece += f"  →  [bold]{escape(str(rcv))}[/bold]"
         else:
             piece += "  →  [dim italic](inherited)[/dim italic]"
         if node.get("continue"):
@@ -465,14 +465,14 @@ def _cmd_tree(args) -> int:
         noun = "issue" if len(shown) == 1 else "issues"
         console.print(
             f"  [dim]{len(shown)} routing {noun} flagged above — run "
-            f"'amlint check {args.file}' for full details.[/dim]\n"
+            f"'amlint check {escape(args.file)}' for full details.[/dim]\n"
         )
     other = sum(len(v) for p, v in by_path.items()) - len(shown)
     if other:
         noun = "issue" if other == 1 else "issues"
         console.print(
             f"  [dim]{other} more {noun} outside routing (receivers, global, timing) — "
-            f"run 'amlint check {args.file}' for full details.[/dim]\n"
+            f"run 'amlint check {escape(args.file)}' for full details.[/dim]\n"
         )
     return 0
 
@@ -821,7 +821,7 @@ def _cmd_test(args) -> int:
     cases = _load_test_cases(args.tests)
     if cases is None:
         err_console.print(
-            f"[red]Invalid test file:[/red] {args.tests} must be a list of test cases, "
+            f"[red]Invalid test file:[/red] {escape(args.tests)} must be a list of test cases, "
             f"or have a top-level 'tests:' list."
         )
         return 2
@@ -937,7 +937,7 @@ def _print_routing_diff(rdiff, skipped) -> None:
         for d in c.differences():
             same = d["setting"] == d["subject"]
             what = d["subject"] if same else f"{d['subject']}  {d['setting']}"
-            grid.add_row(what, Text(f"{d['old']} → {d['new']}"))
+            grid.add_row(Text(what), Text(f"{d['old']} → {d['new']}"))
         console.print(Padding(grid, (0, 0, 0, 4), expand=False))
         if c.similar:
             more = "label set" if c.similar == 1 else "label sets"
@@ -1017,14 +1017,14 @@ def _cmd_diff(args):
                       f"  ·  {escape(_location(args.old, f))}"
                       + (f"  ·  [dim]{escape(f.where)}[/dim]" if f.where else ""),
                       soft_wrap=True)
-        console.print(f"     {f.msg}")
+        console.print(f"     {escape(f.msg)}")
         console.print()
     for f in added:
         console.print(f"  [bold red]NEW  [/bold red]  {escape(f'[{f.code}]')}"
                       f"  ·  {escape(_location(args.new, f))}"
                       + (f"  ·  [dim]{escape(f.where)}[/dim]" if f.where else ""),
                       soft_wrap=True)
-        console.print(f"     {f.msg}")
+        console.print(f"     {escape(f.msg)}")
         console.print()
 
     console.print(Rule(style="dim"))
@@ -1057,7 +1057,7 @@ def _cmd_list():
             Text(code, style="dim"),
             Text(level, style=STYLE[level]),
             mark,
-            e["summary"],
+            Text(e["summary"]),
         )
     console.print()
     console.print(table)
@@ -1077,7 +1077,7 @@ def _cmd_explain(args):
     from .explains import ALSO_CAUGHT_BY_AMTOOL, EXPLAINS
     code = args.code
     if code not in EXPLAINS:
-        err_console.print(f"[red]Unknown check code:[/red] {code}\n")
+        err_console.print(f"[red]Unknown check code:[/red] {escape(code)}\n")
         err_console.print("Available codes:")
         for c in sorted(EXPLAINS):
             err_console.print(f"  {c}")
@@ -1101,11 +1101,11 @@ def _cmd_explain(args):
             "exists for.[/dim]"
         )
     console.print()
-    console.print(f"  {e['summary']}")
+    console.print(f"  {escape(e['summary'])}")
     console.print()
     if e.get("why"):
         console.print("  [bold]Why this matters:[/bold]")
-        console.print(f"  {e['why']}")
+        console.print(f"  {escape(e['why'])}")
         console.print()
     console.print("  [bold dim]Bad:[/bold dim]")
     console.print(Syntax(e["bad"], "yaml", theme="ansi_dark", background_color="default",

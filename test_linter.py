@@ -430,6 +430,82 @@ def test_sarif_rules_cover_all_checks(tmp_path, capsys):
     assert "global-resolve-timeout-missing" in rule_ids
 
 
+def test_sarif_rules_link_to_their_docs_section(tmp_path, capsys):
+    from amlint.explains import docs_url
+    cfg = tmp_path / "am.yml"
+    cfg.write_text("route:\n  receiver: a\nreceivers:\n  - name: a\n")
+    main(["check", "--format", "sarif", str(cfg)])
+    rules = json.loads(capsys.readouterr().out)["runs"][0]["tool"]["driver"]["rules"]
+    assert all(r["helpUri"] == docs_url(r["id"]) for r in rules)
+    [rule] = [r for r in rules if r["id"] == "undefined-receiver"]
+    assert rule["helpUri"] == \
+        "https://danikdanik2013.github.io/amlint/checks/routing/#undefined-receiver"
+
+
+# Text from the config, such as a regex or a receiver name, printed through Rich: square
+# brackets in it must come out as written, not be read as markup and dropped.
+_BRACKETS_CONFIG = """\
+global: {resolve_timeout: 5m}
+route:
+  receiver: "[dev] team"
+  routes:
+    - matchers: ["env=~[a-z]{3}"]
+      receiver: "[dev] team"
+    - match_re: {service: "[a-z]+-api"}
+      receiver: "[dev] team"
+receivers:
+  - name: "[dev] team"
+    webhook_configs: [{url: http://example.org}]
+"""
+
+
+def test_text_output_keeps_square_brackets(tmp_path, capsys):
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(_BRACKETS_CONFIG)
+    main(["check", str(cfg)])
+    out = " ".join(capsys.readouterr().out.split())
+    assert "the regex for 'env' is '[a-z]{3', not '[a-z]{3}'" in out
+
+    old = tmp_path / "old.yml"
+    old.write_text(_BRACKETS_CONFIG.replace('["env=~[a-z]{3}"]', '[\'env=~"[a-z]{3}"\']'))
+    main(["diff", "--no-routing", str(old), str(cfg)])
+    assert "the regex for 'env' is '[a-z]{3'" in " ".join(capsys.readouterr().out.split())
+
+    main(["tree", str(cfg)])
+    out = capsys.readouterr().out
+    assert "{service=~[a-z]+-api}  →  [dev] team" in out
+    assert "(root)  →  [dev] team" in out
+
+
+def test_explain_and_list_keep_square_brackets(monkeypatch, capsys):
+    from amlint import explains
+    entry = dict(explains.EXPLAINS["undefined-receiver"],
+                 summary="Route matches [team] labels.", why="Use [a-z] here.")
+    monkeypatch.setitem(explains.EXPLAINS, "undefined-receiver", entry)
+    main(["explain", "undefined-receiver"])
+    out = capsys.readouterr().out
+    assert "Route matches [team] labels." in out and "Use [a-z] here." in out
+    main(["list"])
+    assert "[team]" in capsys.readouterr().out  # the table wraps the text
+
+
+def test_error_messages_keep_square_brackets(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        main(["check", str(tmp_path / "[prod]" / "am.yml")])
+    assert "[prod]" in " ".join(capsys.readouterr().err.split())
+
+    assert main(["explain", "[bold]nope"]) == 2
+    assert "Unknown check code: [bold]nope" in capsys.readouterr().err
+
+    cfg = tmp_path / "am.yml"
+    cfg.write_text(_BRACKETS_CONFIG)
+    tests = tmp_path / "tests.yml"
+    tests.write_text("- labels: {env: [abc\n")  # YAML error; the message quotes the line
+    with pytest.raises(SystemExit):
+        main(["test", str(cfg), str(tests)])
+    assert "{env: [abc" in capsys.readouterr().err
+
+
 def test_route_match_collision():
     cfg = {
         "route": {"receiver": "a", "routes": [
