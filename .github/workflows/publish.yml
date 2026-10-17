@@ -54,3 +54,58 @@ jobs:
             exit 1
           fi
           gh release create "$TAG" --title "amlint $version" --notes-file notes.md --verify-tag
+
+  # Points Formula/amlint.rb (this repository is the Homebrew tap) at the new sdist on PyPI
+  # and commits that to main, or opens a PR if main refuses the push. It stops when the
+  # runtime dependencies changed: the formula's resource blocks then need a manual refresh.
+  homebrew:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0  # for the tag's pyproject.toml
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Point the formula at the sdist on PyPI
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          git show "$TAG:pyproject.toml" > "$RUNNER_TEMP/pyproject.toml"
+          python scripts/bump_formula.py "$TAG" --pyproject "$RUNNER_TEMP/pyproject.toml" --wait 600
+
+      - name: Commit to main, or open a PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          if git diff --quiet -- Formula/amlint.rb; then
+            echo "Nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -q -m "Homebrew: amlint $version" \
+            -m "Formula/amlint.rb points at the $version sdist on PyPI (sha256 checked against the download). Dependencies are unchanged." \
+            -- Formula/amlint.rb
+          for attempt in 1 2 3; do
+            git pull -q --rebase origin main  # main may have moved since the checkout
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep 10
+          done
+          # Most likely branch protection. A PR opened with GITHUB_TOKEN doesn't run CI.
+          branch="homebrew/amlint-$version"
+          git push -f origin "HEAD:refs/heads/$branch"
+          gh pr create --base main --head "$branch" --title "Homebrew: amlint $version" \
+            --body "The release workflow couldn't push to main, so here is the formula update for amlint $version. It changes only the top-level url and sha256 of Formula/amlint.rb; the sha256 was checked against the download from PyPI."
+          echo "::warning title=Homebrew formula::Pushing to main was refused, so the formula update is a PR"
