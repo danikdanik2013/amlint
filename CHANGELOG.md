@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- The VS Code extension is on the Marketplace as [`dpyly.amlint`](https://marketplace.visualstudio.com/items?itemName=dpyly.amlint). Install it
+  with `code --install-extension dpyly.amlint`; it needs amlint 0.6.0 or newer.
+
 ## [0.6.0] - 2026-10-17
 
 Highlights:

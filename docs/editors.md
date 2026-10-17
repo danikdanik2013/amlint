@@ -62,18 +62,15 @@ config that doesn't parse gets one error at the broken line.
 
 ## VS Code
 
-The extension isn't on the Marketplace yet. Build it from the repository and install the
-`.vsix` (needs Node.js 22):
+Install the [amlint extension](https://marketplace.visualstudio.com/items?itemName=dpyly.amlint) from the Marketplace: search for "amlint" in the
+Extensions view, or run:
 
 ```bash
-git clone https://github.com/danikdanik2013/amlint
-cd amlint/editors/vscode
-npm ci
-npm run package
-code --install-extension amlint-0.1.0.vsix
+code --install-extension dpyly.amlint
 ```
 
-Then open an `alertmanager.yml`. Settings:
+Then open an `alertmanager.yml`. The extension runs the amlint you installed, so new
+checks come with `pip install -U amlint`, not with an extension update. Settings:
 
 | Setting | Default | What it does |
 |---|---|---|

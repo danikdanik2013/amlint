@@ -48,8 +48,10 @@ The hook runs on files whose names end in `alertmanager.yml` or `alertmanager.ya
 
 ## Editors
 
-To see findings in VS Code, Neovim or Helix as you type, install amlint as above, then
-set up your editor: see [Editors](editors.md).
+To see findings as you type, install amlint as above, then:
+
+- **VS Code:** install the [amlint extension](https://marketplace.visualstudio.com/items?itemName=dpyly.amlint) (`code --install-extension dpyly.amlint`).
+- **Neovim, Helix and others:** see [Editors](editors.md).
 
 ## AI coding assistants
 

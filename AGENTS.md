@@ -10,8 +10,9 @@ amlint is a Python CLI that lints Prometheus Alertmanager configs and simulates 
 routing and inhibition. It is published to PyPI (`amlint`), as a Docker image
 (`ghcr.io/danikdanik2013/amlint`), as a GitHub Action (`action.yml`) and as a Homebrew
 formula (`Formula/amlint.rb`). A VS Code extension in `editors/vscode/` runs `amlint lsp`;
-it isn't on the Marketplace yet. Runtime dependencies are only PyYAML and Rich, and it
-supports Python 3.9+, so don't use newer syntax or add dependencies casually.
+it is on the Marketplace as `dpyly.amlint`, uploaded by hand (`editors/vscode/PUBLISHING.md`).
+Runtime dependencies are only PyYAML and Rich, and it supports Python 3.9+, so don't use
+newer syntax or add dependencies casually.
 
 ## Layout
 

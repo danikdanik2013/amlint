@@ -9,10 +9,10 @@ the `.vsix` and keeps it as a workflow artifact. These are the steps for a maint
    and error message ask for it.
 2. The publisher is `dpyly`: https://marketplace.visualstudio.com/manage/publishers/dpyly.
    `publisher` in `package.json` must match it, or the Marketplace rejects the package.
-3. Only for publishing from the command line or CI, not for an upload by hand: create a
-   personal access token in Azure DevOps (https://dev.azure.com, User settings → Personal
-   access tokens): organization **All accessible organizations**, scope
-   **Marketplace → Manage**.
+3. Only for publishing from the command line, not for an upload by hand, and only until
+   December 1, 2026 (see below): create a personal access token in Azure DevOps
+   (https://dev.azure.com, User settings → Personal access tokens): organization
+   **All accessible organizations**, scope **Marketplace → Manage**.
 4. Optional: add a 128×128 PNG as `icon.png` and `"icon": "icon.png"` in `package.json`.
    The Marketplace shows a placeholder without one.
 
@@ -42,16 +42,23 @@ the `.vsix` and keeps it as a workflow artifact. These are the steps for a maint
 
 ## Automating it later
 
-To publish from CI, store the token as a repository secret, for example `VSCE_PAT`, and add
-a step after "Type-check, bundle and package" in `.github/workflows/vscode.yml`:
+A new amlint release doesn't need a new extension release: the extension runs whatever
+amlint is installed. Publish the extension only when its own code changes. VS Code then
+updates it for everyone on its own.
 
-```yaml
-      - name: Publish to the Marketplace
-        if: github.event_name == 'workflow_dispatch'
-        run: npx vsce publish --packagePath *.vsix
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-```
+To publish from CI instead of uploading by hand:
 
-Don't trigger it with a tag that starts with `v`: `publish.yml` publishes amlint to PyPI on
-every `v*` tag.
+- **Personal access token: don't.** The Marketplace needs a global token (organization
+  **All accessible organizations**), and Azure DevOps retires global tokens on December 1,
+  2026.
+- **Microsoft Entra ID with workload identity federation:** no secret to store or rotate.
+  It needs an Azure subscription, a user-assigned managed identity with a federated
+  credential that trusts this repository's workflow, and that identity added to the `dpyly`
+  publisher as a Contributor. The workflow then signs in with `azure/login` and runs
+  `npx vsce publish --azure-credential`. Microsoft documents the setup for Azure Pipelines
+  only: https://code.visualstudio.com/api/working-with-extensions/publishing-extension
+- **Open VSX** (VSCodium, Cursor) takes a token that Azure's retirement doesn't affect:
+  `npx ovsx publish <file>.vsix -p $OVSX_PAT`.
+
+Don't trigger publishing with a tag that starts with `v`: `publish.yml` publishes amlint to
+PyPI on every `v*` tag.
