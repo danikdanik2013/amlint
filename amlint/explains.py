@@ -92,7 +92,7 @@ receivers:
         "summary": "The root route breaks a rule Alertmanager enforces at load time.",
         "why": (
             "The root route is the fallback for every alert: it must name a receiver and "
-            "must not have matchers, continue, mute_time_intervals or active_time_intervals. "
+            "must not have matchers, continue: true, mute_time_intervals or active_time_intervals. "
             "Alertmanager refuses to load a config that breaks any of these rules — amtool "
             "catches it too; amlint reports it alongside everything else in one run."
         ),
@@ -365,15 +365,18 @@ inhibit_rules:
         "level": "info",
         "summary": "source_match and target_match share an identical label=value pair.",
         "why": (
-            "The inhibition rule may silence the same alert that triggered it. "
-            "Usually a misconfiguration — verify that source and target are distinct alert types."
+            "An alert never mutes itself, and an alert that matches both sides of a rule"
+            " never mutes another alert that also matches both. So if the source and target"
+            " matchers can't tell two alerts apart, the rule mutes nothing. It's fine when"
+            " other matchers make the sides different (for example a different alertname);"
+            " otherwise the rule is usually a copy-paste mistake."
         ),
         "bad": """\
 inhibit_rules:
   - source_match:
       severity: critical
     target_match:
-      severity: critical   # same value — may silence itself
+      severity: critical   # same alerts on both sides — mutes nothing
     equal: [alertname]""",
         "good": """\
 inhibit_rules:
@@ -467,13 +470,15 @@ route:
         "level": "warn",
         "summary": "repeat_interval is shorter than group_interval.",
         "why": (
-            "Alertmanager sends repeats before the group has a chance to fire. "
-            "You get noisy repeat notifications for alerts that haven't even been grouped yet."
+            "Alertmanager re-sends a notification only when it flushes the group, which"
+            " happens once per group_interval. A repeat_interval shorter than that can't take"
+            " effect: repeats come every group_interval instead, so the number in the config"
+            " doesn't match what people get."
         ),
         "bad": """\
 route:
   group_interval: 1h
-  repeat_interval: 5m    # fires 12× before the group even re-evaluates""",
+  repeat_interval: 5m    # repeats actually come every 1h, not every 5m""",
         "good": """\
 route:
   group_interval: 5m
@@ -484,13 +489,16 @@ route:
         "level": "warn",
         "summary": "group_wait is longer than group_interval.",
         "why": (
-            "Subsequent alerts fire before the initial group has finished waiting. "
-            "You may receive fragmented notifications instead of one grouped alert."
+            "group_wait is how long a new group waits before its first notification;"
+            " group_interval is how long Alertmanager waits before sending an update for"
+            " alerts added to a group it already notified about. With group_wait longer,"
+            " the first notification about a new problem is the slowest one. That's"
+            " usually the opposite of what you want."
         ),
         "bad": """\
 route:
   group_wait: 10m
-  group_interval: 2m     # group fires before wait expires""",
+  group_interval: 2m     # first page after 10m, later updates every 2m""",
         "good": """\
 route:
   group_wait: 30s
@@ -503,16 +511,22 @@ route:
             "mute_time_intervals or active_time_intervals"
             " references an interval not in time_intervals:"
         ),
-        "why": "Alertmanager will reject this config at startup.",
+        "why": "Alertmanager refuses to load this config. amtool catches it too.",
         "bad": """\
 route:
   receiver: default
-  mute_time_intervals: [maintenance]   # not defined below!
+  routes:
+    - matchers: [team="db"]
+      receiver: default
+      mute_time_intervals: [maintenance]   # not defined below!
 # no time_intervals: section""",
         "good": """\
 route:
   receiver: default
-  mute_time_intervals: [maintenance]
+  routes:
+    - matchers: [team="db"]
+      receiver: default
+      mute_time_intervals: [maintenance]
 time_intervals:
   - name: maintenance
     time_intervals:
@@ -541,7 +555,10 @@ receivers:
 
     "pagerduty-no-routing-key": {
         "level": "error",
-        "summary": "A pagerduty_configs entry has no routing_key or routing_key_file.",
+        "summary": (
+            "A pagerduty_configs entry has no routing_key, routing_key_file,"
+            " service_key or service_key_file."
+        ),
         "why": (
             "Alertmanager refuses to start without it — this fails the whole instance, "
             "not just PagerDuty delivery. amtool catches it too."
@@ -561,7 +578,10 @@ receivers:
 
     "slack-no-api-url": {
         "level": "error",
-        "summary": "A slack_configs entry has no api_url and global.slack_api_url is not set.",
+        "summary": (
+            "A slack_configs entry has no api_url or api_url_file, and neither"
+            " global.slack_api_url nor global.slack_api_url_file is set (or api_url is empty)."
+        ),
         "why": (
             "Alertmanager refuses to start without it — this fails the whole instance, "
             "not just Slack delivery. amtool catches it too."
@@ -587,8 +607,8 @@ global:
     "opsgenie-no-api-key": {
         "level": "error",
         "summary": (
-            "An opsgenie_configs entry has no api_key"
-            " and global.opsgenie_api_key is not set."
+            "An opsgenie_configs entry has no api_key or api_key_file, and neither"
+            " global.opsgenie_api_key nor global.opsgenie_api_key_file is set."
         ),
         "why": (
             "Alertmanager refuses to start without it — this fails the whole instance, "
@@ -616,9 +636,11 @@ global:
         "level": "info",
         "summary": "global.resolve_timeout is not set; Alertmanager defaults to 5m.",
         "why": (
-            "The default 5m means alerts are marked resolved 5 minutes after they stop firing."
-            " This may be too short or too long for your environment."
-            " Setting it explicitly makes the intent reviewable in code."
+            "resolve_timeout is how long Alertmanager waits before marking an alert resolved"
+            " when the alert arrived without an end time. Prometheus always sends an end time,"
+            " so for alerts from Prometheus this setting does nothing; it matters for other"
+            " tools that post alerts to Alertmanager. Setting it explicitly makes the intent"
+            " reviewable."
         ),
         "bad": """\
 route:
@@ -630,7 +652,7 @@ receivers:
 # no global: section — resolve_timeout defaults to 5m""",
         "good": """\
 global:
-  resolve_timeout: 5m   # or 15m, 1h — whatever fits your alert lifecycle
+  resolve_timeout: 5m   # for alerts sent without an end time (not Prometheus's)
 
 route:
   receiver: default
@@ -778,8 +800,8 @@ receivers:
     "victorops-no-api-key": {
         "level": "error",
         "summary": (
-            "A victorops_configs entry has no api_key"
-            " and global.victorops_api_key is not set."
+            "A victorops_configs entry has no api_key or api_key_file, and neither"
+            " global.victorops_api_key nor global.victorops_api_key_file is set."
         ),
         "why": (
             "Alertmanager refuses to start without it — this fails the whole instance, "

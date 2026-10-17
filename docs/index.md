@@ -21,8 +21,8 @@ amlint check alertmanager.yml
 
 ```
   ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:7:7  ·  route.routes[1]
-     Route references receiver 'pager' which is not defined in receivers. Alerts
-     matched here will be dropped.
+     Route references receiver 'pager' which is not defined in receivers.
+     Alertmanager refuses to load this config.
 
   ⚠  WARN   [unreachable-route]  ·  alertmanager.yml:6:7  ·  route.routes[0]
      Catch-all route (no matchers) with continue:false will intercept all alerts

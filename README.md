@@ -43,8 +43,8 @@ receivers:
 $ amlint check alertmanager.yml
 
   ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:5:7  ·  route.routes[1]
-     Route references receiver 'pager' which is not defined in receivers. Alerts
-     matched here will be dropped.
+     Route references receiver 'pager' which is not defined in receivers.
+     Alertmanager refuses to load this config.
 
   ⚠  WARN   [inhibit-no-equal]  ·  alertmanager.yml:8:5  ·  inhibit_rules[0]
      Inhibition rule has no 'equal' field: it will silence alerts across
@@ -55,14 +55,15 @@ $ amlint check alertmanager.yml
      — 1 subsequent sibling(s) are unreachable.
 
   ℹ  INFO   [global-resolve-timeout-missing]  ·  alertmanager.yml:1:1  ·  global
-     global.resolve_timeout is not set. Alertmanager defaults to 5m — set it
-     explicitly so the intent is clear and reviewable.
+     global.resolve_timeout is not set, so Alertmanager uses 5m. It only applies
+     to alerts sent without an end time; Prometheus always sets one.
 
   ✖ 1 error  ·  ⚠ 2 warnings  ·  ℹ 1 info
 ```
 
-In plain words: the `pager` receiver doesn't exist. Even if it did, the first route catches
-every alert, so the critical route would never be reached. And one critical alert anywhere
+In plain words: the `pager` receiver doesn't exist, so Alertmanager won't even load this.
+Fix that, and the first route still catches every alert, so the critical route is never
+reached. And one critical alert anywhere
 mutes every warning everywhere, because the inhibit rule doesn't say which alerts belong
 together. amtool would flag only the first problem.
 

@@ -679,6 +679,26 @@ def test_explain_unknown_code():
     assert main(["explain", "not-a-real-code"]) == 2
 
 
+@pytest.mark.parametrize("code", [
+    "undefined-time-interval", "inhibit-same-match", "repeat-before-group",
+    "wait-exceeds-interval", "global-resolve-timeout-missing",
+])
+def test_explain_examples_show_the_check(code):
+    """`amlint explain`'s bad example triggers the check, and its fixed one is a clean,
+    loadable config (undefined-time-interval's used to put the interval on the root route)."""
+    from amlint.explains import EXPLAINS
+    default = {"name": "default", "webhook_configs": [{"url": "http://x"}]}
+
+    def found(text):
+        cfg = yaml.safe_load(EXPLAINS[code][text])
+        cfg.setdefault("route", {}).setdefault("receiver", "default")
+        cfg.setdefault("receivers", [default])
+        return [f for f in lint(cfg) if f.code == code or f.level == ERROR]
+
+    assert [f.code for f in found("bad")] == [code]
+    assert found("good") == []
+
+
 def test_lint_severity_override():
     cfg = {
         "route": {"receiver": "a"},
@@ -2567,7 +2587,7 @@ def test_wait_exceeds_interval_inherited():
 
 @pytest.mark.parametrize("key", ["pushover_configs", "webex_configs", "jira_configs",
                                  "rocketchat_configs", "msteamsv2_configs",
-                                 "incidentio_configs"])
+                                 "incidentio_configs", "mattermost_configs"])
 def test_empty_receiver_newer_integrations_ok(key):
     cfg = {
         "route": {"receiver": "a", "routes": [{"matchers": ["x=y"], "receiver": "b"}]},
@@ -3809,7 +3829,7 @@ def test_cli_diff_markdown_findings_with_locations(tmp_path):
     assert new_section.splitlines()[2] == (
         f"| ✖ error | `undefined-receiver` | `{new_path}:6:7` (`route.routes[1]`) "
         "| Route references receiver 'phantom' which is not defined in receivers. "
-        "Alerts matched here will be dropped. |")
+        "Alertmanager refuses to load this config. |")
     fixed_section = out.split("#### Fixed findings\n\n")[1]
     assert f"| ✖ error | `undefined-receiver` | `{old_path}:4:7` (`route.routes[0]`) " \
            in fixed_section

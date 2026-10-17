@@ -140,6 +140,28 @@
   `group_by: ['...', alertname]`.
 
 ### Fixed
+- Finding messages and `amlint explain` texts that described Alertmanager's behaviour wrongly:
+  - `undefined-receiver`, `duplicate-receiver`, `undefined-time-interval`, `sns-no-target`
+    and the integration checks (`webhook-no-url`, `pagerduty-no-routing-key`, ...) now say
+    Alertmanager refuses to load the config, instead of "alerts will be dropped", "the
+    second definition will be silently ignored" or "cannot be sent".
+  - `repeat-before-group`: repeats come every `group_interval`, because Alertmanager only
+    re-sends when it flushes a group. They don't come "before the group has a chance to
+    fire".
+  - `wait-exceeds-interval`: the effect is that the first notification for a new group is
+    the slowest one, not "fragmented notifications".
+  - `inhibit-same-match`: an alert never mutes itself, and alerts that match both sides
+    don't mute each other, so the rule may mute nothing. It doesn't "silence its own
+    source".
+  - `global-resolve-timeout-missing`: `resolve_timeout` only applies to alerts sent without
+    an end time, and Prometheus always sets one.
+  - The `undefined-time-interval` explain example put `mute_time_intervals` on the root
+    route, which Alertmanager rejects. It now uses a child route.
+  - The summaries for `pagerduty-no-routing-key`, `slack-no-api-url`, `opsgenie-no-api-key`
+    and `victorops-no-api-key` now list every field the check accepts (`service_key`,
+    `*_file`, `global.*_file`).
+- `empty-receiver` knows `mattermost_configs` (Alertmanager 0.34), so a receiver that uses
+  only Mattermost is no longer reported as empty.
 - GitHub Action: `ignore` and `only` now apply to the SARIF upload too. Before, ignored
   checks still reached code scanning.
 - `circular-inhibition` no longer reports two unrelated rules because one label value
