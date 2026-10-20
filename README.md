@@ -112,6 +112,7 @@ assistants can read [llms.txt](https://danikdanik2013.github.io/amlint/llms.txt)
 | Draw the route tree as a Mermaid diagram | `amlint tree alertmanager.yml --format mermaid` |
 | Catch routes for alerts that don't exist | `amlint check alertmanager.yml --rules 'rules/*.yml'` |
 | Lint what you deploy to Kubernetes | `amlint check alertmanager-secret.yaml` or `kubectl kustomize deploy/ \| amlint check -` |
+| Rewrite deprecated `match:` syntax as `matchers:` | `amlint fix alertmanager.yml` |
 | Learn what a check means and how to fix it | `amlint explain shadowed-route` |
 | See every check | `amlint list` |
 | See findings in VS Code, Neovim or Helix as you type | `amlint lsp`, started by the editor ([setup](https://danikdanik2013.github.io/amlint/editors/)) |

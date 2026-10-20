@@ -20,6 +20,7 @@ amlint diff main.yml alertmanager.yml                        # what does this ch
 | [`route`](#route) | see where an alert with given labels goes |
 | [`test`](#test) | run routing unit tests from a file |
 | [`diff`](#diff) | compare two configs: new and fixed findings, and alerts that now go elsewhere |
+| [`fix`](#fix) | rewrite deprecated syntax (`match:`, `source_match:`, ...) in place |
 | [`list`](#list), [`explain`](#explain) | see every check, or read about one |
 | [`init`](#init) | print a minimal valid config to start from |
 | [`lsp`](#lsp) | show findings in your editor as you type |
