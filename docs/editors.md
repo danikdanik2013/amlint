@@ -21,9 +21,31 @@ amlint lsp --help    # check that the command is there
   a parent, or Alertmanager's default. It also shows an example alert that ends on the route
   and the receivers it goes to, from the same simulation as
   [`amlint route`](usage.md#route).
+- **Quick fixes** that change the config: a misspelled receiver or time interval
+  (`undefined-receiver`, `undefined-time-interval`) offers "Change 'db-pagr' to 'db-pager'"
+  for the closest names, and `useless-continue` offers to remove the `continue: true` line.
 - **Quick fixes** for a finding you accept: add `# amlint: disable=<code>` to its line, or
   `# amlint: disable-file=<code>` to the top of the file. See
   [inline suppressions](usage.md#inline-suppressions).
+- **Go to definition, find references and rename** for receiver and time interval names.
+  From a route's `receiver:`, go to the receiver; from a receiver, list the routes that use
+  it. Rename a receiver or a time interval and every route that uses it changes too. The new
+  name keeps the old one's quotes, and gets quotes when it needs them (`"yes"`, `"123"`).
+  Renaming to a name that already exists is refused.
+- **Completion**: receiver names after `receiver:`, time interval names in
+  `mute_time_intervals` and `active_time_intervals`, and label names and values in
+  `matchers`, `source_matchers`, `target_matchers`, `match:`, `group_by` and `equal`. Labels
+  and values come from the config's matchers, and from your Prometheus rules when
+  [`rules:`](usage.md#project-config) is set (`alertname=` completes your rule names). It
+  works on a line you're still typing, with names from the last version of the file that
+  parsed.
+- **Test coverage above each route**: "2 of 12 tests reach this route", or "no test
+  reaches this route", from the [`amlint test`](usage.md#test) files that
+  [`tests:`](usage.md#project-config) maps the config to. A case reaches a route when its
+  alert goes through it, as for `amlint test --coverage`.
+- **Outline**: the route tree, with each route's matchers and `→ receiver`, then the
+  receivers (with their integrations), inhibit rules (`source → target`) and time
+  intervals. In VS Code it's the Outline view and the breadcrumbs above the editor.
 
 A hover over a route looks like this:
 
@@ -69,6 +91,11 @@ Extensions view, or run:
 code --install-extension dpyly.amlint
 ```
 
+**Cursor, VSCodium and Gitpod** install extensions from [Open VSX](https://open-vsx.org)
+instead of the Marketplace. Until amlint is published there, install the `.vsix` from the
+latest run of the `VS Code extension` workflow (its `amlint-vscode` artifact):
+`cursor --install-extension amlint-<version>.vsix`, or `codium --install-extension ...`.
+
 Then open an `alertmanager.yml`. The extension runs the amlint you installed, so new
 checks come with `pip install -U amlint`, not with an extension update. Settings:
 
@@ -79,8 +106,15 @@ checks come with `pip install -U amlint`, not with an extension update. Settings
 | `amlint.trace.server` | `off` | `messages` or `verbose` logs the traffic to the **amlint** output channel. |
 
 **amlint: Restart Server** in the command palette restarts it, for example after you
-upgrade amlint. If VS Code says it can't start `amlint lsp`, run `which amlint` in a
-terminal and put that path in `amlint.path`.
+upgrade amlint.
+
+If it doesn't start:
+
+- **"can't find amlint"**: VS Code doesn't see amlint on its `PATH`, which can differ from
+  your terminal's. Install it with `pipx install amlint`, or run `which amlint` in a
+  terminal and put that path in `amlint.path`.
+- **"the editor needs 0.6.0 or newer"**: the amlint VS Code finds predates `amlint lsp`.
+  Upgrade it with `pipx upgrade amlint` or `pip install -U amlint`, then restart the server.
 
 ## Neovim
 
@@ -122,11 +156,15 @@ no initialization options.
 
 ## Configure the checks
 
-The editor reads the same [project config](usage.md#project-config) as the CLI: `ignore`
-and `severity` from `.amlint.yml`, `.amlint.yaml` or `pyproject.toml` in the workspace
-folder. A file outside any workspace folder uses the config next to it. Edits to the
-project config apply at the next change to the file; VS Code re-lints open files right
+The editor reads the same [project config](usage.md#project-config) as the CLI: `ignore`,
+`severity` and `rules` from `.amlint.yml`, `.amlint.yaml` or `pyproject.toml` in the
+workspace folder. A file outside any workspace folder uses the config next to it. Edits to
+the project config apply at the next change to the file; VS Code re-lints open files right
 away.
+
+With `rules:` set, the [checks against your Prometheus rules](usage.md#checking-against-prometheus-rules)
+run as you type too. amlint reads the rule files again when one of them changes. If a glob
+matches nothing, a warning on the first line says so.
 
 ## Limits
 

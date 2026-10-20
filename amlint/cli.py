@@ -36,7 +36,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from . import mermaid
-from .config import load_project_config
+from .config import ConfigError, load_project_config, tests_for_config
 from .formats import FORMATS, MATCHER_STRATEGIES, FormatError, apply_locations, load_input
 from .goyaml import AlertmanagerLoader
 from .linter import (
@@ -52,7 +52,7 @@ from .linter import (
 )
 from .markdown import diff_report
 from .routing import GROUP_BY_ALL, Inhibitor, Router, RoutingError, diff_routing, route_coverage
-from .rules import RulesError, load_rules, rule_files
+from .rules import CONFIG_SOURCE, RulesError, load_rules, project_rule_patterns, rule_files
 
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
@@ -331,18 +331,23 @@ def _print_github(all_findings) -> None:
             print(f"::{_GITHUB_LEVEL[f.level]} {','.join(props)}::{_github_escape(msg)}")
 
 
-def _load_rules(patterns):
-    """Alerting rules for --rules, or None if the files have none; exits 2 if a glob
-    matches no file or a file can't be parsed."""
+def _load_rules(patterns, proj):
+    """Alerting rules from `rules:` in the project config and the --rules globs, or None
+    when there are no globs or the files have no rules; exits 2 if a glob matches no file
+    or a file can't be parsed."""
     try:
-        alerts, notes = load_rules(rule_files(patterns))
+        files = rule_files(project_rule_patterns(proj), source=CONFIG_SOURCE)
+        files += [f for f in rule_files(patterns or []) if f not in files]
+        if not files:
+            return None
+        alerts, notes = load_rules(files)
     except RulesError as e:
-        err_console.print(f"[red]Cannot load --rules:[/red] {escape(str(e))}", soft_wrap=True)
+        err_console.print(f"[red]Cannot load rules:[/red] {escape(str(e))}", soft_wrap=True)
         sys.exit(2)
     for note in notes:
         err_console.print(f"[yellow]warning:[/yellow] {escape(note)}", soft_wrap=True)
     if not alerts:
-        err_console.print("[yellow]warning:[/yellow] no alerting rules in the --rules files, "
+        err_console.print("[yellow]warning:[/yellow] no alerting rules in the rule files, "
                           "so the checks against them are skipped", soft_wrap=True)
         return None
     return alerts
@@ -362,7 +367,7 @@ def _warn_if_rule_file(path, cfg) -> None:
 def _cmd_check(args):
     proj, ignore, only, severity = _project_settings(args)
     strict = args.strict or proj.get("strict", False)
-    rules = _load_rules(args.rules) if args.rules else None
+    rules = _load_rules(args.rules, proj)
 
     multi = len(args.files) > 1
     all_findings = []
@@ -818,13 +823,30 @@ def _cmd_test(args) -> int:
     if router is None:
         return 2
 
-    cases = _load_test_cases(args.tests)
-    if cases is None:
-        err_console.print(
-            f"[red]Invalid test file:[/red] {escape(args.tests)} must be a list of test cases, "
-            f"or have a top-level 'tests:' list."
-        )
-        return 2
+    if args.tests:
+        files = [args.tests]
+    else:
+        try:
+            files = tests_for_config(load_project_config(), args.config, os.getcwd())
+        except ConfigError as e:
+            err_console.print(f"[red]Cannot use the project config:[/red] {escape(str(e))}",
+                              soft_wrap=True)
+            return 2
+        if not files:
+            err_console.print(
+                f"[red]No tests file:[/red] give one after {escape(args.config)}, or map the "
+                f"config to its tests under tests: in .amlint.yml", soft_wrap=True)
+            return 2
+    cases = []
+    for path in files:
+        part = _load_test_cases(path)
+        if part is None:
+            err_console.print(
+                f"[red]Invalid test file:[/red] {escape(path)} must be a list of test cases, "
+                f"or have a top-level 'tests:' list."
+            )
+            return 2
+        cases += part
 
     inhibitor = None
     if any(isinstance(case, dict) and "firing" in case for case in cases):
@@ -1201,7 +1223,8 @@ def main(argv=None):
     ptst = sub.add_parser("test", parents=[inputs],
                           help="run routing unit tests against a config")
     ptst.add_argument("config", help="path to alertmanager.yml")
-    ptst.add_argument("tests", help="path to a YAML file with a list of test cases")
+    ptst.add_argument("tests", nargs="?", help="path to a YAML file with a list of test cases "
+                      "(default: the files tests: in .amlint.yml maps the config to)")
     ptst.add_argument("--format", choices=["text", "json"], default="text")
     ptst.add_argument("--coverage", action="store_true",
                       help="list the routes no test case reaches, and the share that is reached")

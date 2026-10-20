@@ -464,3 +464,384 @@ def test_hover_when_routing_cannot_be_simulated(lsp, tmp_path):
     uri = _uri(tmp_path / "am.yml")
     client.open(uri, text)
     assert "amlint can't simulate this route tree" in client.hover(uri, GHOST_LINE)
+
+
+# ── rules: in .amlint.yml ────────────────────────────────────────────
+
+RULES_CONFIG = """\
+global:
+  resolve_timeout: 5m
+route:
+  receiver: default
+  routes:
+    - matchers: [alertname="DiskFull"]
+      receiver: default
+receivers:
+  - name: default
+    webhook_configs: [{url: http://example.org/default}]
+"""
+
+
+def _rule_file(path: Path, *alerts: str) -> None:
+    rules = "".join(f"      - alert: {a}\n        expr: x > 0\n" for a in alerts)
+    path.write_text(f"groups:\n  - name: g\n    rules:\n{rules}")
+
+
+def test_rules_from_project_config_in_the_editor(lsp, tmp_path):
+    (tmp_path / "rules").mkdir()
+    _rule_file(tmp_path / "rules" / "node.yml", "DiskFul")
+    (tmp_path / ".amlint.yml").write_text("rules: ['rules/*.yml']\n")
+    config = tmp_path / "alertmanager.yml"
+    client = lsp(root=tmp_path)
+    diags = _by_code(client.open(_uri(config), RULES_CONFIG))
+    assert "did you mean 'DiskFul'?" in diags["route-unknown-alertname"]["message"]
+
+    # the rule file changes: the next lint reads it again
+    _rule_file(tmp_path / "rules" / "node.yml", "DiskFull")
+    os.utime(tmp_path / "rules" / "node.yml", ns=(1, 2 * 10 ** 18))
+    assert "route-unknown-alertname" not in _by_code(
+        client.change(_uri(config), RULES_CONFIG + "\n", 2))
+
+
+def test_project_rules_that_cant_be_read_are_reported(lsp, tmp_path):
+    (tmp_path / ".amlint.yml").write_text("rules: ['missing/*.yml']\n")
+    client = lsp(root=tmp_path)
+    diags = client.open(_uri(tmp_path / "alertmanager.yml"), RULES_CONFIG)
+    [warning] = [d for d in diags if "Prometheus rules" in d["message"]]
+    assert warning["severity"] == 2 and warning["range"]["start"]["line"] == 0
+    assert "'missing/*.yml' matches no files" in warning["message"]
+
+
+# ── Outline ───────────────────────────────────────────────────────────
+
+def _symbols(client, uri):
+    return client.request("textDocument/documentSymbol", {"textDocument": {"uri": uri}})["result"]
+
+
+def _contains(outer: dict, inner: dict) -> bool:
+    def key(pos):
+        return (pos["line"], pos["character"])
+    return key(outer["start"]) <= key(inner["start"]) and key(inner["end"]) <= key(outer["end"])
+
+
+def _check_nesting(symbols):
+    for s in symbols:
+        assert s["name"]
+        assert _contains(s["range"], s["selectionRange"]), s
+        for child in s.get("children", []):
+            assert _contains(s["range"], child["range"]), (s["name"], child["name"])
+        _check_nesting(s.get("children", []))
+
+
+def test_outline_shows_routes_and_receivers(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, CONFIG + "inhibit_rules:\n  - source_matchers: [severity=critical]\n"
+                "    target_matchers: [severity=warning]\n    equal: [alertname]\n")
+    symbols = _symbols(client, uri)
+    _check_nesting(symbols)
+    route, receivers, inhibit = symbols
+    assert (route["name"], route["detail"], route["kind"]) == ("route", "→ default", 3)
+    db, web = route["children"]
+    assert (db["name"], db["detail"]) == ('team="db"', "→ db-pager")
+    assert db["range"]["start"]["line"] == 6
+    [critical] = db["children"]
+    assert (critical["name"], critical["detail"]) == ('severity="critical"', "→ db-oncall")
+    assert (web["name"], web["detail"]) == ('team="web"', "→ ghost")
+    assert web["range"]["start"]["line"] == GHOST_LINE
+    assert (receivers["name"], receivers["detail"]) == ("receivers", "3")
+    assert [(r["name"], r["detail"]) for r in receivers["children"]] == [
+        ("default", "webhook"), ("db-pager", "webhook"), ("db-oncall", "webhook")]
+    [rule] = inhibit["children"]
+    assert (rule["name"], rule["detail"]) == ("severity=critical → severity=warning",
+                                              "equal: alertname")
+
+
+@pytest.mark.parametrize("name", sorted(os.listdir(os.path.join(ROOT, "testdata", "formats"))))
+def test_outline_for_every_input_format(lsp, tmp_path, name):
+    path = Path(ROOT, "testdata", "formats", name)
+    client = lsp()
+    client.open(path.as_uri(), path.read_text())
+    symbols = _symbols(client, path.as_uri())
+    _check_nesting(symbols)
+    lines = path.read_text().splitlines()
+    for s in symbols:  # every symbol starts at something written in the file
+        assert lines[s["range"]["start"]["line"]].strip()
+
+
+def test_outline_of_other_yaml_is_empty(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "docker-compose.yml")
+    client.open(uri, "services:\n  web:\n    image: nginx\n")
+    assert _symbols(client, uri) == []
+
+
+# ── Go to definition, find references, rename ─────────────────────────
+
+NAMES = """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      mute_time_intervals: [nights, 'weekends']
+    - matchers: [team="web"]
+      receiver: "db-pager"
+      active_time_intervals:
+        - nights
+receivers:
+  - name: default
+    webhook_configs: [{url: http://example.org/default}]
+  - {name: db-pager, webhook_configs: [{url: http://example.org/db}]}
+time_intervals:
+  - name: nights
+    time_intervals: [{times: [{start_time: "00:00", end_time: "06:00"}]}]
+  - name: weekends
+    time_intervals: [{weekdays: [saturday, sunday]}]
+"""
+
+
+def _at(client, method, uri, line, character, **extra):
+    params = {"textDocument": {"uri": uri}, "position": {"line": line, "character": character},
+              **extra}
+    return client.request(method, params)
+
+
+def _spots(locations):
+    return [(loc["range"]["start"]["line"], loc["range"]["start"]["character"],
+             loc["range"]["end"]["character"]) for loc in locations]
+
+
+def test_definition_of_a_receiver_and_a_time_interval(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    result = _at(client, "textDocument/definition", uri, 4, 16)["result"]  # receiver: db-pager
+    assert _spots(result) == [(13, 11, 19)]                                # {name: db-pager
+    result = _at(client, "textDocument/definition", uri, 9, 11)["result"]  # - nights
+    assert _spots(result) == [(15, 10, 16)]
+    result = _at(client, "textDocument/definition", uri, 5, 40)["result"]  # 'weekends'
+    assert _spots(result) == [(17, 10, 18)]
+    assert _at(client, "textDocument/definition", uri, 3, 20)["result"] is None  # a matcher
+
+
+def test_definition_of_an_undefined_receiver_is_empty(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, CONFIG)
+    assert _at(client, "textDocument/definition", uri, GHOST_LINE + 1, 16)["result"] is None
+
+
+def test_references_of_a_receiver(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    every = _at(client, "textDocument/references", uri, 13, 12,
+                context={"includeDeclaration": True})["result"]
+    assert _spots(every) == [(4, 16, 24), (7, 17, 25), (13, 11, 19)]
+    uses = _at(client, "textDocument/references", uri, 13, 12,
+               context={"includeDeclaration": False})["result"]
+    assert _spots(uses) == [(4, 16, 24), (7, 17, 25)]
+
+
+def test_rename_a_receiver_everywhere(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    prepared = _at(client, "textDocument/prepareRename", uri, 4, 18)["result"]
+    assert prepared["placeholder"] == "db-pager"
+    edit = _at(client, "textDocument/rename", uri, 4, 18, newName="db-oncall")["result"]
+    text = NAMES
+    for change in sorted(edit["changes"][uri], key=lambda e: (e["range"]["start"]["line"],
+                                                             e["range"]["start"]["character"]),
+                         reverse=True):
+        text = _apply(text, change)
+    assert "db-pager" not in text
+    assert 'receiver: "db-oncall"' in text and "{name: db-oncall," in text  # quotes kept
+    assert "undefined-receiver" not in _by_code(client.change(uri, text, 2))
+
+
+def test_rename_quotes_a_name_that_needs_it(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    # every `nights` is plain: "yes" would read as a boolean, so it gets quotes
+    edits = _at(client, "textDocument/rename", uri, 15, 12, newName="yes")["result"]
+    assert [e["newText"] for e in edits["changes"][uri]] == ['"yes"'] * 3
+    # 'weekends' keeps its single quotes; the plain definition gets double ones
+    edits = _at(client, "textDocument/rename", uri, 17, 12, newName="it's")["result"]
+    assert sorted(e["newText"] for e in edits["changes"][uri]) == ['"it\'s"', "it''s"]
+
+
+def test_rename_to_an_existing_name_fails(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    error = _at(client, "textDocument/rename", uri, 4, 18, newName="default")["error"]
+    assert error["code"] == -32803
+    assert "already a receiver called 'default'" in error["message"]
+    assert _at(client, "textDocument/prepareRename", uri, 3, 20)["result"] is None
+
+
+# ── Completion ────────────────────────────────────────────────────────
+
+def _complete(client, uri, line, character):
+    result = client.request("textDocument/completion", {
+        "textDocument": {"uri": uri}, "position": {"line": line, "character": character},
+    })["result"]
+    return {item["label"]: item for item in result}
+
+
+def test_complete_receiver_names(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    text = NAMES.replace("      receiver: db-pager\n", "      receiver: db\n", 1)
+    client.change(uri, text, 2)
+    items = _complete(client, uri, 4, 18)  # after "receiver: db"
+    assert set(items) == {"default", "db-pager"}
+    edit = items["db-pager"]["textEdit"]
+    assert edit["range"] == {"start": {"line": 4, "character": 16},
+                             "end": {"line": 4, "character": 18}}
+    assert items["db-pager"]["detail"] == "receiver"
+
+
+def test_complete_while_the_yaml_is_broken(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    # half-typed: the document doesn't parse, so names come from the last version that did
+    broken = NAMES.replace("      receiver: db-pager\n", "      receiver: \n  - [\n", 1)
+    client.change(uri, broken, 2)
+    assert set(_complete(client, uri, 4, 16)) == {"default", "db-pager"}
+
+
+def test_complete_time_intervals_in_flow_and_block_lists(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    assert set(_complete(client, uri, 5, 29)) == {"nights", "weekends"}  # [n|ights
+    assert set(_complete(client, uri, 9, 12)) == {"nights", "weekends"}  # - n|ights
+
+
+def test_complete_labels_and_values_in_matchers(lsp, tmp_path):
+    (tmp_path / "rules").mkdir()
+    _rule_file(tmp_path / "rules" / "node.yml", "NodeDown")
+    (tmp_path / ".amlint.yml").write_text("rules: ['rules/*.yml']\n")
+    client = lsp(root=tmp_path)
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = NAMES.replace('[team="web"]', '[team="web", te]', 1)
+    client.open(uri, text)
+    labels = _complete(client, uri, 6, 31)  # [team="web", te|
+    assert {"team", "alertname"} <= set(labels)
+    assert labels["alertname"]["detail"] == "label · from rules"
+    values = _complete(client, uri, 3, 22)  # [team="d|b"]
+    assert values["db"]["detail"] == "team · in the config" and "web" in values
+    text = NAMES.replace('[team="db"]', '[team="db", alertname="N"]', 1)
+    client.change(uri, text, 2)
+    assert set(_complete(client, uri, 3, 40)) == {"NodeDown"}  # alertname="N|
+    assert {"team", "alertname"} <= set(_complete(client, uri, 3, 37))  # alertname|=
+
+
+def test_no_completion_outside_known_places(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    assert _complete(client, uri, 1, 5) == {}   # in the key "receiver"
+    other = _uri(tmp_path / "docker-compose.yml")
+    client.open(other, "services:\n  web:\n    receiver: \n")
+    assert _complete(client, other, 2, 14) == {}
+
+
+# ── Test coverage above each route ────────────────────────────────────
+
+def _lenses(client, uri):
+    result = client.request("textDocument/codeLens", {"textDocument": {"uri": uri}})["result"]
+    return {lens["range"]["start"]["line"]: lens["command"]["title"] for lens in result}
+
+
+def test_code_lens_counts_the_tests_that_reach_each_route(lsp, tmp_path):
+    (tmp_path / "routing-tests.yml").write_text(
+        "- {labels: {team: db, severity: critical}, expect: [db-oncall]}\n"
+        "- {labels: {team: db}, expect: [db-pager]}\n"
+        "- {labels: {team: other}, expect: [default]}\n")
+    (tmp_path / ".amlint.yml").write_text("tests:\n  alertmanager.yml: routing-tests.yml\n")
+    client = lsp(root=tmp_path)
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, CONFIG)
+    assert _lenses(client, uri) == {
+        6: "2 of 3 tests reach this route",
+        10: "1 of 3 tests reach this route",
+        GHOST_LINE: "no test reaches this route",
+    }
+    # the tests file changes: the next request reads it again
+    (tmp_path / "routing-tests.yml").write_text("- {labels: {team: web}, expect: [ghost]}\n")
+    os.utime(tmp_path / "routing-tests.yml", ns=(1, 2 * 10 ** 18))
+    assert _lenses(client, uri)[GHOST_LINE] == "1 of 1 tests reach this route"
+
+
+def test_no_code_lens_without_tests_for_the_file(lsp, tmp_path):
+    (tmp_path / ".amlint.yml").write_text("tests:\n  other.yml: missing.yml\n")
+    client = lsp(root=tmp_path)
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, CONFIG)
+    assert _lenses(client, uri) == {}
+
+
+# ── Quick fixes that change the config ────────────────────────────────
+
+def _fix_actions(client, uri, diags):
+    return client.request("textDocument/codeAction", {
+        "textDocument": {"uri": uri},
+        "range": diags[0]["range"],
+        "context": {"diagnostics": diags},
+    })["result"]
+
+
+def _fix(client, uri, text, code):
+    """Apply the preferred quick fix for `code` and return the new text."""
+    diags = [d for d in client.open(uri, text) if d.get("code") == code]
+    assert diags, code
+    [preferred] = [a for a in _fix_actions(client, uri, diags) if a.get("isPreferred")]
+    for edit in preferred["edit"]["changes"][uri]:
+        text = _apply(text, edit)
+    return preferred["title"], text
+
+
+def test_quick_fix_misspelled_receiver(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = CONFIG.replace("receiver: db-pager", "receiver: db-pagr", 1)
+    title, fixed = _fix(client, uri, text, "undefined-receiver")
+    assert title == "Change 'db-pagr' to 'db-pager'"
+    assert fixed == CONFIG
+
+
+def test_quick_fix_misspelled_time_interval(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = NAMES.replace("[nights, 'weekends']", "[nights, 'wekends']", 1)
+    title, fixed = _fix(client, uri, text, "undefined-time-interval")
+    assert title == "Change 'wekends' to 'weekends'"
+    assert fixed == NAMES
+
+
+def test_quick_fix_removes_a_useless_continue(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = CONFIG.replace("      receiver: ghost\n",
+                          "      receiver: ghost\n      continue: true\n")
+    title, fixed = _fix(client, uri, text, "useless-continue")
+    assert title.startswith("Remove continue: true")
+    assert fixed == CONFIG
+
+
+def test_no_continue_fix_when_it_starts_the_route(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = CONFIG.replace('    - matchers: [team="web"]\n      receiver: ghost\n',
+                          '    - continue: true\n      matchers: [team="web"]\n'
+                          '      receiver: ghost\n')
+    diags = [d for d in client.open(uri, text) if d.get("code") == "useless-continue"]
+    titles = [a["title"] for a in _fix_actions(client, uri, diags)]
+    assert titles and not any(t.startswith("Remove") for t in titles)

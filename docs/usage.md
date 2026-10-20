@@ -124,6 +124,8 @@ from. If there is none, it reads `[tool.amlint]` from `pyproject.toml` in that d
     severity:
       empty-receiver: info      # downgrade warn → info
       unused-receiver: error    # upgrade info → error
+    rules:
+      - rules/*.yml             # Prometheus alerting rules, like --rules
     ```
 
 === "pyproject.toml"
@@ -131,6 +133,7 @@ from. If there is none, it reads `[tool.amlint]` from `pyproject.toml` in that d
     [tool.amlint]
     ignore = ["empty-receiver", "unused-receiver"]
     strict = true
+    rules = ["rules/*.yml"]
 
     [tool.amlint.severity]
     empty-receiver = "info"
@@ -142,6 +145,8 @@ from. If there is none, it reads `[tool.amlint]` from `pyproject.toml` in that d
 | `ignore` | Checks to skip, added to any `--ignore` codes | `check`, `diff`, `tree`, `lsp` |
 | `strict` | Same as `--strict` | `check` |
 | `severity` | Sets a check's level to `error`, `warn` or `info` | `check`, `diff`, `tree`, `lsp` |
+| `rules` | Globs of [Prometheus rule files](#checking-against-prometheus-rules), relative to the config file's directory. Added to any `--rules` | `check`, `lsp` |
+| `tests` | Maps config files to their [`amlint test`](#test) files (a glob or a list of globs), relative to the config file's directory | `test`, `lsp` |
 
 **Good to know:** amlint doesn't look in parent directories or next to the config file. Only
 the first file found is read, so `pyproject.toml` is ignored when `.amlint.yml` exists.
@@ -193,7 +198,7 @@ amlint check alertmanager.yml --rules 'rules/**/*.yml' --rules 'manifests/*-prom
 
 ```
   ⚠  WARN   [route-unknown-alertname]  ·  alertmanager.yml:7:7  ·  route.routes[0]
-     Route matches alertname 'HighCpuUsage', which no alerting rule in the --rules files produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source, this branch is dead.
+     Route matches alertname 'HighCpuUsage', which no alerting rule in the rule files produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source, this branch is dead.
 ```
 
 `--rules` adds three checks:
@@ -206,6 +211,8 @@ amlint check alertmanager.yml --rules 'rules/**/*.yml' --rules 'manifests/*-prom
 
 **Good to know**
 
+- Put the globs under `rules:` in [`.amlint.yml`](#project-config) to use them on every
+  `check` without the flag, and in the [editor](editors.md). `--rules` adds more.
 - `--rules` reads Prometheus rule files (`groups:`) and prometheus-operator `PrometheusRule`
   manifests (`spec.groups:`). Recording rules are skipped. `**` matches subdirectories.
 - Quote the glob. Unquoted, the shell expands it, and the extra files are either rejected as
@@ -484,6 +491,21 @@ said `expect: [infra-slack, pager]`:
 
 `test` exits `1` if any case fails, and `2` if the config can't be simulated (see
 [`route`](#route)) or the tests file isn't a list of cases.
+
+Map each config to its tests under `tests:` in [`.amlint.yml`](#project-config), and you
+can leave the tests file out. The editor uses the same mapping to show above each route
+how many cases reach it:
+
+```yaml
+# .amlint.yml
+tests:
+  alertmanager.yml: routing-tests.yml           # a file, a glob, or a list of them
+  k8s/alertmanager-secret.yaml: [tests/k8s/*.yml]
+```
+
+```bash
+amlint test alertmanager.yml                    # runs routing-tests.yml
+```
 
 **Options**
 

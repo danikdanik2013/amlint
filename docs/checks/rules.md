@@ -85,7 +85,7 @@ route:
 
 ```
   ⚠  WARN   [route-unknown-alertname]  ·  alertmanager.yml:4:7  ·  route.routes[0]
-     Route matches alertname 'HighCpuUsage', which no alerting rule in the --rules files
+     Route matches alertname 'HighCpuUsage', which no alerting rule in the rule files
      produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source,
      this branch is dead.
 ```

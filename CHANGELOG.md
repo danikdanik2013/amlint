@@ -1,5 +1,50 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `rules:` in `.amlint.yml` (or `pyproject.toml`): globs of Prometheus rule files, relative
+  to the config file's directory. `amlint check` uses them without `--rules`, and `--rules`
+  adds more. The editor (`amlint lsp`) runs the checks against these rules as you type, and
+  reads the rule files again when one changes; a glob that matches nothing is a warning on
+  the first line. A bad glob or a value that isn't a glob or a list of globs exits `check`
+  with `2`, as a bad `--rules` does.
+- Outline in the editor (`textDocument/documentSymbol`): the route tree, each route named by
+  its matchers with `→ receiver`, then receivers (with their integrations), inhibit rules
+  (`source → target`) and time intervals. Routes that an AlertmanagerConfig adds elsewhere in
+  the file show at the top level, where they are written.
+- Go to definition, find references and rename for receiver and time interval names in the
+  editor. Renaming changes the definition and every route's `receiver:`,
+  `mute_time_intervals` and `active_time_intervals`; it keeps quotes, adds them when the new
+  name needs them, and refuses a name that already exists.
+- Completion in the editor: receiver names after `receiver:`, time interval names in
+  `mute_time_intervals`/`active_time_intervals`, and label names and values in matchers,
+  `match:`, `group_by` and `equal`, from the config and from the `rules:` files. It works
+  while the line doesn't parse yet, with names from the last version that did.
+- `tests:` in `.amlint.yml` maps config files to their `amlint test` files (a glob or a
+  list). `amlint test alertmanager.yml` then needs no tests file, and runs the cases of every
+  mapped file in order. A missing mapping, a glob that matches nothing or a `tests:` that
+  isn't a mapping exits `2`.
+- Test coverage in the editor: above each route (but the root), how many cases of the mapped
+  test files reach it ("2 of 12 tests reach this route"), as `amlint test --coverage` counts
+  them. The test files are read again when they change.
+- Quick fixes that change the config, in the editor: "did you mean" for `undefined-receiver`
+  and `undefined-time-interval` (the closest names, the first one preferred), and removing
+  the `continue: true` line of a `useless-continue`. Diagnostics carry the finding's path in
+  `data` for this.
+- The VS Code extension has an icon, and a workflow that publishes it to Open VSX for
+  Cursor, VSCodium and Gitpod. It runs only when started by hand, with an `OVSX_PAT` secret;
+  the steps are in `editors/vscode/PUBLISHING.md`.
+
+### Changed
+- `route-unknown-alertname` and `inhibit-unknown-alertname` say "the rule files" instead of
+  "the --rules files", since the rules can come from `.amlint.yml` too.
+
+### Fixed
+- VS Code extension 0.1.1: an amlint older than 0.6.0 (or none at all) on VS Code's `PATH`
+  no longer makes the server start and crash in a loop. The extension checks
+  `amlint --version` first and says what to install or set in `amlint.path`.
+
 ## [0.6.1] - 2026-10-17
 
 ### Added
