@@ -720,6 +720,16 @@ def _matcher_nodes(cfg: dict) -> Generator[Tuple[dict, str, str], None, None]:
 def check_bad_regex(cfg):
     out = []
     for node, path, prefix in _matcher_nodes(cfg):
+        regexes = node.get(prefix + "match_re")
+        for label, value in regexes.items() if isinstance(regexes, dict) else ():
+            if value is None:  # Go leaves the Regexp nil: "invalid regexp value"
+                out.append(Finding(
+                    ERROR, "bad-regex",
+                    f"{prefix}match_re value for '{_scalar(label)}' is empty (null). "
+                    f"Alertmanager will reject this config (invalid regexp value). Write the "
+                    f"regex, or '' to match a missing or empty label.",
+                    path,
+                ))
         for label, pattern in _regex_patterns(node, prefix):
             problem = _regex_problem(pattern)
             if problem:
@@ -1569,6 +1579,8 @@ def legacy_matchers(node: dict, prefix: str = "") -> Optional[List[str]]:
         if not isinstance(value, dict):
             return None
         for label, v in value.items():
+            if v is None and key == "match_re":
+                return None  # Alertmanager rejects it (bad-regex); "" would accept it
             entry = written_matcher(_scalar(label), op, _scalar(v))
             if entry is None:
                 return None

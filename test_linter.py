@@ -5448,3 +5448,19 @@ alertmanager:
     path.write_text(values.replace("  tplConfig: true\n", ""))
     main(["check", "--format", "json", str(path)])
     assert "bad-template" in {f["code"] for f in json.loads(capsys.readouterr().out)}
+
+
+def test_bad_regex_null_match_re_value():
+    """`match_re: {label: }` leaves Go's Regexp nil: Alertmanager rejects the config
+    ("invalid regexp value"), so amlint fix must not turn it into =~"" either."""
+    cfg = {"route": {"receiver": "a", "routes": [
+        {"match_re": {"team": None}, "receiver": "a"}]},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_match_re": {"sev": None}, "target_matchers": ["x=y"]}]}
+    found = {f.where: f.msg for f in lint(cfg) if f.code == "bad-regex"}
+    assert "match_re value for 'team' is empty (null)" in found["route.routes[0]"]
+    assert "source_match_re value for 'sev'" in found["inhibit_rules[0]"]
+    text = "route:\n  receiver: a\n  routes:\n    - match_re:\n        team:\n      receiver: a\n" \
+           "receivers:\n  - name: a\n"
+    new, fixed, left = _fix(text)
+    assert new == text and left == ["route.routes[0].match_re"]

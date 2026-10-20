@@ -467,7 +467,7 @@ MISTAKES = {
     "bad-match-label": 6,
     "groupby-ellipsis": 12, "no-root-route": 20, "root-receiver": 20, "root-matchers": 20,
     "root-match": 20, "root-continue": 20, "root-time-intervals": 20,
-    "duplicate-receiver": 12, "integration-key": 3, "time-interval": 3,
+    "duplicate-receiver": 12, "integration-key": 3, "time-interval": 3, "null-regex": 20,
 }
 
 
@@ -533,6 +533,10 @@ def validation_configs(draw) -> dict:
         node, prefix = draw(pick([(child, "") for child in children]
                                  + [(rule, "source_"), (rule, "target_")]))
         node[prefix + draw(pick(("match", "match_re")))] = {draw(pick(BAD_LABEL_NAMES)): "crit"}
+    if "null-regex" in mistakes:  # match_re: {sev: } with no value
+        node, prefix = draw(pick([(child, "") for child in children]
+                                 + [(rule, "source_"), (rule, "target_")]))
+        node[prefix + "match_re"] = {"sev": None}
     if "groupby-ellipsis" in mistakes:
         some_route()["group_by"] = ["...", "alertname"]
     if "root-receiver" in mistakes:
