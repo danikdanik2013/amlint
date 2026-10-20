@@ -925,7 +925,8 @@ type, on the lines `amlint check` reports. You don't run it yourself.
 - **Template files** (`.tmpl`) show `bad-template-file`, `undefined-template` and
   `template-unknown-field` on the line where the problem is, for every config in the
   workspace folder whose `templates:` globs load the file. A template file no config loads
-  gets its syntax errors only.
+  gets its syntax errors only, if it uses Alertmanager's data (`.Alerts`, `.CommonLabels`
+  and the like); other `.tmpl` files get nothing.
 
 It reads every format `check` reads. YAML files without an Alertmanager config, such as
 Kubernetes manifests, get no findings.

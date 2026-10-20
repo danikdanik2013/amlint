@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+- `.tmpl` files that aren't Alertmanager templates, such as chezmoi or gomplate templates,
+  no longer get "function not defined" errors. The fix is in amlint itself (`amlint lsp`),
+  so it comes with the amlint release after 0.8.0; the extension doesn't change.
+
 ## [0.1.2]
 
 - Template files (`.tmpl`): amlint's template findings show in the file itself, on the

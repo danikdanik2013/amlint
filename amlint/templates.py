@@ -93,6 +93,7 @@ class Source(NamedTuple):
     name: str   # for messages
     text: str
     path: Optional[str] = None  # a file on disk: its absolute path, normcase'd
+    file: str = ""  # its file name, which Go also makes a template of the file's own text
 
 
 def template_sources(cfg: dict, basedir: Optional[str], bundled,
@@ -102,9 +103,11 @@ def template_sources(cfg: dict, basedir: Optional[str], bundled,
     relative paths against). `bundled` is the input's BundledTemplates, if any. `texts`
     ({absolute path, normcase'd: text}) is read instead of those files on disk."""
     templates = cfg.get("templates")
+    if bundled is not None and bundled.unknown:
+        return None
     if bundled is not None and bundled.all_loaded:
         return [Source(bundled.paths.get(name, "templates"), f"{name} in {bundled.source}",
-                       bundled.files[name])
+                       bundled.files[name], None, name)
                 for name in bundled.names if name in bundled.files] \
             if set(bundled.names) <= set(bundled.files) else None
     if bundled is not None and bundled.grafana:
@@ -127,7 +130,8 @@ def template_sources(cfg: dict, basedir: Optional[str], bundled,
                 if fnmatch.fnmatchcase(name, pattern):
                     if name not in bundled.files:
                         return None
-                    out.append(Source(where, f"{name} in {bundled.source}", bundled.files[name]))
+                    out.append(Source(where, f"{name} in {bundled.source}", bundled.files[name],
+                                      None, name))
             continue
         if basedir is None or os.path.isabs(tpl):
             return None
@@ -140,7 +144,8 @@ def template_sources(cfg: dict, basedir: Optional[str], bundled,
                         text = f.read()
                 except OSError:
                     return None
-            out.append(Source(where, os.path.relpath(path, basedir), text, full))
+            out.append(Source(where, os.path.relpath(path, basedir), text, full,
+                              os.path.basename(path)))
     return out
 
 
@@ -216,7 +221,7 @@ def check_templates(cfg: dict, sources: Optional[List[Source]],
     files_ok = True
     for src in sources or []:
         parsed = parse(src.text, d.funcs)
-        defined |= set(parsed.defines)
+        defined |= set(parsed.defines) | ({src.file} if src.file else set())
         if parsed.error:
             files_ok = complete = False  # Alertmanager loads nothing; the rest is unknown
             out.append(_in_file(Finding(
@@ -328,10 +333,11 @@ def _file_fields(sources: List[Source], dots: Dict[str, Optional[str]],
             break
     out: List[Finding] = []
     seen: Set[Tuple[str, int]] = set()
-    for src in sources:
-        for pos, name, typ, define in parse(src.text, d.funcs, None, dict(dots),
-                                            d.members).missing:
-            if (src.name, pos) in seen:
+    parsed = [(src, parse(src.text, d.funcs, None, dict(dots), d.members)) for src in sources]
+    kept = {name: src for src, p in parsed for name in p.defines}  # Go keeps the last one
+    for src, p in parsed:
+        for pos, name, typ, define in p.missing:
+            if (src.name, pos) in seen or define and kept.get(define) is not src:
                 continue
             seen.add((src.name, pos))
             out.append(_in_file(Finding(

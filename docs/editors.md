@@ -99,10 +99,17 @@ config that loads them:
 
 amlint finds the configs among the YAML files in the workspace folder, and keeps those
 whose `templates:` globs match the file, resolved against each config's directory. Outside
-a workspace folder it looks in the template's directory and the one above it. A template
-file no config loads gets its syntax errors only. Unsaved changes count both ways: edit a
-template and the config's `templates:` line updates, edit the config and the template
-updates.
+a workspace folder it looks in the template's directory and the one above it. A problem
+that several configs find, such as prod and staging loading the same file, shows once.
+
+A template file no config loads gets its syntax errors only, and only if it reads
+Alertmanager's data (`.Alerts`, `.CommonLabels`, `.GroupLabels` and the like) or calls one
+of Alertmanager's own templates. Other `.tmpl` files, such as chezmoi or gomplate templates,
+get nothing: their functions aren't Alertmanager's.
+
+Unsaved changes count both ways: edit a template and the config's `templates:` line
+updates, along with the other open template files that call it; edit the config and the
+template updates.
 
 ## VS Code
 

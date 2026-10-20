@@ -18,6 +18,32 @@
 
 ### Fixed
 - A plain `=` in YAML, as in Grafana's exported `object_matchers`, no longer fails to load.
+- Template checks, compared with amtool 0.34:
+  - `amlint check` no longer crashes on a template name with a bad escape, such as
+    `{{ template "slack\.title" . }}`; it is a `bad-template` (or `bad-template-file`), as
+    in Alertmanager.
+  - `undefined-template` knows that a template file is also a template named after the
+    file: `{{ template "msg.tmpl" . }}` works in Alertmanager.
+  - `undefined-template` is quiet for an AlertmanagerConfig resource checked without its
+    base config: the templates that config loads are unknown.
+  - `template-unknown-field` is quiet in Helm values with `tplConfig: true`, where fields
+    such as `{{ .Values.channel }}` are Helm's, as `bad-template` already was.
+  - `template-unknown-field` checks only the define Alertmanager keeps when two template
+    files define the same name: the one loaded last.
+  - `bad-template-file` no longer reports a variable declared before a `{{ define }}` and
+    used after it.
+- The editor (`amlint lsp`) no longer reports `bad-template-file` in `.tmpl` files that
+  aren't Alertmanager templates, such as chezmoi, gomplate or Go program templates with
+  functions of their own. A template file no config loads is checked only if it uses
+  Alertmanager's data (`.Alerts`, `.CommonLabels` and the like) or calls its templates.
+- In template files the editor also:
+  - updates a file when an open template file it calls changes;
+  - follows the config as it is in the editor, so removing `templates:` there counts
+    before you save;
+  - shows a problem that several configs find (prod and staging loading one file) once;
+  - finds configs in the outer workspace folder when the templates sit in an inner one;
+  - keeps working when a YAML file in the workspace can't be read, such as one nested
+    thousands of levels deep.
 
 ## [0.8.0] - 2026-10-20
 

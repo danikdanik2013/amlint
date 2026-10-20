@@ -101,6 +101,7 @@ class BundledTemplates:
     source: str               # where they are, for messages
     files: Dict[str, str] = field(default_factory=dict)  # name -> text, where amlint can read it
     all_loaded: bool = False  # every file is loaded, whatever `templates:` says (Mimir)
+    unknown: bool = False     # in a config amlint can't see (the operator's base Secret)
     grafana: bool = False     # Grafana's templates: its functions and data
     paths: Dict[str, str] = field(default_factory=dict)  # name -> path in cfg, for findings
 
@@ -298,6 +299,13 @@ class Loaded:
 _INHIBIT_CODES = {"inhibit-no-equal", "inhibit-same-match", "circular-inhibition"}
 
 
+def _helm_renders(f) -> bool:
+    """A template finding in a config that Helm renders first (tplConfig): the text is
+    Helm's, not what Alertmanager gets. Template files aren't rendered by Helm."""
+    return f.code in ("bad-template", "undefined-template") or (
+        f.code == "template-unknown-field" and f.where.startswith("receivers["))
+
+
 def apply_locations(findings: list, loaded: Loaded) -> list:
     """Set line/col on every finding; drop the ones `loaded` doesn't keep, and the inhibit
     rule findings that only the operator's namespace matcher causes: it is on both sides of
@@ -307,7 +315,7 @@ def apply_locations(findings: list, loaded: Loaded) -> list:
         f.line, f.col = loaded.locate(f.where)
     findings = [f for f in findings if (f.code, f.where) not in loaded.by_design
                 and not (loaded.secrets_ok and f.code == "plaintext-secret")
-                and not (loaded.helm_tpl and f.code in ("bad-template", "undefined-template"))
+                and not (loaded.helm_tpl and _helm_renders(f))
                 and f.code not in loaded.skip_codes]
     if loaded.uninjected is not None:
         without = {(f.code, f.where, f.msg) for check in (check_dead_inhibitions,
@@ -997,6 +1005,8 @@ def _operator(text: str, docs: List[_Doc], crs_docs: List[_Doc], base: Optional[
     else:
         cfg = copy.deepcopy(_OPERATOR_DEFAULT)
         region = _Default(_pos(crs_docs[0].node))
+        # the templates the real base config loads are unknown, so are the ones it defines
+        templates = BundledTemplates([], None, "the Alertmanager's config Secret", unknown=True)
 
     merged = _Merged(region)
     route = dict(cfg["route"]) if isinstance(cfg.get("route"), dict) else {}

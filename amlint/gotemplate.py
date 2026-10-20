@@ -430,12 +430,14 @@ class _Parser:
         tok = self.next_non_space()
         name = self.template_name(tok, "define clause")
         self.expect(RIGHT, "define clause")
+        # Go parses a define as a tree of its own: the variables around it are out of scope
+        # inside, and back in scope after it
+        saved = self.dot, self.root, self.define, self.vars
         self.vars = ["$"]
-        saved = self.dot, self.root, self.define
         self.dot = self.root = self.define_dots.get(name)
         self.define = name
         end, full = self.item_list()
-        self.dot, self.root, self.define = saved
+        self.dot, self.root, self.define, self.vars = saved
         if end.kind != "end":
             raise TemplateError("unexpected {{else}} in define clause", end.tok.pos)
         self.add(name, tok.pos, full)
@@ -559,7 +561,10 @@ class _Parser:
 
     def template_name(self, tok: Token, context: str) -> str:
         if tok.typ == STRING:
-            return _unquote_go(tok.val)
+            name = _unquote_go(tok.val)
+            if name is None:  # strconv.Unquote fails on a bad escape such as "\."
+                raise TemplateError(f"invalid syntax: {tok.val}", tok.pos)
+            return name
         if tok.typ == RAW:
             return tok.val[1:-1]
         self.unexpected(tok, context)

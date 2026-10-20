@@ -56,8 +56,9 @@ Other YAML files, such as Kubernetes manifests or Prometheus rule files, get no 
 the line where the problem is: a syntax error, a call to a template no file defines, or a
 field the data doesn't have, such as `.Labels` outside `{{ range .Alerts }}`. amlint finds
 those configs among the YAML files in the workspace folder, by their `templates:` globs. A
-template file no config loads gets its syntax errors only. Unsaved changes count, in the
-template and in the config.
+template file no config loads gets its syntax errors only, if it uses Alertmanager's data
+(`.Alerts`, `.CommonLabels` and the like). Other `.tmpl` files, such as chezmoi or gomplate
+templates, get nothing. Unsaved changes count, in the template and in the config.
 
 ## Settings
 
