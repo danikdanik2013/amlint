@@ -5236,6 +5236,10 @@ GO_TEMPLATE_CASES = [
     ("{{`a}}", "unterminated raw quoted string"), ("{{0xi}}", "bad number syntax"),
     ("{{define `a`}}a{{end}}{{define `a`}}b{{end}}", "multiple definition of template"),
     ("{{range $k, .}}{{end}}", "range can only initialize variables"),
+    # checked with amtool 0.34: a define is a tree of its own, and template names are unquoted
+    ('{{$x := 1}}{{define "a"}}x{{end}}{{$x}}', None),
+    ('{{$x := 1}}{{define "a"}}{{$x}}{{end}}', 'undefined variable "$x"'),
+    ('{{template "a\\.b"}}', 'invalid syntax: "a\\.b"'),
 ]
 
 
@@ -5373,6 +5377,20 @@ def test_template_texts_replace_the_files_and_findings_know_their_place(tmp_path
     assert all(f.template_at is None for f in lint(_slack(title="{{ .Labels.x }}")))
 
 
+def test_template_called_by_its_file_name(tmp_path):
+    """Go's ParseGlob makes each file's own text a template named after the file."""
+    cfg, base = _project(tmp_path, {"msg.tmpl": "hello {{ .Status }}"},
+                         _slack(text='{{ template "msg.tmpl" . }}',
+                                title='{{ template "other.tmpl" . }}'))
+    assert list(_tpl(cfg, basedir=base)) == ["receivers[r].slack_configs[0].title"]
+
+
+def test_bad_escape_in_a_template_name():
+    code, msg = _tpl(_slack(title='{{ template "slack\\.title" . }}'))[
+        "receivers[r].slack_configs[0].title"]
+    assert code == "bad-template" and 'invalid syntax: "slack\\.title"' in msg
+
+
 def test_template_unknown_field_in_a_field():
     found = _tpl(_slack(
         title="{{ .Labels.alertname }}",
@@ -5408,6 +5426,40 @@ def test_template_unknown_field_follows_calls(tmp_path):
     assert 'line 1, in "text": .Labels on the notification data' in msgs[0]
     assert 'line 2, in "row": .Receiver on one alert' in msgs[1]
     assert "The template runs on one alert here" in msgs[1]
+
+
+def test_template_unknown_field_only_in_the_define_alertmanager_keeps(tmp_path):
+    """A define in a later file replaces one of the same name: Go keeps the last."""
+    cfg, base = _project(tmp_path, {
+        "a.tmpl": '{{ define "x" }}{{ .Labels.foo }}{{ end }}',
+        "b.tmpl": '{{ define "x" }}{{ .CommonLabels.foo }}{{ end }}',
+    }, _slack(text='{{ template "x" . }}'))
+    assert _tpl(cfg, basedir=base) == {}
+    (tmp_path / "templates" / "a.tmpl").rename(tmp_path / "templates" / "c.tmpl")  # now last
+    code, msg = _tpl(cfg, basedir=base)["templates[0]"]
+    assert code == "template-unknown-field" and "templates/c.tmpl" in msg
+
+
+def test_alertmanagerconfig_alone_does_not_know_the_templates(tmp_path, capsys):
+    """The base config the operator merges it into loads templates amlint can't see."""
+    path = tmp_path / "team.yaml"
+    path.write_text("""\
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata: {name: team, namespace: team-a}
+spec:
+  route: {receiver: slack}
+  receivers:
+    - name: slack
+      slackConfigs:
+        - apiURL: {name: s, key: url}
+          title: '{{ template "slack.myorg.title" . }}'
+          text: '{{ .Labels.x }}'
+""")
+    main(["check", "--format", "json", str(path)])
+    codes = {f["code"] for f in json.loads(capsys.readouterr().out)}
+    assert "undefined-template" not in codes
+    assert "template-unknown-field" in codes  # the data is known all the same
 
 
 def test_templates_in_kubernetes_inputs(tmp_path, capsys):
@@ -5457,6 +5509,7 @@ alertmanager:
           - api_url_file: /s
             channel: '{{ .Values.channel | quote }}'
             title: '{{ "{{" }} .CommonLabels.alertname {{ "}}" }}'
+            text: '{{ .Release.Namespace }}'
 """
     path = tmp_path / "values.yml"
     path.write_text(values)
@@ -5464,7 +5517,8 @@ alertmanager:
     assert not [f for f in json.loads(capsys.readouterr().out) if "template" in f["code"]]
     path.write_text(values.replace("  tplConfig: true\n", ""))
     main(["check", "--format", "json", str(path)])
-    assert "bad-template" in {f["code"] for f in json.loads(capsys.readouterr().out)}
+    assert {"bad-template", "template-unknown-field"} <= \
+        {f["code"] for f in json.loads(capsys.readouterr().out)}
 
 
 def test_bad_regex_null_match_re_value():
