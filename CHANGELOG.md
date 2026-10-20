@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+- Grafana Alerting: amlint reads Grafana's file provisioning (`contactPoints`, `policies`,
+  `muteTimes`, `templates`), its exports, and its Alertmanager config, and checks them like
+  any config; `route`, `test` and `diff` simulate their routing, and the editor shows the
+  findings. As Grafana does, it reads the other provisioning files in the same directory, so
+  a policy can use a contact point from another file; names made in Grafana's UI aren't
+  reported as undefined. `--input-format grafana`.
+- `grafana-contact-point` (error): a Grafana contact point with a type Grafana doesn't have,
+  or without a setting its type requires.
+- `plaintext-secret` checks the secret settings of Grafana contact points, and skips
+  `$__env{…}`, `$__file{…}`, `$VAR` and `[REDACTED]`.
+- Templates in Grafana are checked with Grafana's functions and template data.
+- `object_matchers` (Grafana's `[label, op, value]` matchers) are read in every format.
+
+### Fixed
+- A plain `=` in YAML, as in Grafana's exported `object_matchers`, no longer fails to load.
+
 ## [0.8.0] - 2026-10-20
 
 Highlights:

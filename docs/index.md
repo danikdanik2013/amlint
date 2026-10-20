@@ -46,13 +46,14 @@ fix a finding, run `amlint explain <check>`, for example `amlint explain unreach
 | See what a change does to routing | `amlint diff old.yml new.yml` | [Usage](usage.md) |
 | Catch routes for alerts that don't exist | `amlint check … --rules 'rules/*.yml'` | [Prometheus rules](checks/rules.md) |
 | Rewrite deprecated `match:` syntax as `matchers:` | `amlint fix alertmanager.yml` | [Usage](usage.md#fix) |
-| Lint a Secret, Helm values or Mimir config | `amlint check alertmanager-secret.yaml` | [Kubernetes & Mimir](kubernetes.md) |
+| Lint a Secret, Helm values or Mimir config | `amlint check alertmanager-secret.yaml` | [Kubernetes, Grafana & Mimir](kubernetes.md) |
+| Lint Grafana Alerting's notification policies | `amlint check provisioning/alerting/*.yaml` | [Grafana Alerting](kubernetes.md#grafana) |
 | Get findings and a routing diff on every PR | the GitHub Action | [GitHub Action](github-action.md) |
 | See findings in your editor as you type | `amlint lsp`, started by the editor | [Editors](editors.md) |
 
 ## What it catches
 
-There are 48 checks. 26 of them find configs that amtool accepts but that don't behave the
+There are 49 checks. 27 of them find configs that amtool accepts but that don't behave the
 way you expect, or use syntax Alertmanager has deprecated:
 
 - **Alerts that reach nobody.** A route points at a receiver with no integration, or a
@@ -87,7 +88,7 @@ there. amlint adds what comes after that question:
 | A file of routing tests in CI, with route coverage | — | ✅ |
 | Is this alert muted while that one fires? | — | ✅ |
 | What does this change do to routing? | — | ✅ |
-| Kubernetes, Helm, Mimir and AlertmanagerConfig input | — | ✅ |
+| Kubernetes, Helm, Mimir, AlertmanagerConfig and Grafana input | — | ✅ |
 | PR annotations, SARIF, JSON, Markdown output | — | ✅ |
 
 The routing and inhibition simulation is

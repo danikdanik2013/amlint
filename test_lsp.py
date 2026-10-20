@@ -559,7 +559,12 @@ def test_outline_shows_routes_and_receivers(lsp, tmp_path):
                                               "equal: alertname")
 
 
-@pytest.mark.parametrize("name", sorted(os.listdir(os.path.join(ROOT, "testdata", "formats"))))
+_FORMAT_FILES = sorted(
+    os.path.relpath(os.path.join(d, f), os.path.join(ROOT, "testdata", "formats"))
+    for d, _, files in os.walk(os.path.join(ROOT, "testdata", "formats")) for f in files)
+
+
+@pytest.mark.parametrize("name", _FORMAT_FILES)
 def test_outline_for_every_input_format(lsp, tmp_path, name):
     path = Path(ROOT, "testdata", "formats", name)
     client = lsp()

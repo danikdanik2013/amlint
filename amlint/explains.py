@@ -47,7 +47,7 @@ _DOCS_PAGES = {
         "email-no-smarthost", "webhook-no-url", "pagerduty-no-routing-key", "slack-no-api-url",
         "opsgenie-no-api-key", "msteams-no-webhook-url", "telegram-no-bot-token",
         "discord-no-webhook-url", "victorops-no-api-key", "wechat-no-corp-id", "sns-no-target",
-        "plaintext-secret",
+        "plaintext-secret", "grafana-contact-point",
     ),
     "inhibition": ("inhibit-no-equal", "circular-inhibition", "inhibit-same-match"),
     "timing": (
@@ -1334,5 +1334,40 @@ receivers:
       - channel: "#alerts"
         title: '{{ .CommonLabels.alertname }}'
         text: '{{ range .Alerts }}{{ .Labels.pod }} in {{ $.CommonLabels.env }}{{ end }}'""",
+    },
+
+    "grafana-contact-point": {
+        "level": "error",
+        "amtool": "amtool doesn't read Grafana's contact points; Grafana refuses these itself.",
+        "summary": (
+            "A Grafana contact point has an integration type Grafana doesn't have, or misses"
+            " a setting its type requires."
+        ),
+        "why": (
+            "Grafana checks contact points when it provisions or saves them, and refuses one "
+            "with an unknown type or without a required setting: Slack needs url (a webhook) "
+            "or token and recipient, PagerDuty integrationKey, email addresses, Telegram "
+            "bottoken and chatid, and so on. A provisioning run with such a contact point "
+            "fails. Only for Grafana Alerting input."
+        ),
+        "bad": """\
+contactPoints:
+  - orgId: 1
+    name: ops-slack
+    receivers:
+      - uid: ops-slack
+        type: slack
+        settings:
+          channel: "#ops"        # not a Slack setting in Grafana; no url either""",
+        "good": """\
+contactPoints:
+  - orgId: 1
+    name: ops-slack
+    receivers:
+      - uid: ops-slack
+        type: slack
+        settings:
+          url: $__env{OPS_SLACK_WEBHOOK}
+          recipient: '#ops'""",
     },
 }

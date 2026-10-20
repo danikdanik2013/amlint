@@ -1,0 +1,11 @@
+# The database team's contact point, provisioned from its own file.
+apiVersion: 1
+contactPoints:
+  - orgId: 1
+    name: db-pager
+    receivers:
+      - uid: db-pager
+        type: pagerduty
+        settings:
+          integrationKey: ${DB_PAGERDUTY_KEY}
+          severity: critical

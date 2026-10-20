@@ -678,8 +678,12 @@ receivers:
         channel: "#team"
 ```
 
+In Grafana Alerting contact points, the secret settings of each type are checked (Slack
+`url` and `token`, PagerDuty `integrationKey`, Telegram `bottoken`, …); the fix there is
+Grafana's `$__env{VAR}` or `$__file{/path}`.
+
 **Not reported:** values that only stand in for a secret (`<secret>`, `${SLACK_URL}`,
-`$(SLACK_URL)`, `{{ ... }}`, `xxxx`, example values), keys and passwords that look like
+`$(SLACK_URL)`, `$__env{…}`, `{{ ... }}`, `xxxx`, `[REDACTED]`, example values), keys and passwords that look like
 examples rather than random strings (`mysecret`, `token123`, a short value or one plain
 word), a Slack `api_url` that isn't a webhook, and configs kept where plain-text secrets belong: inside a Kubernetes Secret, in
 AlertmanagerConfig resources (they reference Secrets), and Mimir tenant configs, which
@@ -689,3 +693,43 @@ Some `_file` fields are newer than others: `webhook_configs` `url_file` needs Al
 0.26, Discord and Teams `webhook_url_file` 0.27, `auth_secret_file` and
 `wechat_api_secret_file` 0.31. The message says so. An SNS `sigv4.secret_key` has no `_file`
 form: keep that config in a Kubernetes Secret.
+
+---
+
+## grafana-contact-point
+
+**Level:** error · **amtool:** doesn't apply (Grafana Alerting only)
+
+**What goes wrong:** A Grafana contact point has an integration `type` Grafana doesn't have,
+or misses a setting its type requires: Slack needs `url` (a webhook) or `token` and
+`recipient`, PagerDuty `integrationKey`, email `addresses`, Telegram `bottoken` and
+`chatid`, Opsgenie `apiKey`, webhooks, Teams, Discord and Google Chat a `url`.
+
+```yaml title="Bad"
+contactPoints:
+  - orgId: 1
+    name: ops-slack
+    receivers:
+      - uid: ops-slack
+        type: slack
+        settings:
+          channel: "#ops"        # not a Slack setting in Grafana; no url either
+```
+
+**What Grafana does:** Refuses to provision or save the contact point, so the provisioning
+run fails. A setting Grafana doesn't know, such as `channel` here, is ignored.
+
+**How to fix:** Set what the type needs. Keep secrets out of the file with `$__env{…}` or
+`$__file{…}`, which Grafana's provisioning expands.
+
+```yaml title="Fixed"
+contactPoints:
+  - orgId: 1
+    name: ops-slack
+    receivers:
+      - uid: ops-slack
+        type: slack
+        settings:
+          url: $__env{OPS_SLACK_WEBHOOK}
+          recipient: '#ops'
+```

@@ -122,7 +122,7 @@ Full guide: [usage docs](https://danikdanik2013.github.io/amlint/usage/).
 
 ## What it catches
 
-48 checks. 26 of them catch things amtool doesn't, because the config is valid and simply
+49 checks. 27 of them catch things amtool doesn't, because the config is valid and simply
 behaves differently than you expect, or uses syntax Alertmanager has deprecated:
 
 - **Alerts that reach nobody.** A route points at a receiver that has no integration, or a
@@ -246,7 +246,7 @@ receivers:
   - name: blackhole   # amlint: disable=empty-receiver   ← this line
 ```
 
-## Kubernetes, Helm and Mimir
+## Kubernetes, Helm, Mimir and Grafana
 
 Point amlint at the file you actually deploy. It detects the format and finds the
 Alertmanager config inside:
@@ -255,6 +255,8 @@ Alertmanager config inside:
 - **kube-prometheus-stack** Helm values (`alertmanager.config`)
 - a **Mimir** or **Cortex** tenant config (`alertmanager_config`)
 - prometheus-operator **AlertmanagerConfig** resources, merged the way the operator does it
+- **Grafana Alerting** provisioning files and exports: notification policies, contact points,
+  mute timings and templates
 
 Line numbers still point into your file.
 [Details →](https://danikdanik2013.github.io/amlint/kubernetes/)
@@ -269,7 +271,7 @@ Line numbers still point into your file.
 | A file of routing tests, run in CI, with route coverage | — | ✅ |
 | Inhibition: is this alert muted while that one fires? | — | ✅ |
 | What does this change do to routing? | — | ✅ |
-| Kubernetes / Helm / Mimir / AlertmanagerConfig input | — | ✅ |
+| Kubernetes / Helm / Mimir / AlertmanagerConfig / Grafana input | — | ✅ |
 | PR annotations, SARIF, JSON, Markdown | — | ✅ |
 | Needs a Go binary | ✅ | — |
 

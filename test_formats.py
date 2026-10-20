@@ -975,3 +975,289 @@ def test_routes_shared_by_alias_in_a_resource_still_work(tmp_path, capsys):
     assert main(["route", path, "namespace=team-a", "team=web", "severity=critical",
                  "--format", "json"]) == 0
     assert json.loads(capsys.readouterr().out)["receivers"] == ["team-a/payments/pager"]
+
+
+# ── Grafana Alerting ──────────────────────────────────────────────────
+
+_GRAFANA = os.path.join(_FORMATS, "grafana")
+
+
+def test_grafana_fixture_works_with_every_command(capsys):
+    path = os.path.join(_GRAFANA, "alerting.yaml")
+    code, findings, err = check(capsys, path, "--strict")
+    assert code == 0 and findings == [], findings
+    loaded = load_input(open(path).read(), path=path)
+    assert loaded.format == "grafana"
+    assert [r["name"] for r in loaded.cfg["receivers"]] == ["ops-email", "ops-slack", "db-pager"]
+    assert main(["tree", path]) == 0
+    assert "{team=db, severity=critical}  →  db-pager" in capsys.readouterr().out
+    assert main(["diff", path, path]) == 0
+    capsys.readouterr()
+    main(["route", path, "team=db", "severity=critical", "--format", "json"])
+    assert json.loads(capsys.readouterr().out)["receivers"] == ["db-pager"]
+    main(["route", path, "team=api", "--format", "json"])
+    assert json.loads(capsys.readouterr().out)["receivers"] == ["ops-slack"]
+
+
+def test_grafana_object_matchers():
+    loaded = load("""
+        policies:
+          - receiver: a
+            routes:
+              - receiver: b
+                object_matchers:
+                  - - env
+                    - =
+                    - '"NO"'
+                  - [code, =~, "5.."]
+              - receiver: c
+                object_matchers: [[team, "!=", db]]
+        contactPoints:
+          - {name: a, receivers: [{uid: a, type: email, settings: {addresses: a@b.c}}]}
+          - {name: b, receivers: [{uid: b, type: email, settings: {addresses: a@b.c}}]}
+          - {name: c, receivers: [{uid: c, type: email, settings: {addresses: a@b.c}}]}
+    """)
+    from amlint.linter import _matchers
+    route = loaded.cfg["route"]
+    # Grafana strips one double quote from each end; YAML's NO stays text
+    assert _matchers(route["routes"][0]) == [("env", "=", "NO"), ("code", "=~", "5..")]
+    assert _matchers(route["routes"][1]) == [("team", "!=", "db")]
+
+
+def test_grafana_exported_object_matchers_parse():
+    """Grafana's export writes `- =` unquoted, which YAML 1.1 reads as the "value" tag."""
+    loaded = load("""
+        apiVersion: 1
+        policies:
+          - orgId: 1
+            receiver: grafana-default-email
+            routes:
+              - object_matchers:
+                  - - severity
+                    - =
+                    - warn
+    """)
+    from amlint.linter import _matchers
+    assert _matchers(loaded.cfg["route"]["routes"][0]) == [("severity", "=", "warn")]
+
+
+def test_grafana_names_defined_in_grafana(tmp_path, capsys):
+    """An export of the policies alone uses contact points and mute timings that are in
+    Grafana, not in the file: no undefined-receiver, and a note says so."""
+    path = write(tmp_path, """
+        apiVersion: 1
+        policies:
+          - orgId: 1
+            receiver: grafana-default-email
+            routes:
+              - receiver: team-pager
+                object_matchers: [[team, =, db]]
+                mute_time_intervals: [weekends]
+    """, "policies.yaml")
+    code, findings, err = check(capsys, path)
+    assert code == 0 and codes(findings) == []
+    assert "taken to be in Grafana: grafana-default-email, team-pager, weekends" in err
+
+
+def test_grafana_files_next_to_each_other(tmp_path, capsys):
+    """Grafana reads every file in the directory: a policy here uses a contact point there,
+    and each file's findings are reported when that file is checked."""
+    policies = write(tmp_path, """
+        apiVersion: 1
+        policies:
+          - orgId: 1
+            receiver: ops
+            routes:
+              - receiver: ops
+                object_matchers: [[team, =, db]]
+              - receiver: ops
+                object_matchers: [[team, =, db]]
+    """, "policies.yaml")
+    points = write(tmp_path, """
+        apiVersion: 1
+        contactPoints:
+          - orgId: 1
+            name: ops
+            receivers:
+              - uid: ops
+                type: slack
+                settings:
+                  recipient: "#ops"
+    """, "contact-points.yaml")
+    write(tmp_path, "not: [grafana", "broken.yaml")
+    _, findings, err = check(capsys, policies)
+    assert codes(findings) == ["route-match-collision"]
+    assert "taken to be in Grafana" not in err
+    _, findings, _ = check(capsys, points)
+    assert codes(findings) == ["grafana-contact-point"]
+    assert findings[0]["line"] == line_of(points, "settings:")
+
+
+def test_grafana_provisioning_upserts(tmp_path, capsys):
+    """A mute timing, template or integration seen again replaces the earlier one."""
+    path = write(tmp_path, """
+        apiVersion: 1
+        policies:
+          - receiver: a
+            routes: [{receiver: a, object_matchers: [[x, =, y]], mute_time_intervals: [n]}]
+        contactPoints:
+          - {name: a, receivers: [{uid: a1, type: email, settings: {addresses: a@b.c}}]}
+          - {name: a, receivers: [{uid: a1, type: email, settings: {addresses: c@d.e}}]}
+        muteTimes:
+          - {name: n, time_intervals: [{weekdays: [monday]}]}
+          - {name: n, time_intervals: [{weekdays: [sunday]}]}
+    """)
+    _, findings, _ = check(capsys, path)
+    assert codes(findings) == []
+    loaded = load_input(open(path).read(), path=path)
+    [receiver] = loaded.cfg["receivers"]
+    assert receiver["grafana_managed_receiver_configs"][0]["settings"]["addresses"] == "c@d.e"
+    assert loaded.cfg["time_intervals"] == [{"name": "n",
+                                             "time_intervals": [{"weekdays": ["sunday"]}]}]
+
+
+def test_grafana_orgs(capsys, tmp_path):
+    path = write(tmp_path, """
+        policies:
+          - {orgId: 2, receiver: b}
+          - {orgId: 1, receiver: a}
+        contactPoints:
+          - {orgId: 1, name: a, receivers: [{uid: a, type: email, settings: {addresses: x}}]}
+          - {orgId: 2, name: b, receivers: [{uid: b, type: email, settings: {addresses: x}}]}
+    """)
+    _, findings, err = check(capsys, path)
+    assert "these files configure Grafana orgs 1, 2; amlint checks org 1" in err
+    assert load_input(open(path).read()).cfg["route"]["receiver"] == "a"
+
+
+@pytest.mark.parametrize("integration,missing", [
+    ({"type": "slack", "settings": {"recipient": "#x"}}, "has no url setting"),
+    ({"type": "pagerduty", "settings": {"severity": "critical"}}, "has no integrationKey"),
+    ({"type": "telegram", "settings": {"chatid": "1"}}, "has no bottoken setting"),
+    ({"type": "slak", "settings": {"url": "x"}}, "type 'slak', which Grafana doesn't have "
+                                                 "(did you mean 'slack'?)"),
+])
+def test_grafana_contact_point(integration, missing):
+    from amlint.linter import lint
+    cfg = {"route": {"receiver": "x"},
+           "receivers": [{"name": "x", "grafana_managed_receiver_configs": [integration]}]}
+    [f] = [f for f in lint(cfg) if f.code == "grafana-contact-point"]
+    assert missing in f.msg and "Grafana refuses to provision or save it" in f.msg
+
+
+@pytest.mark.parametrize("integration", [
+    {"type": "slack", "settings": {"token": "xoxb-1", "recipient": "#x"}},
+    {"type": "Slack", "settings": {}, "secureFields": {"url": True}},
+    {"type": "msteams", "settings": {"url": "https://x"}},
+    {"type": "LINE", "settings": {"token": "t"}},
+    {"type": "webex", "settings": {}},
+])
+def test_grafana_contact_point_ok(integration):
+    from amlint.linter import lint
+    cfg = {"route": {"receiver": "x"},
+           "receivers": [{"name": "x", "grafana_managed_receiver_configs": [integration]}]}
+    assert [f for f in lint(cfg) if f.code == "grafana-contact-point"] == []
+
+
+@pytest.mark.parametrize("value,reported", [
+    ("https://hooks.slack.com/services/" "T024BE7LD/B01ABCDEF/9xQmL2vK7pR4tY8wZ3nB6cD1", True),
+    ("$__env{SLACK_URL}", False), ("$__file{/run/secrets/slack}", False),
+    ("${SLACK_URL}", False), ("$SLACK_URL", False), ("[REDACTED]", False),
+    ("https://slack.example.org/hook", False),
+])
+def test_grafana_plaintext_secret(value, reported):
+    from amlint.linter import lint
+    cfg = {"route": {"receiver": "x"}, "receivers": [{"name": "x",
+           "grafana_managed_receiver_configs": [{"type": "slack", "settings": {"url": value}}]}]}
+    found = [f for f in lint(cfg) if f.code == "plaintext-secret"]
+    assert bool(found) is reported
+    if found:
+        assert "settings.url of the slack integration in contact point 'x'" in found[0].msg
+        assert "$__env{VAR} or $__file{/path/to/secret}" in found[0].msg
+
+
+def test_grafana_secret_in_a_file(tmp_path, capsys):
+    path = write(tmp_path, """
+        contactPoints:
+          - name: pager
+            receivers:
+              - uid: pager
+                type: pagerduty
+                settings:
+                  integrationKey: 3f9a1c0be44d4f0d8d6c2b7e5a1f0c9d
+    """)
+    _, findings, _ = check(capsys, path)
+    [f] = [f for f in findings if f["code"] == "plaintext-secret"]
+    assert f["line"] == line_of(path, "integrationKey")
+    assert f["where"] == ("receivers[pager].grafana_managed_receiver_configs[0]"
+                          ".settings.integrationKey")
+
+
+def test_grafana_templates(tmp_path, capsys):
+    """Grafana's own functions and fields; a template without a define is wrapped in one."""
+    path = write(tmp_path, """
+        policies:
+          - receiver: ops
+        contactPoints:
+          - name: ops
+            receivers:
+              - uid: ops
+                type: slack
+                settings:
+                  url: $__env{URL}
+                  title: '{{ template "ops.title" . }} {{ template "default.title" . }}'
+                  text: >-
+                    {{ range .Alerts }}{{ .ValueString }} {{ .DashboardURL }}
+                    {{ .Values.B }}{{ end }} {{ coll.Dict "a" 1 }}
+        templates:
+          - name: ops.title
+            template: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'
+    """)
+    _, findings, _ = check(capsys, path)
+    assert codes(findings) == []
+    text = open(path).read()
+    for old, new, code in [
+        ("ops.title\" . }} {{", "ops.titel\" . }} {{", "undefined-template"),
+        ("{{ .ValueString }}", "{{ .Labels.x | humanizeDuration }}", "bad-template"),
+        ("{{ .ValueString }}", "{{ end }}{{ .Labels.x }}{{ range .Alerts }}",
+         "template-unknown-field"),
+    ]:
+        open(path, "w").write(text.replace(old, new))
+        _, findings, _ = check(capsys, path)
+        assert codes(findings) == [code], (old, findings)
+        assert "Grafana" in findings[0]["message"]
+
+
+def test_grafana_alertmanager_config_from_the_api(tmp_path, capsys):
+    path = write(tmp_path, json.dumps({
+        "template_files": {"custom": '{{ define "custom.title" }}{{ .Labels.x }}{{ end }}'},
+        "alertmanager_config": {
+            "route": {"receiver": "ops", "routes": [
+                {"receiver": "ops", "object_matchers": [["team", "=", "db"]]}]},
+            "receivers": [{"name": "ops", "grafana_managed_receiver_configs": [{
+                "uid": "x", "name": "ops", "type": "slack", "settings": {
+                    "title": '{{ template "custom.title" . }}'},
+                "secureFields": {"url": True}}]}],
+        },
+    }, indent=2), "config.json")
+    _, findings, _ = check(capsys, path)
+    assert codes(findings) == ["template-unknown-field"]
+    assert "in \"custom.title\": .Labels on the notification data" in findings[0]["message"]
+    assert findings[0]["line"] == line_of(path, '"custom"')
+
+
+def test_grafana_skips_alertmanager_only_codes(tmp_path, capsys):
+    """No global: section and a route Grafana makes for every contact point: these codes
+    say nothing about Grafana."""
+    path = write(tmp_path, """
+        route:
+          receiver: a
+          routes: [{receiver: a, object_matchers: [[x, =, y]]}]
+        receivers:
+          - {name: a, grafana_managed_receiver_configs: [{type: email, settings: {addresses: x}}]}
+          - {name: b, grafana_managed_receiver_configs: [{type: email, settings: {addresses: x}}]}
+    """)
+    _, findings, _ = check(capsys, path)
+    assert codes(findings) == []
+    _, findings, _ = check(capsys, path, "--input-format", "alertmanager")
+    assert {"unused-receiver", "global-resolve-timeout-missing"} <= set(codes(findings))

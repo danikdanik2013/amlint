@@ -67,9 +67,27 @@ MEMBERS: Dict[str, Dict[str, Optional[str]]] = {
 }
 ELEMENT = {"Alerts": "Alert", "[]Alert": "Alert", "KV": "string", "Pairs": "Pair",
            "Strings": "string"}
+# Grafana's template data (grafana/alerting templates: ExtendedData, ExtendedAlert). Values
+# maps a query's ref ID to its value.
+GRAFANA_MEMBERS: Dict[str, Dict[str, Optional[str]]] = dict(MEMBERS, **{
+    "Data": {"Receiver": "string", "Status": "string", "Alerts": "Alerts",
+             "GroupLabels": "KV", "CommonLabels": "KV", "CommonAnnotations": "KV",
+             "ExternalURL": "string", "AppVersion": "string", "GroupKey": "string",
+             "TruncatedAlerts": None, "Vars": "KV"},
+    "Alert": {"Status": "string", "Labels": "KV", "Annotations": "KV", "StartsAt": None,
+              "EndsAt": None, "GeneratorURL": "string", "Fingerprint": "string",
+              "SilenceURL": "string", "DashboardURL": "string", "PanelURL": "string",
+              "RuleUID": "string", "Values": "Values", "ValueString": "string",
+              "ImageURL": "string", "EmbeddedImage": "string", "OrgID": None,
+              "ExtraData": None},
+    "Values": {},
+})
+# Map types: any other name is a key, of this type.
+MAPS = {"KV": "string", "Values": None}
 GO_TYPE = {"Data": "*template.Data", "Alert": "template.Alert", "Alerts": "template.Alerts",
            "[]Alert": "[]template.Alert", "KV": "template.KV", "Pairs": "template.Pairs",
-           "Pair": "template.Pair", "Strings": "template.Strings", "string": "string"}
+           "Pair": "template.Pair", "Strings": "template.Strings", "string": "string",
+           "Values": "map[string]float64"}
 
 
 def line_of(text: str, pos: int) -> int:
@@ -336,7 +354,8 @@ class _End(Exception):
 
 class _Parser:
     def __init__(self, text: str, funcs: Set[str], dot: Optional[str],
-                 define_dots: Dict[str, Optional[str]]) -> None:
+                 define_dots: Dict[str, Optional[str]],
+                 members: Dict[str, Dict[str, Optional[str]]]) -> None:
         self.tokens = _Lexer(text).run()
         self.i = 0
         self.funcs = funcs
@@ -348,6 +367,7 @@ class _Parser:
         # the type of dot and of $, when known, and the define being parsed
         self.dot, self.root, self.define = dot, dot, ""
         self.define_dots = define_dots
+        self.members = members
         self.missing: List[Tuple[int, str, str, str]] = []
         self.typed_calls: List[Tuple[str, Optional[str]]] = []
 
@@ -632,11 +652,11 @@ class _Parser:
         if typ is None:
             return None
         name = tok.val[1:]
-        members = MEMBERS.get(typ, {})
+        members = self.members.get(typ, {})
         if name in members:
             return members[name]
-        if typ == "KV":
-            return "string"  # a map key; a missing one is "" (missingkey=zero)
+        if typ in MAPS:
+            return MAPS[typ]  # a map key; a missing one is the zero value (missingkey=zero)
         self.missing.append((tok.pos, name, typ, self.define))
         return None
 
@@ -705,11 +725,12 @@ def _unquote_go(literal: str) -> Optional[str]:
 
 
 def parse(text: str, funcs: Set[str], dot: Optional[str] = None,
-          define_dots: Optional[Dict[str, Optional[str]]] = None) -> Parsed:
+          define_dots: Optional[Dict[str, Optional[str]]] = None,
+          members: Optional[Dict[str, Dict[str, Optional[str]]]] = None) -> Parsed:
     """Parse `text` with the functions in `funcs` (plus Go's own) defined. `dot` is the type
     of the data the text runs on (DATA for a notification field, None if unknown), and
     `define_dots` the type each {{define}} in it is called with."""
-    parser = _Parser(text, set(funcs) | GO_FUNCS, dot, define_dots or {})
+    parser = _Parser(text, set(funcs) | GO_FUNCS, dot, define_dots or {}, members or MEMBERS)
     try:
         parser.parse()
     except TemplateError as e:

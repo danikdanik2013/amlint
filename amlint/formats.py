@@ -29,6 +29,7 @@ import yaml
 from yaml.constructor import SafeConstructor
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
+from . import grafana
 from .goyaml import AlertmanagerLoader, keep_interval_strings, keep_strings
 from .linter import (
     _parse_duration,
@@ -39,7 +40,7 @@ from .linter import (
 )
 from .source import Position, SourceMap, Suppressions, _mapping_pairs, parse_suppressions
 
-FORMATS = ("alertmanager", "secret", "helm", "mimir", "alertmanagerconfig")
+FORMATS = ("alertmanager", "secret", "helm", "mimir", "alertmanagerconfig", "grafana")
 MATCHER_STRATEGIES = ("OnNamespace", "OnNamespaceExceptForAlertmanagerNamespace", "None")
 
 # The AlertmanagerConfig conversion follows prometheus-operator v0.94.1:
@@ -100,6 +101,8 @@ class BundledTemplates:
     source: str               # where they are, for messages
     files: Dict[str, str] = field(default_factory=dict)  # name -> text, where amlint can read it
     all_loaded: bool = False  # every file is loaded, whatever `templates:` says (Mimir)
+    grafana: bool = False     # Grafana's templates: its functions and data
+    paths: Dict[str, str] = field(default_factory=dict)  # name -> path in cfg, for findings
 
 
 def _texts(entries, encoded: bool) -> Dict[str, str]:
@@ -278,6 +281,8 @@ class Loaded:
         # Helm renders the config with tpl first, so {{ }} in it may be Helm's, not
         # Alertmanager's: notification templates in it aren't checked
         self.helm_tpl = False
+        # codes that say nothing about this kind of input (Grafana has no global: section)
+        self.skip_codes: set = set()
         self._region = region
 
     def locate(self, where: str) -> Position:
@@ -302,7 +307,8 @@ def apply_locations(findings: list, loaded: Loaded) -> list:
         f.line, f.col = loaded.locate(f.where)
     findings = [f for f in findings if (f.code, f.where) not in loaded.by_design
                 and not (loaded.secrets_ok and f.code == "plaintext-secret")
-                and not (loaded.helm_tpl and f.code in ("bad-template", "undefined-template"))]
+                and not (loaded.helm_tpl and f.code in ("bad-template", "undefined-template"))
+                and f.code not in loaded.skip_codes]
     if loaded.uninjected is not None:
         without = {(f.code, f.where, f.msg) for check in (check_dead_inhibitions,
                    check_circular_inhibition) for f in check(loaded.uninjected)}
@@ -449,6 +455,11 @@ def _classify(doc: _Doc, fmt: str) -> str:
         return "secret" if _config_key(doc) else kind
     if kind is not None:
         return kind
+    if fmt in ("auto", "grafana") and (grafana.is_provisioning(doc.value)
+                                       or grafana.is_config(doc.value)):
+        return "grafana"
+    if fmt == "grafana" and isinstance(doc.get("route"), dict):
+        return "grafana"
     if fmt in ("auto", "alertmanagerconfig", "mimir") and isinstance(
             doc.get("alertmanager_config"), str):
         return "mimir"
@@ -457,20 +468,23 @@ def _classify(doc: _Doc, fmt: str) -> str:
     return "alertmanager"
 
 
-_BASES = ("alertmanager", "secret", "helm", "mimir")
+_BASES = ("alertmanager", "secret", "helm", "mimir", "grafana")
 _FORMAT_NAMES = {
     "alertmanager": "Alertmanager config",
     "secret": "Kubernetes Secret or ConfigMap with an alertmanager.yaml key",
     "helm": "kube-prometheus-stack Helm values (an alertmanager: section)",
     "mimir": "Mimir/Cortex config (an alertmanager_config: string)",
     "alertmanagerconfig": "AlertmanagerConfig resource",
+    "grafana": "Grafana Alerting provisioning file, export or Alertmanager config",
 }
 
 
 def load_input(text: str, input_format: Optional[str] = None,
-               matcher_strategy: Optional[str] = None) -> Loaded:
+               matcher_strategy: Optional[str] = None, path: Optional[str] = None) -> Loaded:
     """Read `text` in `input_format` (one of FORMATS; None or "auto" detects it).
-    `matcher_strategy` overrides the alertmanagerConfigMatcherStrategy found in the input."""
+    `matcher_strategy` overrides the alertmanagerConfigMatcherStrategy found in the input.
+    `path` is the file `text` came from: Grafana's provisioning reads the files next to it
+    too."""
     fmt = input_format or "auto"
     if fmt == "alertmanager":
         # exactly what amlint has always read: one plain document
@@ -508,6 +522,10 @@ def load_input(text: str, input_format: Optional[str] = None,
     notes: List[Note] = []
     comments, problems = list(outer.comments), list(outer.problems)
     base = bases[0] if bases else None
+    if not crs and base.cls == "grafana":
+        loaded = grafana.read(base, text, outer, notes, comments, problems, path)
+        _no_route_cycle(loaded.cfg.get("route"), "route")
+        return loaded
     if not crs:
         cfg, region, templates = _read_base(base, text, outer, notes, comments, problems)
         _no_route_cycle(cfg.get("route"), "route")

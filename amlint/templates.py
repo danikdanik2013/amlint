@@ -14,7 +14,7 @@ import os
 import posixpath
 from typing import Dict, Iterator, List, NamedTuple, Optional, Set, Tuple
 
-from .gotemplate import DATA, GO_TYPE, MEMBERS, line_of, parse
+from .gotemplate import DATA, GO_TYPE, GRAFANA_MEMBERS, MEMBERS, line_of, parse
 from .linter import ERROR, Finding, _dict_items, _receivers
 
 # DefaultFuncs in Alertmanager 0.34 (template/template.go); Go's own are added by parse().
@@ -51,13 +51,40 @@ DEFAULT_TEMPLATES = frozenset({
         "color", "username", "title", "titlelink", "fallback", "text")),
 })
 
-def _at_send(section: str) -> str:
+# Grafana's Alertmanager (a fork of 0.27) has fewer of Alertmanager's functions, and adds its
+# own (grafana/alerting templates): namespaces such as coll.Dict and data.JSON, and a few more.
+GRAFANA_FUNCS = frozenset({
+    "toUpper", "toLower", "title", "trimSpace", "join", "match", "safeHtml", "reReplaceAll",
+    "stringSlice", "date", "tz", "coll", "data", "tmpl", "time", "tenantID",
+    "grafanaExploreURL", "queryFromGeneratorURL",
+})
+# Grafana's own templates (default_template.go), on top of Alertmanager's.
+GRAFANA_TEMPLATES = DEFAULT_TEMPLATES | frozenset({
+    "__subject", "__text_values_list", "__text_alert_list", "default.title",
+    "default.message", "slack.default.footer", "__teams_text_alert_list",
+    "teams.default.message", "jira.default.summary", "jira.default.description",
+    "jira.default.priority", "webhook.default.payload", "webhook.default.payload.state",
+})
+
+
+class Dialect(NamedTuple):
+    who: str              # what runs the templates, for messages
+    funcs: frozenset
+    defaults: frozenset   # the templates it defines itself
+    members: dict         # its template data
+
+
+ALERTMANAGER = Dialect("Alertmanager", AM_FUNCS, DEFAULT_TEMPLATES, MEMBERS)
+GRAFANA = Dialect("Grafana", GRAFANA_FUNCS, GRAFANA_TEMPLATES, GRAFANA_MEMBERS)
+
+
+def _at_send(section: str, who: str = "Alertmanager") -> str:
     """What happens when Alertmanager runs into the problem, at send time."""
     if section == "slack_configs":
         then = "Slack still sends the message, with this field and the ones after it empty"
     else:
         then = "the notification fails and isn't sent"
-    return (f"Alertmanager loads the config anyway and only finds out when it sends a "
+    return (f"{who} loads the config anyway and only finds out when it sends a "
             f"notification: {then}.")
 
 
@@ -76,9 +103,12 @@ def template_sources(cfg: dict, basedir: Optional[str], bundled,
     ({absolute path, normcase'd: text}) is read instead of those files on disk."""
     templates = cfg.get("templates")
     if bundled is not None and bundled.all_loaded:
-        return [Source("templates", f"{name} in {bundled.source}", bundled.files[name])
+        return [Source(bundled.paths.get(name, "templates"), f"{name} in {bundled.source}",
+                       bundled.files[name])
                 for name in bundled.names if name in bundled.files] \
             if set(bundled.names) <= set(bundled.files) else None
+    if bundled is not None and bundled.grafana:
+        return None  # Grafana's templates are in Grafana, not in this input
     if templates is None:
         return []
     if not isinstance(templates, list):
@@ -146,23 +176,25 @@ _WHAT = {"Data": "the notification data", "Alert": "one alert", "Alerts": "the l
          "Pair": "a label pair", "Strings": "a list of strings", "string": "a string"}
 
 
-def _field_problem(name: str, typ: str, root: Optional[str] = DATA) -> str:
+def _field_problem(name: str, typ: str, root: Optional[str] = DATA,
+                   d: Dialect = ALERTMANAGER) -> str:
     """`.name` on a value of type `typ`, which has no such field, for messages. `root` is the
     type of $ there."""
+    members = d.members
     if typ == "Data" and name in ("Labels", "Annotations"):
         hint = (f". For the {name.lower()} all alerts in the notification share, use "
                 f".Common{name}; for each alert's own, use .{name} inside "
                 f"{{{{ range .Alerts }}}}")
-    elif typ == "Data" and name in MEMBERS["Alert"]:
+    elif typ == "Data" and name in members["Alert"]:
         hint = ". It is a field of each alert: use it inside {{ range .Alerts }}"
-    elif typ == "Alert" and name in MEMBERS["Data"] and root == DATA:
+    elif typ == "Alert" and name in members["Data"] and root == DATA:
         hint = f". Inside {{{{ range .Alerts }}}} the dot is one alert: use $.{name}"
-    elif typ == "Alert" and name in MEMBERS["Data"]:
+    elif typ == "Alert" and name in members["Data"]:
         hint = ". The template runs on one alert here, not on the notification data"
     else:
-        close = difflib.get_close_matches(name, sorted(MEMBERS.get(typ, {})), n=1, cutoff=0.6)
+        close = difflib.get_close_matches(name, sorted(members.get(typ, {})), n=1, cutoff=0.6)
         hint = f" (did you mean .{close[0]}?)" if close else ""
-    return (f".{name} on {_WHAT.get(typ, typ)}, which has no field {name}{hint}. Alertmanager "
+    return (f".{name} on {_WHAT.get(typ, typ)}, which has no field {name}{hint}. {d.who} "
             f"fails with \"can't evaluate field {name} in type {GO_TYPE.get(typ, typ)}\"")
 
 
@@ -171,24 +203,26 @@ def _hint(name: str, defined: Set[str]) -> str:
     return f" (did you mean \"{close[0]}\"?)" if close else ""
 
 
-def check_templates(cfg: dict, sources: Optional[List[Source]]) -> List[Finding]:
+def check_templates(cfg: dict, sources: Optional[List[Source]],
+                    d: Dialect = ALERTMANAGER) -> List[Finding]:
     """bad-template-file, bad-template and undefined-template. Templates a field calls are
-    only looked up when amlint could read every template file."""
+    only looked up when amlint could read every template file. `d` is Alertmanager's
+    templates or Grafana's."""
     out: List[Finding] = []
-    defined: Set[str] = set(DEFAULT_TEMPLATES)
+    defined: Set[str] = set(d.defaults)
     complete = sources is not None
     calls: List[Tuple[Source, List[Tuple[str, int]]]] = []
     dots: Dict[str, Optional[str]] = {}  # define -> the type of data it is called with
     files_ok = True
     for src in sources or []:
-        parsed = parse(src.text, AM_FUNCS)
+        parsed = parse(src.text, d.funcs)
         defined |= set(parsed.defines)
         if parsed.error:
             files_ok = complete = False  # Alertmanager loads nothing; the rest is unknown
             out.append(_in_file(Finding(
                 ERROR, "bad-template-file",
                 f"Template file {src.name}, line {line_of(src.text, parsed.error.pos)}: "
-                f"{parsed.error.message}. Alertmanager refuses to load this config.",
+                f"{parsed.error.message}. {d.who} refuses to load this config.",
                 src.where,
             ), src, parsed.error.pos))
         calls.append((src, parsed.calls))
@@ -204,14 +238,15 @@ def check_templates(cfg: dict, sources: Optional[List[Source]]) -> List[Finding]
                     where = f"receivers[{r.get('name')}].{base}{path}"
                     webhook_url = key == "webhook_configs" and path == ".url"
                     # a webhook url is parsed when the config loads, with no functions added
-                    parsed = parse(text, frozenset() if webhook_url else AM_FUNCS, DATA)
+                    parsed = parse(text, frozenset() if webhook_url else d.funcs, DATA,
+                                   members=d.members)
                     if parsed.error:
                         why = ("Alertmanager 0.31 and later parse it when they load the "
                                "config, so they refuse to load it." if webhook_url
-                               else _at_send(str(key)))
+                               else _at_send(str(key), d.who))
                         out.append(Finding(
                             ERROR, "bad-template",
-                            f"{label} is a template Alertmanager can't parse: "
+                            f"{label} is a template {d.who} can't parse: "
                             f"{_at(text, parsed.error.pos)}{parsed.error.message}. {why}",
                             where,
                         ))
@@ -219,7 +254,8 @@ def check_templates(cfg: dict, sources: Optional[List[Source]]) -> List[Finding]
                     for _, name, typ, _ in parsed.missing:
                         out.append(Finding(
                             ERROR, "template-unknown-field",
-                            f"{label} uses {_field_problem(name, typ)}. {_at_send(str(key))}",
+                            f"{label} uses {_field_problem(name, typ, DATA, d)}. "
+                            f"{_at_send(str(key), d.who)}",
                             where,
                         ))
                     for name, typ in parsed.typed_calls:
@@ -231,11 +267,11 @@ def check_templates(cfg: dict, sources: Optional[List[Source]]) -> List[Finding]
                         out.append(Finding(
                             ERROR, "undefined-template",
                             f"{label} calls template \"{name}\", which no template file "
-                            f"defines{_hint(name, known)}. {_at_send(str(key))}",
+                            f"defines{_hint(name, known)}. {_at_send(str(key), d.who)}",
                             where,
                         ))
     if files_ok and sources:
-        out.extend(_file_fields(sources, dots))
+        out.extend(_file_fields(sources, dots, d))
     if complete:
         for src, src_calls in calls:
             seen: Set[str] = set()
@@ -247,7 +283,7 @@ def check_templates(cfg: dict, sources: Optional[List[Source]]) -> List[Finding]
                     ERROR, "undefined-template",
                     f"Template file {src.name}, line {line_of(src.text, pos)}, calls template "
                     f"\"{name}\", which no template file defines{_hint(name, defined)}. "
-                    f"Notifications that use it fail when Alertmanager sends them.",
+                    f"Notifications that use it fail when {d.who} sends them.",
                     src.where,
                 ), src, pos))
     return out
@@ -278,27 +314,30 @@ def _called(dots: Dict[str, Optional[str]], name: str, typ: Optional[str]) -> bo
     return False
 
 
-def _file_fields(sources: List[Source], dots: Dict[str, Optional[str]]) -> List[Finding]:
+def _file_fields(sources: List[Source], dots: Dict[str, Optional[str]],
+                 d: Dialect = ALERTMANAGER) -> List[Finding]:
     """template-unknown-field in the {{define}}s of template files, each checked with the
     type of data the notification fields (and other templates) call it with."""
     for _ in range(10):  # until the types reach every define the calls lead to
         changed = False
         for src in sources:
-            for name, typ in parse(src.text, AM_FUNCS, None, dict(dots)).typed_calls:
+            for name, typ in parse(src.text, d.funcs, None, dict(dots),
+                                   d.members).typed_calls:
                 changed = _called(dots, name, typ) or changed
         if not changed:
             break
     out: List[Finding] = []
     seen: Set[Tuple[str, int]] = set()
     for src in sources:
-        for pos, name, typ, define in parse(src.text, AM_FUNCS, None, dict(dots)).missing:
+        for pos, name, typ, define in parse(src.text, d.funcs, None, dict(dots),
+                                            d.members).missing:
             if (src.name, pos) in seen:
                 continue
             seen.add((src.name, pos))
             out.append(_in_file(Finding(
                 ERROR, "template-unknown-field",
                 f"Template file {src.name}, line {line_of(src.text, pos)}, in \"{define}\": "
-                f"{_field_problem(name, typ, dots.get(define))}, so notifications that use "
+                f"{_field_problem(name, typ, dots.get(define), d)}, so notifications that use "
                 f"\"{define}\" fail.",
                 src.where,
             ), src, pos))
