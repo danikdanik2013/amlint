@@ -3,8 +3,8 @@ class Amlint < Formula
 
   desc "Semantic linter for Prometheus Alertmanager configs"
   homepage "https://github.com/danikdanik2013/amlint"
-  url "https://files.pythonhosted.org/packages/c1/be/849d038eb2b73f5f7f8d1a43c33fd5d6d717f3b3b9ba7667dd34903a7395/amlint-0.6.1.tar.gz"
-  sha256 "7a456705987661464abb1486a0cb58c26160008b5b8c7ff905e26ff37b44e769"
+  url "https://files.pythonhosted.org/packages/1c/ab/c9b2d302858ae66411182b496569cc16bfa7ea3c6433885dbe80379c5288/amlint-0.7.0.tar.gz"
+  sha256 "e16a41e2e6929bcf37d05f6a64d3a998bd2df58e915dba2d6a0ef4e0915ff576"
   license "MIT"
 
   depends_on "libyaml"
