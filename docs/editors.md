@@ -24,6 +24,11 @@ amlint lsp --help    # check that the command is there
 - **Quick fixes** for a finding you accept: add `# amlint: disable=<code>` to its line, or
   `# amlint: disable-file=<code>` to the top of the file. See
   [inline suppressions](usage.md#inline-suppressions).
+- **Go to definition, find references and rename** for receiver and time interval names.
+  From a route's `receiver:`, go to the receiver; from a receiver, list the routes that use
+  it. Rename a receiver or a time interval and every route that uses it changes too. The new
+  name keeps the old one's quotes, and gets quotes when it needs them (`"yes"`, `"123"`).
+  Renaming to a name that already exists is refused.
 - **Outline**: the route tree, with each route's matchers and `→ receiver`, then the
   receivers (with their integrations), inhibit rules (`source → target`) and time
   intervals. In VS Code it's the Outline view and the breadcrumbs above the editor.

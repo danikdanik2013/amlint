@@ -13,6 +13,10 @@
   its matchers with `→ receiver`, then receivers (with their integrations), inhibit rules
   (`source → target`) and time intervals. Routes that an AlertmanagerConfig adds elsewhere in
   the file show at the top level, where they are written.
+- Go to definition, find references and rename for receiver and time interval names in the
+  editor. Renaming changes the definition and every route's `receiver:`,
+  `mute_time_intervals` and `active_time_intervals`; it keeps quotes, adds them when the new
+  name needs them, and refuses a name that already exists.
 
 ### Changed
 - `route-unknown-alertname` and `inhibit-unknown-alertname` say "the rule files" instead of

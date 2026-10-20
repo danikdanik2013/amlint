@@ -574,3 +574,110 @@ def test_outline_of_other_yaml_is_empty(lsp, tmp_path):
     uri = _uri(tmp_path / "docker-compose.yml")
     client.open(uri, "services:\n  web:\n    image: nginx\n")
     assert _symbols(client, uri) == []
+
+
+# ── Go to definition, find references, rename ─────────────────────────
+
+NAMES = """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      mute_time_intervals: [nights, 'weekends']
+    - matchers: [team="web"]
+      receiver: "db-pager"
+      active_time_intervals:
+        - nights
+receivers:
+  - name: default
+    webhook_configs: [{url: http://example.org/default}]
+  - {name: db-pager, webhook_configs: [{url: http://example.org/db}]}
+time_intervals:
+  - name: nights
+    time_intervals: [{times: [{start_time: "00:00", end_time: "06:00"}]}]
+  - name: weekends
+    time_intervals: [{weekdays: [saturday, sunday]}]
+"""
+
+
+def _at(client, method, uri, line, character, **extra):
+    params = {"textDocument": {"uri": uri}, "position": {"line": line, "character": character},
+              **extra}
+    return client.request(method, params)
+
+
+def _spots(locations):
+    return [(loc["range"]["start"]["line"], loc["range"]["start"]["character"],
+             loc["range"]["end"]["character"]) for loc in locations]
+
+
+def test_definition_of_a_receiver_and_a_time_interval(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    result = _at(client, "textDocument/definition", uri, 4, 16)["result"]  # receiver: db-pager
+    assert _spots(result) == [(13, 11, 19)]                                # {name: db-pager
+    result = _at(client, "textDocument/definition", uri, 9, 11)["result"]  # - nights
+    assert _spots(result) == [(15, 10, 16)]
+    result = _at(client, "textDocument/definition", uri, 5, 40)["result"]  # 'weekends'
+    assert _spots(result) == [(17, 10, 18)]
+    assert _at(client, "textDocument/definition", uri, 3, 20)["result"] is None  # a matcher
+
+
+def test_definition_of_an_undefined_receiver_is_empty(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, CONFIG)
+    assert _at(client, "textDocument/definition", uri, GHOST_LINE + 1, 16)["result"] is None
+
+
+def test_references_of_a_receiver(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    every = _at(client, "textDocument/references", uri, 13, 12,
+                context={"includeDeclaration": True})["result"]
+    assert _spots(every) == [(4, 16, 24), (7, 17, 25), (13, 11, 19)]
+    uses = _at(client, "textDocument/references", uri, 13, 12,
+               context={"includeDeclaration": False})["result"]
+    assert _spots(uses) == [(4, 16, 24), (7, 17, 25)]
+
+
+def test_rename_a_receiver_everywhere(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    prepared = _at(client, "textDocument/prepareRename", uri, 4, 18)["result"]
+    assert prepared["placeholder"] == "db-pager"
+    edit = _at(client, "textDocument/rename", uri, 4, 18, newName="db-oncall")["result"]
+    text = NAMES
+    for change in sorted(edit["changes"][uri], key=lambda e: (e["range"]["start"]["line"],
+                                                             e["range"]["start"]["character"]),
+                         reverse=True):
+        text = _apply(text, change)
+    assert "db-pager" not in text
+    assert 'receiver: "db-oncall"' in text and "{name: db-oncall," in text  # quotes kept
+    assert "undefined-receiver" not in _by_code(client.change(uri, text, 2))
+
+
+def test_rename_quotes_a_name_that_needs_it(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    # every `nights` is plain: "yes" would read as a boolean, so it gets quotes
+    edits = _at(client, "textDocument/rename", uri, 15, 12, newName="yes")["result"]
+    assert [e["newText"] for e in edits["changes"][uri]] == ['"yes"'] * 3
+    # 'weekends' keeps its single quotes; the plain definition gets double ones
+    edits = _at(client, "textDocument/rename", uri, 17, 12, newName="it's")["result"]
+    assert sorted(e["newText"] for e in edits["changes"][uri]) == ['"it\'s"', "it''s"]
+
+
+def test_rename_to_an_existing_name_fails(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    error = _at(client, "textDocument/rename", uri, 4, 18, newName="default")["error"]
+    assert error["code"] == -32803
+    assert "already a receiver called 'default'" in error["message"]
+    assert _at(client, "textDocument/prepareRename", uri, 3, 20)["result"] is None

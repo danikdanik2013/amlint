@@ -52,6 +52,7 @@ _INVALID_REQUEST = -32600
 _METHOD_NOT_FOUND = -32601
 _INTERNAL_ERROR = -32603
 _SERVER_NOT_INITIALIZED = -32002
+_REQUEST_FAILED = -32803
 
 # Text that holds an Alertmanager config, for when amlint can't read it: then the error is
 # worth showing, while a broken docker-compose.yml is not amlint's business.
@@ -175,6 +176,104 @@ def _content_end(text: str, start: int) -> int:
     return end
 
 
+# ── Names: receivers and time intervals ──────────────────────────────
+
+class _Occurrence:
+    """A receiver or time interval name written in the document: where it's defined
+    (`- name: x`) or used (`receiver: x`, `mute_time_intervals: [x]`). `start`/`end` are the
+    columns of the name itself, inside any quotes."""
+
+    def __init__(self, kind: str, role: str, name: str, line: int, start: int, end: int,
+                 quote: str) -> None:
+        self.kind, self.role, self.name = kind, role, name
+        self.line, self.start, self.end, self.quote = line, start, end, quote
+
+
+def _in_flow(text: str, col: int) -> bool:
+    """Whether `col` of a line is inside a flow collection ([...] or {...}) opened on it."""
+    depth, quote = 0, ""
+    for ch in text[:col]:
+        if quote:
+            quote = "" if ch == quote else quote
+        elif ch in "\"'":
+            quote = ch
+        elif ch in "[{":
+            depth += 1
+        elif ch in "]}":
+            depth -= 1
+    return depth > 0
+
+
+def _scalar_at(text: str, col: int) -> Optional[Tuple[int, int, str]]:
+    """(start, end, quote) of the scalar that begins at `col`: its text inside any quotes."""
+    if col >= len(text):
+        return None
+    quote = text[col]
+    if quote in "\"'":
+        i = col + 1
+        while i < len(text):
+            if quote == '"' and text[i] == "\\":
+                i += 2
+                continue
+            if text[i] == quote:
+                if quote == "'" and text[i + 1:i + 2] == "'":
+                    i += 2  # '' is a quote inside a single-quoted string
+                    continue
+                return col + 1, i, quote
+            i += 1
+        return None
+    stops = ",]}" if _in_flow(text, col) else ""
+    end = col
+    while end < len(text) and text[end] not in stops:
+        if text[end] == "#" and end > col and text[end - 1] in " \t":
+            break
+        end += 1
+    end = col + len(text[col:end].rstrip())
+    return (col, end, "") if end > col else None
+
+
+def _value_after_key(text: str, col: int) -> Optional[Tuple[int, int, str]]:
+    """The scalar value of the `key: value` whose key starts at `col`."""
+    colon = text.find(":", col)
+    if colon < 0:
+        return None
+    start = colon + 1
+    while start < len(text) and text[start] in " \t":
+        start += 1
+    return _scalar_at(text, start)
+
+
+def _unescape(raw: str, quote: str) -> str:
+    if quote == "'":
+        return raw.replace("''", "'")
+    if quote == '"':
+        try:
+            return json.loads(f'"{raw}"')
+        except ValueError:
+            return raw
+    return raw
+
+
+_PLAIN_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_./@+-]*\Z")
+# YAML 1.1 words that yaml.v2 (Alertmanager) and PyYAML read as booleans or null
+_YAML_WORDS = {"y", "n", "yes", "no", "on", "off", "true", "false", "null"}
+
+
+def _written(name: str, quote: str) -> str:
+    """`name` as it should be written where the old name was, keeping its quotes."""
+    if quote == "'":
+        return name.replace("'", "''")
+    if quote == '"':
+        return json.dumps(name, ensure_ascii=False)[1:-1]
+    if _PLAIN_NAME.match(name) and name.lower() not in _YAML_WORDS:
+        return name
+    return json.dumps(name, ensure_ascii=False)  # it needs quotes now
+
+
+class _RequestFailed(Exception):
+    """A request that can't be done, with a message for the user (LSP RequestFailed)."""
+
+
 # ── Documents ─────────────────────────────────────────────────────────
 
 class _Probes:
@@ -210,6 +309,51 @@ class _Analysis:
         self._routes: Optional[List[Tuple[int, int, str, dict]]] = None
         self._router = None
         self._probes: Optional[_Probes] = None
+        self._occurrences: Optional[List[_Occurrence]] = None
+
+    def occurrences(self) -> List[_Occurrence]:
+        """Every receiver and time interval name written in the document. A name is kept
+        only where the text at its place spells the name the config has, so a format that
+        renames things (AlertmanagerConfig prefixes receiver names) gets no wrong edits."""
+        if self._occurrences is None:
+            found: Dict[Tuple[int, int], _Occurrence] = {}
+            cfg = self.loaded.cfg if self.loaded else {}
+
+            def add(kind: str, role: str, name, where: str, keyed: bool) -> None:
+                if not isinstance(name, str) or not name:
+                    return
+                line, col = (n - 1 for n in self.loaded.locate(where))
+                if not 0 <= line < len(self.lines):
+                    return
+                text = self.lines[line]
+                span = _value_after_key(text, col) if keyed else _scalar_at(text, col)
+                if span is None or (line, span[0]) in found:
+                    return
+                start, end, quote = span
+                if _unescape(text[start:end], quote) == name:
+                    found[(line, start)] = _Occurrence(kind, role, name, line, start, end, quote)
+
+            for i, receiver in _dict_items(cfg.get("receivers")):
+                add("receiver", "definition", receiver.get("name"), f"receivers[{i}].name", True)
+            for key in ("time_intervals", "mute_time_intervals"):
+                for i, interval in _dict_items(cfg.get(key)):
+                    add("time interval", "definition", interval.get("name"),
+                        f"{key}[{i}].name", True)
+            root = cfg.get("route")
+            for node, path in _walk_routes(root) if isinstance(root, dict) else ():
+                add("receiver", "reference", node.get("receiver"), f"{path}.receiver", True)
+                for key in ("mute_time_intervals", "active_time_intervals"):
+                    names = node.get(key)
+                    for j, name in enumerate(names if isinstance(names, list) else []):
+                        add("time interval", "reference", name, f"{path}.{key}[{j}]", False)
+            self._occurrences = [found[k] for k in sorted(found)]
+        return self._occurrences
+
+    def occurrence_at(self, line: int, col: int) -> Optional[_Occurrence]:
+        for occ in self.occurrences():
+            if occ.line == line and occ.start <= col <= occ.end:
+                return occ
+        return None
 
     def routes(self) -> List[Tuple[int, int, str, dict]]:
         """(first line, last line, path, node) of each route written in the document, by
@@ -474,6 +618,10 @@ class Server:
             "textDocument/hover": self._hover,
             "textDocument/codeAction": self._code_action,
             "textDocument/documentSymbol": self._document_symbol,
+            "textDocument/definition": self._definition,
+            "textDocument/references": self._references,
+            "textDocument/prepareRename": self._prepare_rename,
+            "textDocument/rename": self._rename,
         }
         self._notifications = {
             "textDocument/didOpen": self._did_open,
@@ -525,6 +673,8 @@ class Server:
         else:
             try:
                 result = self._requests[method](params)
+            except _RequestFailed as e:
+                self._error(msg_id, _REQUEST_FAILED, str(e))
             except Exception:
                 trace = traceback.format_exc()
                 self.log(f"amlint: {method} failed:\n{trace}")
@@ -552,6 +702,9 @@ class Server:
                 "hoverProvider": True,
                 "codeActionProvider": {"codeActionKinds": ["quickfix"]},
                 "documentSymbolProvider": True,
+                "definitionProvider": True,
+                "referencesProvider": True,
+                "renameProvider": {"prepareProvider": True},
                 "workspace": {"workspaceFolders": {"supported": True,
                                                    "changeNotifications": True}},
             },
@@ -871,6 +1024,74 @@ class Server:
         newline = "\r\n" if "\r\n" in text else "\n"
         return {"range": self._range(lines, 0, 0, 0),
                 "newText": f"# amlint: disable-file={code}{newline}"}
+
+    # names: go to definition, find references, rename
+
+    def _name_at(self, params: dict):
+        """(uri, analysis, occurrence) for the name under the cursor, or None."""
+        uri = params["textDocument"]["uri"]
+        doc = self.docs.get(uri)
+        if doc is None:
+            return None
+        analysis = self.analyze(doc)
+        pos = params["position"]
+        if analysis.loaded is None or not 0 <= pos["line"] < len(analysis.lines):
+            return None
+        col = self._col(analysis.lines[pos["line"]], pos["character"])
+        occ = analysis.occurrence_at(pos["line"], col)
+        return (uri, analysis, occ) if occ is not None else None
+
+    @staticmethod
+    def _same(analysis: _Analysis, occ: _Occurrence, role: Optional[str] = None):
+        return [o for o in analysis.occurrences()
+                if o.kind == occ.kind and o.name == occ.name and role in (None, o.role)]
+
+    def _location(self, uri: str, lines: List[str], occ: _Occurrence) -> dict:
+        return {"uri": uri, "range": self._range(lines, occ.line, occ.start, occ.end)}
+
+    def _definition(self, params: dict) -> Optional[List[dict]]:
+        found = self._name_at(params)
+        if found is None:
+            return None
+        uri, analysis, occ = found
+        defs = self._same(analysis, occ, "definition")
+        return [self._location(uri, analysis.lines, o) for o in defs] or None
+
+    def _references(self, params: dict) -> Optional[List[dict]]:
+        found = self._name_at(params)
+        if found is None:
+            return None
+        uri, analysis, occ = found
+        declarations = (params.get("context") or {}).get("includeDeclaration", True)
+        return [self._location(uri, analysis.lines, o) for o in self._same(analysis, occ)
+                if declarations or o.role != "definition"]
+
+    def _prepare_rename(self, params: dict) -> Optional[dict]:
+        found = self._name_at(params)
+        if found is None:
+            return None
+        _, analysis, occ = found
+        return {"range": self._range(analysis.lines, occ.line, occ.start, occ.end),
+                "placeholder": occ.name}
+
+    def _rename(self, params: dict) -> Optional[dict]:
+        found = self._name_at(params)
+        if found is None:
+            raise _RequestFailed("Put the cursor on a receiver or time interval name to rename it.")
+        uri, analysis, occ = found
+        new = params.get("newName")
+        if not isinstance(new, str) or not new.strip() or "\n" in new or "\r" in new:
+            raise _RequestFailed("The new name must be one line of text.")
+        if new == occ.name:
+            return {"changes": {uri: []}}
+        cfg = analysis.loaded.cfg
+        keys = ("receivers",) if occ.kind == "receiver" else ("time_intervals",
+                                                              "mute_time_intervals")
+        if any(item.get("name") == new for key in keys for _, item in _dict_items(cfg.get(key))):
+            raise _RequestFailed(f"There is already a {occ.kind} called {new!r}.")
+        edits = [{"range": self._range(analysis.lines, o.line, o.start, o.end),
+                  "newText": _written(new, o.quote)} for o in self._same(analysis, occ)]
+        return {"changes": {uri: edits}}
 
     # outline
 
