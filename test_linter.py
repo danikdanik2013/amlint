@@ -4919,3 +4919,120 @@ def test_cli_fix_stdin(capsys, monkeypatch):
     captured = capsys.readouterr()
     assert captured.out == FIXED
     assert "✔ fixed" in captured.err
+
+
+# ── plaintext-secret ─────────────────────────────────────────────────
+
+# split, so that secret scanners don't take this made-up URL for a real one
+SLACK_HOOK = ("https://hooks.slack.com/services/"
+              "T024BE7LD/B01ABCDEF/9xQmL2vK7pR4tY8wZ3nB6cD1")
+PD_KEY = "3f9a1c0be44d4f0d8d6c2b7e5a1f0c9d"
+
+
+def _secrets(cfg):
+    return {f.where: f for f in lint(cfg) if f.code == "plaintext-secret"}
+
+
+def _receiver(**configs):
+    return {"route": {"receiver": "r"}, "receivers": [dict({"name": "r"}, **configs)]}
+
+
+def test_plaintext_secret_in_receivers():
+    found = _secrets(_receiver(
+        pagerduty_configs=[{"routing_key": PD_KEY}],
+        slack_configs=[{"api_url": SLACK_HOOK, "channel": "#x"}],
+        telegram_configs=[{"bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+                           "chat_id": 1}],
+        email_configs=[{"to": "a@b.c", "auth_password": "hunter22"}],
+        wechat_configs=[{"api_secret": "s3cr3tValue"}],
+        sns_configs=[{"topic_arn": "arn:aws:sns:eu-west-1:1:t",
+                      "sigv4": {"access_key": "AKIA1", "secret_key": "wJalrXUtnFEMI"}}],
+    ))
+    assert set(found) == {
+        "receivers[r].pagerduty_configs[0].routing_key",
+        "receivers[r].slack_configs[0].api_url",
+        "receivers[r].telegram_configs[0].bot_token",
+        "receivers[r].email_configs[0].auth_password",
+        "receivers[r].wechat_configs[0].api_secret",
+        "receivers[r].sns_configs[0].sigv4.secret_key",
+    }
+    pd = found["receivers[r].pagerduty_configs[0].routing_key"]
+    assert pd.level == WARN
+    assert "set routing_key_file to that path instead" in pd.msg
+    assert "a URL with a webhook token in it" in found["receivers[r].slack_configs[0].api_url"].msg
+    assert "set api_secret_file (Alertmanager 0.31 and later) to that path" in \
+        found["receivers[r].wechat_configs[0].api_secret"].msg
+    assert "can't be read from a file" in \
+        found["receivers[r].sns_configs[0].sigv4.secret_key"].msg
+
+
+def test_plaintext_secret_in_global_and_http_config():
+    cfg = _receiver(webhook_configs=[{"url": "http://hook.internal/x", "http_config": {
+        "basic_auth": {"username": "am", "password": "pa55word!"},
+        "authorization": {"credentials_file": "/etc/am/token"},
+    }}])
+    cfg["global"] = {"slack_api_url": SLACK_HOOK, "opsgenie_api_key": "0a1b2c3d-4e5f",
+                     "http_config": {"oauth2": {"client_id": "x", "client_secret": "y0Zk"}}}
+    assert set(_secrets(cfg)) == {
+        "global.slack_api_url", "global.opsgenie_api_key",
+        "global.http_config.oauth2.client_secret",
+        "receivers[r].webhook_configs[0].http_config.basic_auth.password",
+    }
+
+
+@pytest.mark.parametrize("url,secret", [
+    ("http://alert-gateway.monitoring.svc:8080/alerts", False),
+    ("https://example.org/hook?team=db", False),
+    ("https://hooks.acme.io/alerts?token=a1b2c3d4e5", True),
+    ("https://api.acme.io/v1?api_key=a1b2c3", True),
+    ("https://user:pa55@hook.internal/alerts", True),
+    ("https://prod-12.westeurope.logic.azure.com/workflows/abc/triggers/manual/run?sig=Qx9", True),
+    ("https://discord.com/api/webhooks/1234567890/AbCdEf-GhIjKl", True),
+])
+def test_plaintext_secret_webhook_urls(url, secret):
+    assert bool(_secrets(_receiver(webhook_configs=[{"url": url}]))) is secret
+
+
+@pytest.mark.parametrize("value", [
+    "<secret>", "${PAGERDUTY_KEY}", "$(PAGERDUTY_KEY)", "{{ .Values.pagerduty.key }}",
+    "xxxxxxxxxxxxxxxx", "your-routing-key", "<routing-key>", "REPLACE_ME", "changeme", "",
+    "https://hooks.slack.com/services/" "T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+    "https://hooks.slack.com/...",
+])
+def test_plaintext_secret_skips_stand_ins(value):
+    cfg = _receiver(pagerduty_configs=[{"routing_key": value}],
+                    slack_configs=[{"api_url": value, "channel": "#x"}])
+    assert _secrets(cfg) == {}
+
+
+def test_plaintext_secret_slack_api_without_a_webhook():
+    cfg = _receiver(slack_configs=[{
+        "api_url": "https://slack.com/api/chat.postMessage", "channel": "#x",
+        "http_config": {"authorization": {"credentials_file": "/etc/am/slack-token"}}}])
+    assert _secrets(cfg) == {}
+
+
+def test_plaintext_secret_where_secrets_belong(tmp_path, capsys):
+    """Reported in a plain config and in Helm values; not in a Secret, an
+    AlertmanagerConfig or a Mimir config (which rejects *_file fields)."""
+    receiver = ("receivers:\n  - name: r\n    pagerduty_configs:\n"
+                f"      - routing_key: {PD_KEY}\n")
+    plain = "route:\n  receiver: r\n" + receiver
+    indent = "".join("    " + line + "\n" for line in plain.splitlines())
+    inputs = {
+        "plain.yml": (plain, True),
+        "helm.yml": ("alertmanager:\n  config:\n" + "".join(
+            "    " + line + "\n" for line in plain.splitlines()), True),
+        "secret.yml": ("apiVersion: v1\nkind: Secret\nmetadata: {name: am}\nstringData:\n"
+                       "  alertmanager.yaml: |\n" + indent, False),
+        "configmap.yml": ("apiVersion: v1\nkind: ConfigMap\nmetadata: {name: am}\ndata:\n"
+                          "  alertmanager.yaml: |\n" + indent, True),
+        "mimir.yml": ("alertmanager_config: |\n" + "".join(
+            "  " + line + "\n" for line in plain.splitlines()), False),
+    }
+    for name, (text, reported) in inputs.items():
+        path = tmp_path / name
+        path.write_text(text)
+        main(["check", "--format", "json", str(path)])
+        codes = {f["code"] for f in json.loads(capsys.readouterr().out)}
+        assert ("plaintext-secret" in codes) is reported, name

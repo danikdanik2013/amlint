@@ -635,3 +635,56 @@ receivers:
         sigv4:
           region: us-east-2
 ```
+
+---
+
+## plaintext-secret
+
+**Level:** warn · **amtool:** doesn't catch it
+
+**What goes wrong:** An API key, token or password is written into the config: a
+PagerDuty `routing_key`, an Opsgenie `api_key`, a Telegram `bot_token`, a Slack, Discord or
+Teams webhook URL, a `password` or `credentials` under `http_config:`, and so on. A
+`webhook_configs` URL counts when it carries a password or a parameter such as `token=`.
+
+```yaml title="Bad"
+receivers:
+  - name: pager
+    pagerduty_configs:
+      - routing_key: 3f9a1c0be44d4f0d8d6c2b7e5a1f0c9d
+  - name: team-slack
+    slack_configs:
+      - api_url: https://hooks.slack.com/services/T024BE7LD/B01ABCDEF/9xQmL2vK7pR4tY8w
+        channel: "#team"
+```
+
+**What Alertmanager does:** Works as configured. The problem is who else can read the
+secret: everyone with access to the repository, the CI logs, or a ConfigMap built from it.
+
+**How to fix:** Put the secret in a file Alertmanager can read, and point the `_file` field
+at it: `routing_key_file`, `api_url_file`, `api_key_file`, `bot_token_file`,
+`webhook_url_file`, `url_file`, `password_file`, `credentials_file`. With
+kube-prometheus-stack, list a Kubernetes Secret under
+`alertmanager.alertmanagerSpec.secrets`; it is mounted at `/etc/alertmanager/secrets/<name>/`.
+
+```yaml title="Fixed"
+receivers:
+  - name: pager
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-key
+  - name: team-slack
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack-team-url
+        channel: "#team"
+```
+
+**Not reported:** values that only stand in for a secret (`<secret>`, `${SLACK_URL}`,
+`$(SLACK_URL)`, `{{ ... }}`, `xxxx`, example values), a Slack `api_url` that isn't a
+webhook, and configs kept where plain-text secrets belong: inside a Kubernetes Secret, in
+AlertmanagerConfig resources (they reference Secrets), and Mimir tenant configs, which
+reject `_file` fields.
+
+Some `_file` fields are newer than others: `webhook_configs` `url_file` needs Alertmanager
+0.26, Discord and Teams `webhook_url_file` 0.27, `auth_secret_file` and
+`wechat_api_secret_file` 0.31. The message says so. An SNS `sigv4.secret_key` has no `_file`
+form: keep that config in a Kubernetes Secret.

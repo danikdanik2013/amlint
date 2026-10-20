@@ -45,6 +45,7 @@ _DOCS_PAGES = {
         "email-no-smarthost", "webhook-no-url", "pagerduty-no-routing-key", "slack-no-api-url",
         "opsgenie-no-api-key", "msteams-no-webhook-url", "telegram-no-bot-token",
         "discord-no-webhook-url", "victorops-no-api-key", "wechat-no-corp-id", "sns-no-target",
+        "plaintext-secret",
     ),
     "inhibition": ("inhibit-no-equal", "circular-inhibition", "inhibit-same-match"),
     "timing": (
@@ -1095,5 +1096,33 @@ time_intervals:
   - name: nights
     time_intervals:
       - times: [{start_time: "00:00", end_time: "06:00"}]""",
+    },
+
+    "plaintext-secret": {
+        "level": "warn",
+        "summary": (
+            "An API key, token, password, or a webhook URL with a token in it, is written"
+            " into the config in plain text."
+        ),
+        "why": (
+            "Anyone who can read the config can use the secret: everyone with access to the "
+            "repository, CI logs, or the ConfigMap it is deployed from. Alertmanager reads "
+            "most of these from a file instead (api_url_file, routing_key_file, "
+            "password_file, ...), so the config can be reviewed and shared without the "
+            "secret. Values that only stand in for one (<secret>, ${VAR}, $(VAR), "
+            "{{ ... }}, example values) are skipped, and so are configs inside a Kubernetes "
+            "Secret, AlertmanagerConfig resources, and Mimir configs, which reject *_file "
+            "fields."
+        ),
+        "bad": """\
+receivers:
+  - name: pager
+    pagerduty_configs:
+      - routing_key: 3f9a1c0be44d4f0d8d6c2b7e5a1f0c9d""",
+        "good": """\
+receivers:
+  - name: pager
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-key""",
     },
 }

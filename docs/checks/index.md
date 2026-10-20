@@ -3,9 +3,9 @@
 amlint's checks catch Alertmanager config mistakes that lose alerts, send them to the wrong
 place, or mute them when they shouldn't be.
 
-amlint has **40 checks**. `amtool check-config` also catches **20** of them: Alertmanager
+amlint has **41 checks**. `amtool check-config` also catches **20** of them: Alertmanager
 refuses to load those configs, and amlint reports them so one run covers everything. The
-other **20** are configs that amtool accepts and Alertmanager runs, just not the way you
+other **21** are configs that amtool accepts and Alertmanager runs, just not the way you
 meant, or not for much longer. Those are the main reason to run amlint.
 
 The three **Prometheus rules** checks run only with `amlint check --rules`, which compares
@@ -49,6 +49,7 @@ catches it too.
 | Receivers | [`wechat-no-corp-id`](receivers.md#wechat-no-corp-id) | error | ✓ | A `wechat_configs` entry has no `corp_id`, and `global.wechat_api_corp_id` isn't set. |
 | Receivers | [`sns-no-target`](receivers.md#sns-no-target) | error | ✓ | An `sns_configs` entry has none of `topic_arn`, `phone_number` or `target_arn`. |
 | Receivers | [`template-file-missing`](receivers.md#template-file-missing) | error | | A relative `templates:` path matches no file next to the config (warn for a glob). |
+| Receivers | [`plaintext-secret`](receivers.md#plaintext-secret) | warn | | An API key, token, password or webhook URL with a token is written into the config; use the `_file` field. |
 | Receivers | [`empty-receiver`](receivers.md#empty-receiver) | warn | | A receiver has no integration, like `slack_configs` (info for the root route's receiver or one named like `null`). |
 | Receivers | [`unused-receiver`](receivers.md#unused-receiver) | info | | A receiver no route uses. |
 | Inhibition | [`inhibit-no-equal`](inhibition.md#inhibit-no-equal) | warn | | An inhibition rule has no `equal:` field. |

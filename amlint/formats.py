@@ -254,6 +254,9 @@ class Loaded:
         # (code, where) of findings about what the operator adds, such as the continue: true
         # on a resource's route when it is the last one
         self.by_design = by_design or set()
+        # the config is kept where plain-text secrets belong (a Kubernetes Secret, the
+        # operator's resources), or where *_file fields can't be used (Mimir rejects them)
+        self.secrets_ok = False
         self._region = region
 
     def locate(self, where: str) -> Position:
@@ -276,7 +279,8 @@ def apply_locations(findings: list, loaded: Loaded) -> list:
     nor of two rules of one namespace muting each other."""
     for f in findings:
         f.line, f.col = loaded.locate(f.where)
-    findings = [f for f in findings if (f.code, f.where) not in loaded.by_design]
+    findings = [f for f in findings if (f.code, f.where) not in loaded.by_design
+                and not (loaded.secrets_ok and f.code == "plaintext-secret")]
     if loaded.uninjected is not None:
         without = {(f.code, f.where, f.msg) for check in (check_dead_inhibitions,
                    check_circular_inhibition) for f in check(loaded.uninjected)}
@@ -485,8 +489,12 @@ def load_input(text: str, input_format: Optional[str] = None,
     if not crs:
         cfg, region, templates = _read_base(base, text, outer, notes, comments, problems)
         _no_route_cycle(cfg.get("route"), "route")
-        return Loaded(cfg, base.cls, region, comments, problems, templates, notes)
-    return _operator(text, docs, crs, base, matcher_strategy, outer, notes, comments, problems)
+        loaded = Loaded(cfg, base.cls, region, comments, problems, templates, notes)
+        loaded.secrets_ok = base.cls == "mimir" or base.kind == "Secret"
+        return loaded
+    loaded = _operator(text, docs, crs, base, matcher_strategy, outer, notes, comments, problems)
+    loaded.secrets_ok = True
+    return loaded
 
 
 def _no_route_cycle(route, path: str, what: str = "") -> None:

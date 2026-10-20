@@ -1622,6 +1622,158 @@ def check_deprecated_mute_time_intervals(cfg: dict) -> List[Finding]:
     )]
 
 
+# Fields that hold a secret: (the field that reads it from a file instead, or None if there
+# is none; the first Alertmanager version with that field, None for 0.25 and earlier). A
+# webhook or incident.io url is a secret only when it carries credentials (_url_secret).
+_SECRET_FIELDS = {
+    "global": {
+        "slack_api_url": ("slack_api_url_file", None),
+        "slack_app_token": ("slack_app_token_file", "0.30"),
+        "opsgenie_api_key": ("opsgenie_api_key_file", None),
+        "victorops_api_key": ("victorops_api_key_file", None),
+        "smtp_auth_password": ("smtp_auth_password_file", None),
+        "smtp_auth_secret": ("smtp_auth_secret_file", "0.31"),
+        "wechat_api_secret": ("wechat_api_secret_file", "0.31"),
+        "telegram_bot_token": ("telegram_bot_token_file", "0.31"),
+        "rocketchat_token": ("rocketchat_token_file", "0.28"),
+        "rocketchat_token_id": ("rocketchat_token_id_file", "0.28"),
+        "mattermost_webhook_url": ("mattermost_webhook_url_file", "0.32"),
+    },
+    "slack_configs": {"api_url": ("api_url_file", None), "app_token": ("app_token_file", "0.30")},
+    "pagerduty_configs": {"routing_key": ("routing_key_file", None),
+                          "service_key": ("service_key_file", None)},
+    "opsgenie_configs": {"api_key": ("api_key_file", None)},
+    "victorops_configs": {"api_key": ("api_key_file", None)},
+    "pushover_configs": {"user_key": ("user_key_file", "0.26"), "token": ("token_file", "0.26")},
+    "telegram_configs": {"bot_token": ("bot_token_file", "0.26")},
+    "discord_configs": {"webhook_url": ("webhook_url_file", "0.27")},
+    "msteams_configs": {"webhook_url": ("webhook_url_file", "0.27")},
+    "msteamsv2_configs": {"webhook_url": ("webhook_url_file", "0.28")},
+    "mattermost_configs": {"webhook_url": ("webhook_url_file", "0.30")},
+    "email_configs": {"auth_password": ("auth_password_file", None),
+                      "auth_secret": ("auth_secret_file", "0.31")},
+    "wechat_configs": {"api_secret": ("api_secret_file", "0.31")},
+    "rocketchat_configs": {"token": ("token_file", "0.28"), "token_id": ("token_id_file", "0.28")},
+    "incidentio_configs": {"url": ("url_file", "0.29"),
+                           "alert_source_token": ("alert_source_token_file", "0.29")},
+    "webhook_configs": {"url": ("url_file", "0.26")},
+    "sns_configs": {"sigv4.secret_key": (None, None)},
+}
+# The same in any http_config:, keyed by the path below it.
+_HTTP_SECRET_FIELDS = {
+    ("basic_auth", "password"): "password_file",
+    ("authorization", "credentials"): "credentials_file",
+    ("bearer_token",): "bearer_token_file",
+    ("oauth2", "client_secret"): "client_secret_file",
+}
+# Words in a value that is only a stand-in for the secret, as in docs and examples.
+_PLACEHOLDER = re.compile(
+    r"<[^>]*>|\$\{|\$\(|\{\{|\.\.\.|x{4,}|example|change[-_ ]?me|replace|redacted|dummy|"
+    r"placeholder|your[-_ ]|todo|fixme|secret_here|insert",
+    re.IGNORECASE,
+)
+# Query parameters and hosts that make a webhook URL a credential.
+_URL_SECRET_PARAM = re.compile(
+    r"(^|_)(token|key|apikey|secret|sig|signature|password|passwd|pass|auth|code)$", re.IGNORECASE)
+_URL_SECRET_HOSTS = ("hooks.slack.com", "discord.com", "discordapp.com", "webhook.office.com",
+                     "outlook.office.com", "api.telegram.org", "logic.azure.com")
+
+
+def _placeholder(value: str) -> bool:
+    return not value.strip() or bool(_PLACEHOLDER.search(value))
+
+
+def _url_secret(url: str) -> Optional[str]:
+    """What makes a URL a credential, or None."""
+    from urllib.parse import parse_qsl, urlsplit
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if parts.password:
+        return "a password"
+    if any(host == h or host.endswith("." + h) for h in _URL_SECRET_HOSTS) and \
+            parts.path.strip("/").count("/") >= 1:
+        return "a webhook token"
+    for name, value in parse_qsl(parts.query, keep_blank_values=True):
+        if value and _URL_SECRET_PARAM.search(name):
+            return f"a '{name}' parameter"
+    return None
+
+
+def _secret_problem(section: str, field: str, value) -> Optional[str]:
+    """Why the value of `field` is a secret in plain text, or None."""
+    if not isinstance(value, str) or _placeholder(value):
+        return None
+    if field in ("url", "slack_api_url", "api_url"):
+        what = _url_secret(value)
+        return None if what is None else f"a URL with {what} in it"
+    return "a secret"
+
+
+# CHECK 41: an API key, token, password or webhook URL with a token, written into the config
+def check_plaintext_secrets(cfg: dict) -> List[Finding]:
+    """Anyone who can read the config, or the repository it's kept in, can use these. Values
+    that only stand in for the secret (<secret>, ${VAR}, $(VAR), {{ ... }}, example values)
+    are skipped, and so is a Slack api_url that isn't a webhook (chat.postMessage)."""
+    out: List[Finding] = []
+
+    def report(where: str, field: str, problem: str, file_field: Optional[str],
+               since: Optional[str] = None) -> None:
+        if file_field:
+            newer = f" (Alertmanager {since} and later)" if since else ""
+            how = (f"Put it in a file Alertmanager can read and set {file_field}{newer} to "
+                   f"that path instead.")
+        else:
+            how = ("It can't be read from a file, so keep this config where secrets belong, "
+                   "such as a Kubernetes Secret, not in version control.")
+        out.append(Finding(
+            WARN, "plaintext-secret",
+            f"{field} is {problem}, written into the config in plain text. Anyone who can "
+            f"read the config, or the repository it's kept in, can use it. {how}",
+            where,
+        ))
+
+    def http_config(node, where: str) -> None:
+        if not isinstance(node, dict):
+            return
+        for path, file_field in _HTTP_SECRET_FIELDS.items():
+            parent = node
+            for key in path[:-1]:
+                parent = parent.get(key) if isinstance(parent, dict) else None
+            if not isinstance(parent, dict):
+                continue
+            value = parent.get(path[-1])
+            if isinstance(value, str) and not _placeholder(value):
+                field = ".".join(path)
+                report(f"{where}.{field}", f"http_config.{field}", "a secret", file_field)
+
+    g = cfg.get("global")
+    if isinstance(g, dict):
+        for field, (file_field, since) in _SECRET_FIELDS["global"].items():
+            problem = _secret_problem("global", field, g.get(field))
+            if problem:
+                report(f"global.{field}", f"global.{field}", problem, file_field, since)
+        http_config(g.get("http_config"), "global.http_config")
+    for r in _receivers(cfg):
+        for section, fields in _SECRET_FIELDS.items():
+            if section == "global":
+                continue
+            for i, entry in _dict_items(r.get(section)):
+                where = f"receivers[{r.get('name')}].{section}[{i}]"
+                for field, (file_field, since) in fields.items():
+                    value = entry
+                    for key in field.split("."):
+                        value = value.get(key) if isinstance(value, dict) else None
+                    problem = _secret_problem(section, field, value)
+                    if problem:
+                        report(f"{where}.{field}", f"{section}[{i}].{field} in receiver "
+                               f"'{r.get('name')}'", problem, file_field, since)
+                http_config(entry.get("http_config"), f"{where}.http_config")
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -1657,6 +1809,7 @@ ALL_CHECKS = [
     check_shadowed_routes,
     check_deprecated_match,
     check_deprecated_mute_time_intervals,
+    check_plaintext_secrets,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}
