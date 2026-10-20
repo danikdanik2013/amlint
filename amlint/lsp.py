@@ -34,6 +34,7 @@ from .explains import EXPLAINS, docs_url
 from .formats import FormatError, Loaded, apply_locations, load_input
 from .linter import ERROR, INFO, WARN, _walk_routes, lint
 from .routing import GROUP_BY_ALL, RouteOpts, Router, RoutingError, probe_label_sets
+from .rules import CONFIG_SOURCE, RulesError, load_rules, project_rule_patterns, rule_files
 from .source import _COMMENT_RE, _DIRECTIVE_RE
 
 try:
@@ -400,6 +401,8 @@ class Server:
         self.shut_down = False
         self.encoding = "utf-16"
         self.folders: List[str] = []
+        # (folder, globs) -> (files with their mtime and size, the alerting rules in them)
+        self._rules: Dict[tuple, tuple] = {}
         self._requests = {
             "initialize": self._initialize,
             "shutdown": self._shutdown,
@@ -600,10 +603,10 @@ class Server:
 
     # linting
 
-    def _project(self, doc: _Document) -> dict:
+    def _project(self, doc: _Document) -> Tuple[dict, str]:
         """The .amlint.yml (or pyproject.toml) of the workspace folder holding the document,
-        else of the document's own directory."""
-        folder = None
+        else of the document's own directory; and that directory."""
+        folder = os.getcwd()
         if doc.path:
             path = os.path.abspath(doc.path)
             inside = [f for f in self.folders
@@ -611,10 +614,30 @@ class Server:
             folder = max(inside, key=len) if inside else os.path.dirname(path)
         try:
             proj = load_project_config(folder)
-            return proj if isinstance(proj, dict) else {}
+            return (proj if isinstance(proj, dict) else {}), folder
         except Exception as e:
-            self.log(f"amlint: can't read the project config in {folder or os.getcwd()}: {e}", 2)
-            return {}
+            self.log(f"amlint: can't read the project config in {folder}: {e}", 2)
+            return {}, folder
+
+    def _alert_rules(self, proj: dict, folder: str):
+        """The alerting rules that `rules:` in the project config points at, read again only
+        when one of the files changes; or the reason they can't be read."""
+        try:
+            patterns = project_rule_patterns(proj)
+            if not patterns:
+                return None, None
+            files = rule_files(patterns, base=folder, source=CONFIG_SOURCE)
+            stamp = tuple((f, os.stat(f).st_mtime_ns, os.stat(f).st_size) for f in files)
+            key = (folder, tuple(patterns))
+            cached = self._rules.get(key)
+            if cached is None or cached[0] != stamp:
+                alerts, notes = load_rules(files)
+                for note in notes:
+                    self.log(f"amlint: {note}", 2)
+                cached = self._rules[key] = (stamp, alerts or None)
+            return cached[1], None
+        except (RulesError, OSError) as e:
+            return None, str(e)
 
     def analyze(self, doc: _Document) -> _Analysis:
         if doc.analysis is None:
@@ -639,12 +662,18 @@ class Server:
             return  # some other YAML file
         analysis.loaded = loaded
 
-        proj = self._project(doc)
+        proj, folder = self._project(doc)
         severity = proj.get("severity")
         basedir = os.path.dirname(doc.path) if doc.path and loaded.templates is None else None
+        alerts, rules_error = self._alert_rules(proj, folder)
+        if rules_error:
+            diags.append({"range": self._line_range(lines, 0), "severity": _SEVERITY[WARN],
+                          "source": "amlint",
+                          "message": f"Can't read the Prometheus rules: {rules_error}. The "
+                                     f"checks against them are off."})
         findings = lint(loaded.cfg, ignore=set(proj.get("ignore") or []),
                         severity=severity if isinstance(severity, dict) else None,
-                        basedir=basedir, template_files=loaded.templates)
+                        basedir=basedir, rules=alerts, template_files=loaded.templates)
         for f in apply_locations(findings, loaded):
             diags.append({
                 "range": self._line_range(lines, f.line - 1, f.col - 1),

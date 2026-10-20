@@ -4392,7 +4392,7 @@ def test_cli_check_rules_without_alerting_rules_warns(tmp_path, capsys):
     captured = capsys.readouterr()
     assert not {f["code"] for f in json.loads(captured.out)} & RULE_CODES
     assert "empty.yml: no rule groups found" in captured.err
-    assert "no alerting rules in the --rules files" in captured.err
+    assert "no alerting rules in the rule files" in captured.err
 
 
 def test_cli_check_rules_hints_at_shell_expanded_glob(tmp_path, capsys):
@@ -4536,3 +4536,49 @@ def test_cli_diff_markdown_no_diagram_without_route_changes(tmp_path):
     old_path, new_path = _write_diff_pair(tmp_path, {**_DB_ROUTE, "receiver": "slack-db"})
     assert "```mermaid\nflowchart LR\n" in _markdown_diff(old_path, new_path)[1]
     assert "mermaid" not in _markdown_diff(old_path, new_path, "--no-routing")[1]
+
+
+# ── rules: in .amlint.yml ────────────────────────────────────────────
+
+def test_cli_check_reads_rules_from_project_config(tmp_path, capsys, monkeypatch):
+    _rules_dir(tmp_path)
+    (tmp_path / "am.yml").write_text(RULES_AM.format(suppress=""))
+    (tmp_path / ".amlint.yml").write_text("rules: ['rules/*.yml']\n")
+    monkeypatch.chdir(tmp_path)
+    assert main(["check", "am.yml", "--format", "json"]) == 0
+    [f] = [f for f in json.loads(capsys.readouterr().out)
+           if f["code"] == "route-unknown-alertname"]
+    assert "did you mean 'HighCPUUsage'?" in f["message"]
+
+
+def test_cli_check_project_rules_add_to_flag(tmp_path, capsys, monkeypatch):
+    rules = _rules_dir(tmp_path)
+    (rules / "cpu.yml").write_text(
+        "groups:\n  - name: cpu\n    rules:\n      - alert: HighCpuUsage\n        expr: x > 0\n")
+    (tmp_path / "am.yml").write_text(RULES_AM.format(suppress=""))
+    (tmp_path / ".amlint.yml").write_text("rules: rules/node.yml\n")  # one string is fine
+    monkeypatch.chdir(tmp_path)
+    main(["check", "am.yml", "--format", "json", "--rules", "rules/cpu.yml"])
+    codes = {f["code"] for f in json.loads(capsys.readouterr().out)}
+    assert "route-unknown-alertname" not in codes  # HighCpuUsage comes from --rules
+
+
+@pytest.mark.parametrize("value,message", [
+    ("rules: ['missing/*.yml']\n", "rules: in .amlint.yml 'missing/*.yml' matches no files"),
+    ("rules: {a: b}\n", "rules: in .amlint.yml must be a glob or a list of globs, got dict"),
+])
+def test_cli_check_bad_project_rules_exit_2(tmp_path, capsys, monkeypatch, value, message):
+    (tmp_path / "am.yml").write_text(RULES_AM.format(suppress=""))
+    (tmp_path / ".amlint.yml").write_text(value)
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        main(["check", "am.yml"])
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+
+
+def test_rule_files_relative_to_base(tmp_path):
+    from amlint.rules import rule_files
+    rules = _rules_dir(tmp_path)
+    assert rule_files(["rules/*.yml"], base=str(tmp_path)) == [str(rules / "node.yml")]
+    assert rule_files([str(rules / "*.yaml")], base="/elsewhere") == [str(rules / "k8s.yaml")]

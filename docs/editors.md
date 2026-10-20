@@ -122,11 +122,15 @@ no initialization options.
 
 ## Configure the checks
 
-The editor reads the same [project config](usage.md#project-config) as the CLI: `ignore`
-and `severity` from `.amlint.yml`, `.amlint.yaml` or `pyproject.toml` in the workspace
-folder. A file outside any workspace folder uses the config next to it. Edits to the
-project config apply at the next change to the file; VS Code re-lints open files right
+The editor reads the same [project config](usage.md#project-config) as the CLI: `ignore`,
+`severity` and `rules` from `.amlint.yml`, `.amlint.yaml` or `pyproject.toml` in the
+workspace folder. A file outside any workspace folder uses the config next to it. Edits to
+the project config apply at the next change to the file; VS Code re-lints open files right
 away.
+
+With `rules:` set, the [checks against your Prometheus rules](usage.md#checking-against-prometheus-rules)
+run as you type too. amlint reads the rule files again when one of them changes. If a glob
+matches nothing, a warning on the first line says so.
 
 ## Limits
 

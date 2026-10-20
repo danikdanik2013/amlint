@@ -52,7 +52,7 @@ from .linter import (
 )
 from .markdown import diff_report
 from .routing import GROUP_BY_ALL, Inhibitor, Router, RoutingError, diff_routing, route_coverage
-from .rules import RulesError, load_rules, rule_files
+from .rules import CONFIG_SOURCE, RulesError, load_rules, project_rule_patterns, rule_files
 
 console = Console(highlight=False)
 err_console = Console(stderr=True, highlight=False)
@@ -331,18 +331,23 @@ def _print_github(all_findings) -> None:
             print(f"::{_GITHUB_LEVEL[f.level]} {','.join(props)}::{_github_escape(msg)}")
 
 
-def _load_rules(patterns):
-    """Alerting rules for --rules, or None if the files have none; exits 2 if a glob
-    matches no file or a file can't be parsed."""
+def _load_rules(patterns, proj):
+    """Alerting rules from `rules:` in the project config and the --rules globs, or None
+    when there are no globs or the files have no rules; exits 2 if a glob matches no file
+    or a file can't be parsed."""
     try:
-        alerts, notes = load_rules(rule_files(patterns))
+        files = rule_files(project_rule_patterns(proj), source=CONFIG_SOURCE)
+        files += [f for f in rule_files(patterns or []) if f not in files]
+        if not files:
+            return None
+        alerts, notes = load_rules(files)
     except RulesError as e:
-        err_console.print(f"[red]Cannot load --rules:[/red] {escape(str(e))}", soft_wrap=True)
+        err_console.print(f"[red]Cannot load rules:[/red] {escape(str(e))}", soft_wrap=True)
         sys.exit(2)
     for note in notes:
         err_console.print(f"[yellow]warning:[/yellow] {escape(note)}", soft_wrap=True)
     if not alerts:
-        err_console.print("[yellow]warning:[/yellow] no alerting rules in the --rules files, "
+        err_console.print("[yellow]warning:[/yellow] no alerting rules in the rule files, "
                           "so the checks against them are skipped", soft_wrap=True)
         return None
     return alerts
@@ -362,7 +367,7 @@ def _warn_if_rule_file(path, cfg) -> None:
 def _cmd_check(args):
     proj, ignore, only, severity = _project_settings(args)
     strict = args.strict or proj.get("strict", False)
-    rules = _load_rules(args.rules) if args.rules else None
+    rules = _load_rules(args.rules, proj)
 
     multi = len(args.files) > 1
     all_findings = []

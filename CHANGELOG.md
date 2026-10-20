@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `rules:` in `.amlint.yml` (or `pyproject.toml`): globs of Prometheus rule files, relative
+  to the config file's directory. `amlint check` uses them without `--rules`, and `--rules`
+  adds more. The editor (`amlint lsp`) runs the checks against these rules as you type, and
+  reads the rule files again when one changes; a glob that matches nothing is a warning on
+  the first line. A bad glob or a value that isn't a glob or a list of globs exits `check`
+  with `2`, as a bad `--rules` does.
+
+### Changed
+- `route-unknown-alertname` and `inhibit-unknown-alertname` say "the rule files" instead of
+  "the --rules files", since the rules can come from `.amlint.yml` too.
+
 ## [0.6.1] - 2026-10-17
 
 ### Added

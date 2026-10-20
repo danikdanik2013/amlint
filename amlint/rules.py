@@ -45,18 +45,40 @@ class AlertRule:
         return f"{self.file}:{self.line}"
 
 
-def rule_files(patterns: List[str]) -> List[str]:
-    """Files the --rules globs match, each once; RulesError for a glob that matches none."""
+CONFIG_SOURCE = "rules: in .amlint.yml"
+
+
+def rule_files(patterns: List[str], base: Optional[str] = None,
+               source: str = "--rules") -> List[str]:
+    """Files the globs match, each once; RulesError for a glob that matches none. Relative
+    globs are taken from `base` when it's given (the directory of .amlint.yml), else from
+    the current directory. `source` names where the globs come from, in the errors."""
     files: Dict[str, None] = {}
     for pattern in patterns:
-        matched = sorted(p for p in glob.glob(pattern, recursive=True) if os.path.isfile(p))
-        if not matched and os.path.isdir(pattern):
+        full = os.path.expanduser(pattern)
+        if base is not None and not os.path.isabs(full):
+            full = os.path.join(base, full)
+        matched = sorted(p for p in glob.glob(full, recursive=True) if os.path.isfile(p))
+        if not matched and os.path.isdir(full):
             example = os.path.join(pattern, "*.yml")
-            raise RulesError(f"--rules {pattern!r} is a directory; use a glob like {example!r}")
+            raise RulesError(f"{source} {pattern!r} is a directory; use a glob like {example!r}")
         if not matched:
-            raise RulesError(f"--rules {pattern!r} matches no files")
+            raise RulesError(f"{source} {pattern!r} matches no files")
         files.update(dict.fromkeys(matched))
     return list(files)
+
+
+def project_rule_patterns(proj: dict) -> List[str]:
+    """The globs under `rules:` in the project config: one string, or a list of them."""
+    value = proj.get("rules") if isinstance(proj, dict) else None
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return list(value)
+    raise RulesError(f"{CONFIG_SOURCE} must be a glob or a list of globs, "
+                     f"got {type(value).__name__}")
 
 
 def _get(node: Optional[Node], key: str) -> Optional[Node]:
@@ -183,7 +205,7 @@ def _alertname_findings(matchers: List[Matcher], known: Set[str], subject: str,
             out.append(_unknown_finding(
                 code, where,
                 f"{subject} {verb} alertname{op}\"{value}\", which matches none of the "
-                f"{len(known)} alert names in the --rules files",
+                f"{len(known)} alert names in the rule files",
                 _hint(value, known), "the matcher excludes nothing" if negative else dead,
             ))
             continue
@@ -195,7 +217,7 @@ def _alertname_findings(matchers: List[Matcher], known: Set[str], subject: str,
             out.append(_unknown_finding(
                 code, where,
                 f"{subject} {verb} alertname '{name}'{context}, which no alerting rule in "
-                f"the --rules files produces",
+                f"the rule files produces",
                 _hint(name, known),
                 f"{part} excludes nothing" if negative else (
                     f"{part} never matches" if partial else dead),

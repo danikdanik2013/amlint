@@ -464,3 +464,49 @@ def test_hover_when_routing_cannot_be_simulated(lsp, tmp_path):
     uri = _uri(tmp_path / "am.yml")
     client.open(uri, text)
     assert "amlint can't simulate this route tree" in client.hover(uri, GHOST_LINE)
+
+
+# ── rules: in .amlint.yml ────────────────────────────────────────────
+
+RULES_CONFIG = """\
+global:
+  resolve_timeout: 5m
+route:
+  receiver: default
+  routes:
+    - matchers: [alertname="DiskFull"]
+      receiver: default
+receivers:
+  - name: default
+    webhook_configs: [{url: http://example.org/default}]
+"""
+
+
+def _rule_file(path: Path, *alerts: str) -> None:
+    rules = "".join(f"      - alert: {a}\n        expr: x > 0\n" for a in alerts)
+    path.write_text(f"groups:\n  - name: g\n    rules:\n{rules}")
+
+
+def test_rules_from_project_config_in_the_editor(lsp, tmp_path):
+    (tmp_path / "rules").mkdir()
+    _rule_file(tmp_path / "rules" / "node.yml", "DiskFul")
+    (tmp_path / ".amlint.yml").write_text("rules: ['rules/*.yml']\n")
+    config = tmp_path / "alertmanager.yml"
+    client = lsp(root=tmp_path)
+    diags = _by_code(client.open(_uri(config), RULES_CONFIG))
+    assert "did you mean 'DiskFul'?" in diags["route-unknown-alertname"]["message"]
+
+    # the rule file changes: the next lint reads it again
+    _rule_file(tmp_path / "rules" / "node.yml", "DiskFull")
+    os.utime(tmp_path / "rules" / "node.yml", ns=(1, 2 * 10 ** 18))
+    assert "route-unknown-alertname" not in _by_code(
+        client.change(_uri(config), RULES_CONFIG + "\n", 2))
+
+
+def test_project_rules_that_cant_be_read_are_reported(lsp, tmp_path):
+    (tmp_path / ".amlint.yml").write_text("rules: ['missing/*.yml']\n")
+    client = lsp(root=tmp_path)
+    diags = client.open(_uri(tmp_path / "alertmanager.yml"), RULES_CONFIG)
+    [warning] = [d for d in diags if "Prometheus rules" in d["message"]]
+    assert warning["severity"] == 2 and warning["range"]["start"]["line"] == 0
+    assert "'missing/*.yml' matches no files" in warning["message"]
