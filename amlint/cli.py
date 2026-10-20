@@ -905,6 +905,57 @@ inhibit_rules: []
 """
 
 
+def _cmd_fix(args) -> int:
+    """Rewrite what amlint can fix in each file: in place, or as a diff with --diff."""
+    from .fixes import FIXABLE, fix_text
+    _, ignore, _, _ = _project_settings(args)
+    # reports go to stderr when stdout carries the config or the diff
+    out = err_console if args.diff or "-" in args.files else console
+    changed = False
+    for path in args.files:
+        if path == "-":
+            text = sys.stdin.read()
+        else:
+            if not os.path.exists(path):
+                err_console.print(f"[red]File not found:[/red] {escape(str(path))}")
+                return 2
+            with open(path, newline="") as f:
+                text = f.read()
+        crlf = "\r\n" in text
+        text = text.replace("\r\n", "\n")
+        loaded = _load_input(path, text, **_input_options(args))
+        findings = apply_locations(lint(loaded.cfg, ignore=ignore, only=set(FIXABLE)), loaded)
+        new, fixed, left = fix_text(text, loaded, findings)
+        for f in fixed:
+            out.print(f"  [green]✔ fixed[/green]  [dim]\\[{f.code}][/dim]  ·  "
+                      f"{escape(_location(path, f))}  ·  {escape(f.where)}", soft_wrap=True)
+        for f in left:
+            out.print(f"  [yellow]✗ left[/yellow]   [dim]\\[{f.code}][/dim]  ·  "
+                      f"{escape(_location(path, f))}  ·  {escape(f.where)}: amlint can't rewrite "
+                      f"this one safely; change it by hand", soft_wrap=True)
+        if new == text:
+            if not left:
+                out.print(f"[dim]{escape(_display(path))}: nothing to fix[/dim]")
+            if path == "-" and not args.diff:
+                sys.stdout.write(text)
+            continue
+        changed = True
+        if crlf:
+            text, new = text.replace("\n", "\r\n"), new.replace("\n", "\r\n")
+        if args.diff:
+            name = _display(path)
+            sys.stdout.writelines(difflib.unified_diff(
+                text.splitlines(keepends=True), new.splitlines(keepends=True), name, name))
+        elif path == "-":
+            sys.stdout.write(new)
+        else:
+            with open(path, "w", newline="") as f:
+                f.write(new)
+            out.print(f"[bold]{escape(path)}[/bold]: fixed {len(fixed)} of "
+                      f"{len(fixed) + len(left)}")
+    return 1 if args.diff and changed else 0
+
+
 def _cmd_init() -> int:
     print(_INIT_TEMPLATE, end="")
     return 0
@@ -1110,7 +1161,9 @@ def _cmd_explain(args):
     console.print(Rule(f"[bold]{code}[/bold]", style="dim"))
     console.print()
     console.print(f"  Level:  [{level_style}]{e['level'].upper()}[/{level_style}]")
-    if code in ALSO_CAUGHT_BY_AMTOOL:
+    if e.get("amtool"):
+        console.print(f"  [dim]{escape(e['amtool'])}[/dim]")
+    elif code in ALSO_CAUGHT_BY_AMTOOL:
         console.print(
             "  [dim]Also caught by `amtool check-config` — Alertmanager refuses to "
             "start over this. Included here for unified JSON/SARIF/diff output "
@@ -1231,6 +1284,16 @@ def main(argv=None):
     ptst.add_argument("--fail-under", type=_percentage, metavar="N", dest="fail_under",
                       help="exit 1 if route coverage is below N%% (implies --coverage)")
 
+    pf = sub.add_parser("fix", parents=[inputs],
+                        help="rewrite deprecated syntax (match:, source_match:, ...) in place")
+    pf.add_argument("files", nargs="+", metavar="file",
+                    help="path(s) to alertmanager.yml or Helm values, or - for stdin")
+    pf.add_argument("--diff", action="store_true",
+                    help="print the changes as a unified diff and write nothing; exit 1 if "
+                         "there are any")
+    pf.add_argument("--ignore", action="append", metavar="CODE",
+                    help="leave findings with these codes as they are")
+
     sub.add_parser("init", help="print a minimal valid alertmanager.yml to stdout")
 
     sub.add_parser("list", help="list all check codes with level and description")
@@ -1257,6 +1320,8 @@ def main(argv=None):
         return _cmd_route(args)
     if args.cmd == "test":
         return _cmd_test(args)
+    if args.cmd == "fix":
+        return _cmd_fix(args)
     if args.cmd == "init":
         return _cmd_init()
     if args.cmd == "list":

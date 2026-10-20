@@ -45,26 +45,33 @@ fix a finding, run `amlint explain <check>`, for example `amlint explain unreach
 | Write unit tests for routing | `amlint test alertmanager.yml tests.yml` | [Usage](usage.md) |
 | See what a change does to routing | `amlint diff old.yml new.yml` | [Usage](usage.md) |
 | Catch routes for alerts that don't exist | `amlint check … --rules 'rules/*.yml'` | [Prometheus rules](checks/rules.md) |
+| Rewrite deprecated `match:` syntax as `matchers:` | `amlint fix alertmanager.yml` | [Usage](usage.md#fix) |
 | Lint a Secret, Helm values or Mimir config | `amlint check alertmanager-secret.yaml` | [Kubernetes & Mimir](kubernetes.md) |
 | Get findings and a routing diff on every PR | the GitHub Action | [GitHub Action](github-action.md) |
 | See findings in your editor as you type | `amlint lsp`, started by the editor | [Editors](editors.md) |
 
 ## What it catches
 
-There are 38 checks. 18 of them find configs that amtool accepts but that don't behave the
-way you expect:
+There are 48 checks. 26 of them find configs that amtool accepts but that don't behave the
+way you expect, or use syntax Alertmanager has deprecated:
 
 - **Alerts that reach nobody.** A route points at a receiver with no integration, or a
   catch-all route sits above more specific ones.
 - **Routes that can never match.** An earlier sibling route catches every alert first.
+- **Notification templates that break when they're sent**: a missing `}`, a template name
+  with a typo, or `.Labels` where the data has `.CommonLabels`.
 - **Inhibit rules that mute too much.** No `equal` labels, or rules that mute each other.
 - **Timings that contradict themselves.** For example, `group_wait` longer than `group_interval`.
+- **Time intervals that never apply, or always do**, so a route never sends anything.
 - **Matchers Alertmanager reads differently than you do.** For example, `code=~[0-9]{3}`
   without quotes loses its closing brace.
 - **Routes for alerts that don't exist.** With `--rules`, a typo in an `alertname` stops
   being silent.
+- **Deprecated syntax** such as `match:`, which [`amlint fix`](usage.md#fix) rewrites.
+- **Secrets in plain text**: API keys and webhook URLs written into the config instead of
+  read from a file.
 
-The other 20 repeat what amtool already rejects, so one tool gives you one report.
+The other 22 repeat what amtool already rejects, so one tool gives you one report.
 [See all checks](checks/index.md).
 
 ## Why not just amtool?

@@ -1030,6 +1030,7 @@ def test_broken_yml_integration():
         "groupby-ellipsis",
         "unused-receiver",
         "empty-receiver",
+        "deprecated-match",
     }
 
 
@@ -4618,3 +4619,866 @@ def test_cli_test_without_tests_file_or_mapping_exits_2(tmp_path, capsys, monkey
     (tmp_path / ".amlint.yml").write_text("tests: [a.yml]\n")
     assert main(["test", cfg_path.name]) == 2
     assert "must map config files to test files" in capsys.readouterr().err
+
+
+# ── deprecated syntax and amlint fix ─────────────────────────────────
+
+def _deprecated(cfg):
+    return [f for f in lint(cfg) if f.code.startswith("deprecated-")]
+
+
+def test_deprecated_match_on_routes_and_inhibit_rules():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"match": {"team": "db"}, "match_re": {"service": "pg-.*"}, "receiver": "a"},
+            {"match": {"team": "web"}, "matchers": ['env="prod"'], "receiver": "a"},
+            {"matchers": ['team="api"'], "receiver": "a"},
+        ]},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_match": {"severity": "critical"},
+                           "target_match_re": {"severity": "warning|info"},
+                           "equal": ["alertname"]}],
+    }
+    found = {f.where: f for f in _deprecated(cfg)}
+    assert set(found) == {"route.routes[0].match", "route.routes[1].match",
+                          "inhibit_rules[0].source_match", "inhibit_rules[0].target_match_re"}
+    assert all(f.level == "info" and f.code == "deprecated-match" for f in found.values())
+    assert 'Write matchers: [team="db", service=~"pg-.*"] instead' in \
+        found["route.routes[0].match"].msg
+    assert "match: and match_re: are deprecated" in found["route.routes[0].match"].msg
+    assert 'Add team="web" to its matchers: instead' in found["route.routes[1].match"].msg
+    assert 'Write target_matchers: [severity=~"warning|info"]' in \
+        found["inhibit_rules[0].target_match_re"].msg
+
+
+def test_deprecated_match_skips_the_root_route_and_unwritable_labels():
+    root = {"route": {"receiver": "a", "match": {"team": "db"}}, "receivers": [{"name": "a"}]}
+    assert _deprecated(root) == []  # invalid-root-route reports it
+    bad = {"route": {"receiver": "a", "routes": [{"match": {"k8s.ns": "x"}, "receiver": "a"}]},
+           "receivers": [{"name": "a"}]}
+    [f] = _deprecated(bad)
+    assert "Write" not in f.msg and "amlint fix" not in f.msg  # bad-match-label covers it
+
+
+def test_deprecated_mute_time_intervals():
+    interval = [{"name": "nights", "time_intervals": [{"weekdays": ["sunday"]}]}]
+    base = {"route": {"receiver": "a", "routes": [
+        {"matchers": ["x=y"], "receiver": "a", "mute_time_intervals": ["nights"]}]},
+        "receivers": [{"name": "a"}]}
+    [f] = _deprecated(dict(base, mute_time_intervals=interval))
+    assert (f.code, f.where, f.level) == ("deprecated-mute-time-intervals",
+                                          "mute_time_intervals", "info")
+    assert "Rename the key to time_intervals:" in f.msg
+    assert _deprecated(dict(base, time_intervals=interval)) == []
+    [f] = _deprecated(dict(base, time_intervals=interval, mute_time_intervals=[]))
+    assert "Move its entries into the time_intervals: list" in f.msg
+
+
+@pytest.mark.parametrize("op,value", [
+    ("=", "critical"), ("=", 'say "hi"'), ("=", "C:\\temp"), ("=~", "\\d+|x"),
+    ("=", "two\nlines"), ("=", "ünïcode"), ("=~", ""), ("=", "a, b"), ("=", "{x}"),
+])
+def test_written_matcher_reads_back_the_same(op, value):
+    from amlint.linter import _parse_matcher_entry, written_matcher
+    entry = written_matcher("label", op, value)
+    assert _parse_matcher_entry(entry) == (("label", op, value),)
+
+
+def test_written_matcher_needs_a_classic_label_name():
+    from amlint.linter import written_matcher
+    assert written_matcher("k8s.ns", "=", "x") is None
+
+
+LEGACY = """\
+# a config from 2021
+route:
+  receiver: default
+  routes:
+    - match:
+        team: db        # the database team
+        severity: critical
+      match_re:
+        service: "pg-.*|mysql"
+      receiver: db-pager
+    - receiver: web
+      match: {team: web}
+      continue: true
+    - match:
+        team: api
+      matchers: [env="prod"]
+      receiver: api
+    - receiver: ops
+      matchers:
+        - env="prod"
+      match_re:
+        team: 'ops|sre'
+    - match: {path: 'C:\\temp "x"'}
+      receiver: ops
+receivers:
+  - name: default
+  - name: db-pager
+  - name: web
+  - name: api
+  - name: ops
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match_re:
+      severity: warning|info
+    equal: [alertname]
+mute_time_intervals:
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]
+"""
+
+FIXED = """\
+# a config from 2021
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - team="db"  # the database team
+        - severity="critical"
+        - service=~"pg-.*|mysql"
+      receiver: db-pager
+    - receiver: web
+      matchers: [team="web"]
+      continue: true
+    - matchers: [env="prod", team="api"]
+      receiver: api
+    - receiver: ops
+      matchers:
+        - env="prod"
+        - team=~"ops|sre"
+    - matchers: [path="C:\\\\temp \\"x\\""]
+      receiver: ops
+receivers:
+  - name: default
+  - name: db-pager
+  - name: web
+  - name: api
+  - name: ops
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity=~"warning|info"
+    equal: [alertname]
+time_intervals:
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]
+"""
+
+
+def _fix(text, fmt=None):
+    from amlint.fixes import fix_text
+    from amlint.formats import apply_locations, load_input
+    loaded = load_input(text, fmt)
+    findings = apply_locations([f for f in lint(loaded.cfg) if f.code.startswith("deprecated-")],
+                               loaded)
+    new, fixed, left = fix_text(text, loaded, findings)
+    return new, [f.where for f in fixed], [f.where for f in left]
+
+
+def test_fix_rewrites_deprecated_syntax():
+    new, fixed, left = _fix(LEGACY)
+    assert new == FIXED
+    assert len(fixed) == 8 and left == []
+    cfg = yaml.safe_load(new)
+    assert _deprecated(cfg) == []
+    assert cfg["route"]["routes"][4]["matchers"] == ['path="C:\\\\temp \\"x\\""']
+
+
+def test_fix_keeps_the_routing():
+    from amlint.routing import Router
+    old, new = yaml.safe_load(LEGACY), yaml.safe_load(_fix(LEGACY)[0])
+    for labels in ({"team": "db", "severity": "critical", "service": "pg-main"},
+                   {"team": "web"}, {"team": "api", "env": "prod"}, {"team": "sre", "env": "prod"},
+                   {"path": 'C:\\temp "x"'}, {"team": "db"}):
+        assert [m.receiver for m in Router(old).match(labels)] == \
+            [m.receiver for m in Router(new).match(labels)]
+
+
+@pytest.mark.parametrize("route", [
+    "    - {match: {team: db}, receiver: db}\n",                   # a flow mapping
+    "    - <<: *base\n      match: {team: db}\n      receiver: db\n",  # a merge key
+    "    - match: {team: db}\n      match: {team: web}\n      receiver: db\n",  # twice
+])
+def test_fix_leaves_what_it_cannot_rewrite(route):
+    text = ("base: &base {group_wait: 1s}\n" if "*base" in route else "") + \
+        "route:\n  receiver: db\n  routes:\n" + route + "receivers:\n  - name: db\n"
+    try:
+        yaml.safe_load(text)
+    except yaml.YAMLError:
+        pytest.skip("PyYAML rejects it")
+    new, fixed, left = _fix(text, "alertmanager")
+    assert new == text and fixed == [] and left
+
+
+def test_fix_first_key_of_a_list_item():
+    text = ("route:\n  receiver: a\n  routes:\n"
+            "    - match:\n        team: db\n      match_re:\n        env: prod|stage\n"
+            "      matchers: [x=\"y\"]\n      receiver: a\n"
+            "receivers:\n  - name: a\n")
+    new, fixed, left = _fix(text)
+    assert left == []
+    assert "    - matchers: [x=\"y\", team=\"db\", env=~\"prod|stage\"]\n      receiver: a\n" \
+        in new
+
+
+def test_fix_empty_match():
+    text = "route:\n  receiver: a\n  routes:\n    - match:\n      receiver: a\n" \
+           "receivers:\n  - name: a\n"
+    new, _, left = _fix(text)
+    assert left == []
+    assert "    - matchers: []\n      receiver: a\n" in new
+
+
+def test_fix_helm_values():
+    text = """\
+alertmanager:
+  config:
+    route:
+      receiver: "null"
+      routes:
+        - match: {alertname: Watchdog}
+          receiver: "null"
+    receivers:
+      - name: "null"
+"""
+    new, fixed, left = _fix(text)
+    assert left == [] and len(fixed) == 1
+    assert '        - matchers: [alertname="Watchdog"]\n' in new
+
+
+def test_fix_not_in_a_secret():
+    text = """\
+apiVersion: v1
+kind: Secret
+metadata: {name: alertmanager-main}
+stringData:
+  alertmanager.yaml: |
+    route:
+      receiver: a
+      routes:
+        - match: {team: db}
+          receiver: a
+    receivers:
+      - name: a
+"""
+    new, fixed, left = _fix(text)
+    assert new == text and fixed == [] and left == ["route.routes[0].match"]
+
+
+def test_cli_fix_in_place(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "am.yml").write_text(LEGACY)
+    assert main(["fix", "am.yml"]) == 0
+    assert (tmp_path / "am.yml").read_text() == FIXED
+    out = capsys.readouterr().out
+    assert "✔ fixed  [deprecated-match]  ·  am.yml:5:7  ·  route.routes[0].match" in out
+    assert "am.yml: fixed 8 of 8" in out
+    assert main(["fix", "am.yml"]) == 0
+    assert "am.yml: nothing to fix" in capsys.readouterr().out
+    assert main(["check", "am.yml"]) == 0
+
+
+def test_cli_fix_diff_writes_nothing(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "am.yml").write_text(LEGACY)
+    assert main(["fix", "--diff", "am.yml"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out.startswith("--- am.yml\n+++ am.yml\n")
+    assert '+        - team="db"  # the database team\n' in captured.out
+    assert "✔ fixed" in captured.err
+    assert (tmp_path / "am.yml").read_text() == LEGACY
+    (tmp_path / "am.yml").write_text(FIXED)
+    assert main(["fix", "--diff", "am.yml"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_cli_fix_keeps_crlf_and_suppressed_spots(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    text = ("route:\n  receiver: a\n  routes:\n"
+            "    - match: {team: db}  # amlint: disable=deprecated-match\n      receiver: a\n"
+            "    - match: {team: web}\n      receiver: a\n"
+            "receivers:\n  - name: a\n")
+    (tmp_path / "am.yml").write_bytes(text.replace("\n", "\r\n").encode())
+    assert main(["fix", "am.yml"]) == 0
+    new = (tmp_path / "am.yml").read_bytes().decode()
+    assert new == text.replace("    - match: {team: web}", '    - matchers: [team="web"]') \
+        .replace("\n", "\r\n")
+
+
+def test_cli_fix_stdin(capsys, monkeypatch):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(LEGACY))
+    assert main(["fix", "-"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == FIXED
+    assert "✔ fixed" in captured.err
+
+
+# ── plaintext-secret ─────────────────────────────────────────────────
+
+# split, so that secret scanners don't take this made-up URL for a real one
+SLACK_HOOK = ("https://hooks.slack.com/services/"
+              "T024BE7LD/B01ABCDEF/9xQmL2vK7pR4tY8wZ3nB6cD1")
+PD_KEY = "3f9a1c0be44d4f0d8d6c2b7e5a1f0c9d"
+
+
+def _secrets(cfg):
+    return {f.where: f for f in lint(cfg) if f.code == "plaintext-secret"}
+
+
+def _receiver(**configs):
+    return {"route": {"receiver": "r"}, "receivers": [dict({"name": "r"}, **configs)]}
+
+
+def test_plaintext_secret_in_receivers():
+    found = _secrets(_receiver(
+        pagerduty_configs=[{"routing_key": PD_KEY}],
+        slack_configs=[{"api_url": SLACK_HOOK, "channel": "#x"}],
+        telegram_configs=[{"bot_token": "987654321:AAHk3vXq8mP2LwZ7tR5nY1cB9dF4gJ6sK0",
+                           "chat_id": 1}],
+        email_configs=[{"to": "a@b.c", "auth_password": "hunter22"}],
+        wechat_configs=[{"api_secret": "s3cr3tValue"}],
+        sns_configs=[{"topic_arn": "arn:aws:sns:eu-west-1:1:t",
+                      "sigv4": {"access_key": "AKIA1", "secret_key": "wJalrXUtnFEMI7K7MDENG"}}],
+    ))
+    assert set(found) == {
+        "receivers[r].pagerduty_configs[0].routing_key",
+        "receivers[r].slack_configs[0].api_url",
+        "receivers[r].telegram_configs[0].bot_token",
+        "receivers[r].email_configs[0].auth_password",
+        "receivers[r].wechat_configs[0].api_secret",
+        "receivers[r].sns_configs[0].sigv4.secret_key",
+    }
+    pd = found["receivers[r].pagerduty_configs[0].routing_key"]
+    assert pd.level == WARN
+    assert "set routing_key_file to that path instead" in pd.msg
+    assert "a URL with a webhook token in it" in found["receivers[r].slack_configs[0].api_url"].msg
+    assert "set api_secret_file (Alertmanager 0.31 and later) to that path" in \
+        found["receivers[r].wechat_configs[0].api_secret"].msg
+    assert "can't be read from a file" in \
+        found["receivers[r].sns_configs[0].sigv4.secret_key"].msg
+
+
+def test_plaintext_secret_in_global_and_http_config():
+    cfg = _receiver(webhook_configs=[{"url": "http://hook.internal/x", "http_config": {
+        "basic_auth": {"username": "am", "password": "pa55word!"},
+        "authorization": {"credentials_file": "/etc/am/token"},
+    }}])
+    cfg["global"] = {"slack_api_url": SLACK_HOOK, "opsgenie_api_key": "0a1b2c3d-4e5f",
+                     "http_config": {"oauth2": {"client_id": "x", "client_secret": "gH7kq2LmX9vP"}}}
+    assert set(_secrets(cfg)) == {
+        "global.slack_api_url", "global.opsgenie_api_key",
+        "global.http_config.oauth2.client_secret",
+        "receivers[r].webhook_configs[0].http_config.basic_auth.password",
+    }
+
+
+@pytest.mark.parametrize("url,secret", [
+    ("http://alert-gateway.monitoring.svc:8080/alerts", False),
+    ("https://example.org/hook?team=db", False),
+    ("https://hooks.acme.io/alerts?token=a1b2c3d4e5", True),
+    ("https://api.acme.io/v1?api_key=a1b2c3", True),
+    ("https://user:pa55@hook.internal/alerts", True),
+    ("https://prod-12.westeurope.logic.azure.com/workflows/abc/triggers/manual/run?sig=Qx9", True),
+    ("https://discord.com/api/webhooks/1234567890/AbCdEf-GhIjKl", True),
+])
+def test_plaintext_secret_webhook_urls(url, secret):
+    assert bool(_secrets(_receiver(webhook_configs=[{"url": url}]))) is secret
+
+
+@pytest.mark.parametrize("value", [
+    "<secret>", "${PAGERDUTY_KEY}", "$(PAGERDUTY_KEY)", "{{ .Values.pagerduty.key }}",
+    "xxxxxxxxxxxxxxxx", "your-routing-key", "<routing-key>", "REPLACE_ME", "changeme", "",
+    "https://hooks.slack.com/services/" "T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+    "https://hooks.slack.com/...", "mysecret", "qwe456", "password", "token123", "myprecious",
+    "test-api-key-1",
+])
+def test_plaintext_secret_skips_stand_ins(value):
+    cfg = _receiver(pagerduty_configs=[{"routing_key": value}],
+                    slack_configs=[{"api_url": value, "channel": "#x"}])
+    assert _secrets(cfg) == {}
+
+
+def test_plaintext_secret_slack_api_without_a_webhook():
+    cfg = _receiver(slack_configs=[{
+        "api_url": "https://slack.com/api/chat.postMessage", "channel": "#x",
+        "http_config": {"authorization": {"credentials_file": "/etc/am/slack-token"}}}])
+    assert _secrets(cfg) == {}
+
+
+def test_plaintext_secret_where_secrets_belong(tmp_path, capsys):
+    """Reported in a plain config and in Helm values; not in a Secret, an
+    AlertmanagerConfig or a Mimir config (which rejects *_file fields)."""
+    receiver = ("receivers:\n  - name: r\n    pagerduty_configs:\n"
+                f"      - routing_key: {PD_KEY}\n")
+    plain = "route:\n  receiver: r\n" + receiver
+    indent = "".join("    " + line + "\n" for line in plain.splitlines())
+    inputs = {
+        "plain.yml": (plain, True),
+        "helm.yml": ("alertmanager:\n  config:\n" + "".join(
+            "    " + line + "\n" for line in plain.splitlines()), True),
+        "secret.yml": ("apiVersion: v1\nkind: Secret\nmetadata: {name: am}\nstringData:\n"
+                       "  alertmanager.yaml: |\n" + indent, False),
+        "configmap.yml": ("apiVersion: v1\nkind: ConfigMap\nmetadata: {name: am}\ndata:\n"
+                          "  alertmanager.yaml: |\n" + indent, True),
+        "mimir.yml": ("alertmanager_config: |\n" + "".join(
+            "  " + line + "\n" for line in plain.splitlines()), False),
+    }
+    for name, (text, reported) in inputs.items():
+        path = tmp_path / name
+        path.write_text(text)
+        main(["check", "--format", "json", str(path)])
+        codes = {f["code"] for f in json.loads(capsys.readouterr().out)}
+        assert ("plaintext-secret" in codes) is reported, name
+
+
+# ── time intervals ───────────────────────────────────────────────────
+
+@pytest.fixture
+def today(monkeypatch):
+    import datetime
+
+    import amlint.linter
+    monkeypatch.setattr(amlint.linter, "_today", lambda: datetime.date(2026, 10, 20))
+
+
+def _intervals(defs, **routes):
+    """A config whose routes (name -> route settings) use the intervals in `defs`."""
+    return {
+        "route": {"receiver": "a", "routes": [
+            dict({"matchers": [f'team="{name}"'], "receiver": "a"}, **settings)
+            for name, settings in routes.items()]},
+        "receivers": [{"name": "a"}],
+        "time_intervals": [{"name": n, "time_intervals": e} for n, e in defs.items()],
+    }
+
+
+def _by(code, cfg):
+    return {f.where: f.msg for f in lint(cfg) if f.code == code}
+
+
+@pytest.mark.parametrize("entry,where,message", [
+    ({"times": [{"start_time": "17:00", "end_time": "09:00"}]}, "times[0]",
+     "start time cannot be equal or greater than end time"),
+    ({"times": [{"start_time": "09:00", "end_time": "09:00"}]}, "times[0]",
+     "start time cannot be equal or greater than end time"),
+    ({"times": [{"start_time": "8:00", "end_time": "09:00"}]}, "times[0]",
+     "couldn't parse timestamp 8:00, invalid format"),
+    ({"times": [{"start_time": "09:00"}]}, "times[0]",
+     "both start and end times must be provided"),
+    ({"weekdays": ["friday:monday"]}, "weekdays[0]", "start day cannot be before end day"),
+    ({"weekdays": ["1"]}, "weekdays[0]", "1 is not a valid weekday"),
+    ({"days_of_month": ["0"]}, "days_of_month[0]",
+     "0 is not a valid day of the month: out of range"),
+    ({"days_of_month": ["-1:5"]}, "days_of_month[0]",
+     "end day must be negative if start day is negative"),
+    ({"days_of_month": ["-1:-5"]}, "days_of_month[0]", "end day -5 is always before start day -1"),
+    ({"months": ["march:january"]}, "months[0]", "end month january is before start month march"),
+    ({"months": ["marchh"]}, "months[0]", "marchh is not a valid month"),
+    ({"years": ["2025:2020"]}, "years[0]", "end year 2020 is before start year 2025"),
+    ({"location": "Europe/Kiyv"}, "location", "location 'Europe/Kiyv' is not in the time zone"),
+])
+def test_bad_time_interval(entry, where, message):
+    cfg = _intervals({"x": [entry]})
+    found = _by("bad-time-interval", cfg)
+    assert list(found) == [f"time_intervals[0].time_intervals[0].{where}"]
+    msg = found[f"time_intervals[0].time_intervals[0].{where}"]
+    assert message in msg and "Alertmanager refuses to load this config" in msg
+
+
+def test_bad_time_interval_names_and_location_hint():
+    import zoneinfo
+    if "Europe/Kyiv" not in zoneinfo.available_timezones():
+        pytest.skip("no time zone database")
+    cfg = _intervals({"x": [{"location": "Europe/Kiyv"}]})
+    assert "did you mean 'Europe/Kyiv'?" in "".join(_by("bad-time-interval", cfg).values())
+    cfg["mute_time_intervals"] = [{"name": "x"}, {"time_intervals": []}]
+    found = _by("bad-time-interval", cfg)
+    assert "A mute time interval has no name" in found["mute_time_intervals[1]"]
+    assert "Time interval 'x' is not unique" in found["time_intervals[0]"]
+
+
+@pytest.mark.parametrize("entry", [
+    {"times": [{"start_time": "00:00", "end_time": "24:00"}], "location": "Local"},
+    {"weekdays": ["Monday:Friday", "saturday"], "days_of_month": ["1:5", "-3:-1", "31"],
+     "months": ["1:3", "december"], "years": ["2020:2030"], "location": "UTC"},
+    {},
+])
+def test_good_time_intervals(entry):
+    assert _by("bad-time-interval", _intervals({"x": [entry]})) == {}
+
+
+def test_unquoted_times_are_text(tmp_path, capsys):
+    """PyYAML reads an unquoted 17:00 as the base-60 number 1020 and 1:5 as 65; Alertmanager,
+    like Helm, reads text."""
+    text = ("route:\n  receiver: a\n  routes:\n"
+            "    - matchers: [x=y]\n      receiver: a\n      mute_time_intervals: [n]\n"
+            "receivers:\n  - name: a\n"
+            "time_intervals:\n  - name: n\n    time_intervals:\n"
+            "      - times: [{start_time: 9:30, end_time: 17:00}]\n"
+            "        days_of_month: [1:5]\n")
+    path = tmp_path / "am.yml"
+    path.write_text(text)
+    main(["check", "--format", "json", str(path)])
+    found = {f["code"]: f["message"] for f in json.loads(capsys.readouterr().out)}
+    assert "couldn't parse timestamp 9:30" in found["bad-time-interval"]
+    path.write_text(text.replace("9:30", "09:30"))
+    main(["check", "--format", "json", str(path)])
+    assert "bad-time-interval" not in {f["code"] for f in json.loads(capsys.readouterr().out)}
+    helm = "alertmanager:\n  config:\n" + "".join("    " + line + "\n"
+                                                for line in text.splitlines())
+    path.write_text(helm.replace("9:30", "09:30"))
+    main(["check", "--format", "json", str(path)])
+    assert "bad-time-interval" not in {f["code"] for f in json.loads(capsys.readouterr().out)}
+
+
+@pytest.mark.parametrize("entries,reason", [
+    ([{"years": ["2021:2023"]}], "every year it lists is over"),
+    ([{"days_of_month": ["30:31"], "months": ["february"]}],
+     "the days_of_month it lists don't exist in its months"),
+    ([{"weekdays": []}], "its weekdays: is an empty list"),
+    ([{"months": ["13"]}], "its months: are not between 1 and 12"),
+    ([], "it has no time_intervals: entries"),
+    ([{"years": ["2020"]}, {"months": ["13"]}], "none of its entries matches"),
+])
+def test_time_interval_never_active(today, entries, reason):
+    cfg = _intervals({"x": entries}, db={"active_time_intervals": ["x"]},
+                     web={"mute_time_intervals": ["x"]})
+    found = _by("time-interval-never-active", cfg)
+    msg = found["time_intervals[0]"]
+    assert f"Time interval 'x' is never active: {reason}" in msg
+    assert "Routes that mute with it are never muted (route.routes[1])" in msg
+    assert "Routes active only during it never send a notification (route.routes[0])" in msg
+    assert _by("route-always-muted", cfg) == {}  # the interval finding covers the route
+
+
+def test_time_interval_active_later_or_unused(today):
+    cfg = _intervals({"later": [{"years": ["2031"]}], "unused": [{"years": ["2020"]}],
+                      "leap": [{"days_of_month": ["29"], "months": ["february"]}]},
+                     db={"active_time_intervals": ["later"]},
+                     web={"mute_time_intervals": ["leap"]})
+    assert _by("time-interval-never-active", cfg) == {}
+
+
+@pytest.mark.parametrize("defs,mute,active,why", [
+    ({"always": [{}]}, ["always"], [], "its mute_time_intervals 'always' covers every minute"),
+    ({"day": [{"times": [{"start_time": "00:00", "end_time": "24:00"}]}]}, ["day"], [],
+     "its mute_time_intervals 'day' covers every minute"),
+    ({"week": [{"weekdays": ["monday:friday"]}], "weekend": [{"weekdays": ["saturday"]},
+                                                             {"weekdays": ["sunday"]}]},
+     ["week", "weekend"], [], "its mute_time_intervals together cover every minute"),
+    ({"office": [{"weekdays": ["monday:friday"],
+                  "times": [{"start_time": "09:00", "end_time": "17:00"}]}],
+      "daytime": [{"times": [{"start_time": "08:00", "end_time": "20:00"}]}]},
+     ["daytime"], ["office"], "cover every time its active_time_intervals allow"),
+])
+def test_route_always_muted(today, defs, mute, active, why):
+    cfg = _intervals(defs, db={"mute_time_intervals": mute, "active_time_intervals": active})
+    found = _by("route-always-muted", cfg)
+    assert list(found) == ["route.routes[0]"]
+    assert why in found["route.routes[0]"]
+
+
+@pytest.mark.parametrize("defs,mute,active", [
+    ({"nights": [{"times": [{"start_time": "00:00", "end_time": "08:00"}]}]}, ["nights"], []),
+    ({"week": [{"weekdays": ["monday:friday"]}],
+      "sat": [{"weekdays": ["saturday"], "location": "Europe/Berlin"}],
+      "sun": [{"weekdays": ["sunday"]}]}, ["week", "sat", "sun"], []),  # zones differ
+    ({"office": [{"weekdays": ["monday:friday"]}],
+      "nights": [{"times": [{"start_time": "00:00", "end_time": "08:00"}]}]},
+     ["nights"], ["office"]),
+])
+def test_route_not_always_muted(today, defs, mute, active):
+    cfg = _intervals(defs, db={"mute_time_intervals": mute, "active_time_intervals": active})
+    assert _by("route-always-muted", cfg) == {}
+
+
+# ── notification templates ───────────────────────────────────────────
+
+# Cases from Go's text/template/parse tests (parse_test.go): the text, and None if Go parses
+# it, or a piece of the error Go gives.
+GO_TEMPLATE_CASES = [
+    ("", None), ("{{/*\n\n\n*/}}", None), ("{{.X}}", None), ("{{printf}}", None), ("{{$}}", None),
+    ("{{with $x := 3}}{{$x 23}}{{end}}", None), ("{{$.I}}", None), ("{{printf `%d` 23}}", None),
+    ("{{.X|.Y}}", None), ("{{$x := .X|.Y}}", None), ("{{.X (.Y .Z) (.A | .B .C) (.E)}}", None),
+    ("{{(.Y .Z).Field}}", None), ("{{if .X}}true{{else if .Y}}false{{end}}", None),
+    ("{{range $x, $y := .SI}}{{.}}{{end}}", None), ("{{range .SI}}{{.}}{{break}}{{end}}", None),
+    ("{{range .SI 1 -3.2i true false 'a' nil}}{{end}}", None), ("{{template `x` .Y}}", None),
+    ("{{with .X}}hello{{else with .Y}}goodbye{{end}}", None), ("x \r\n\t{{- 3 -}}\n\n\ty", None),
+    ("{{/* hi */ -}}\n\n\ty", None), ('{{block "foo" .}}hello{{end}}', None),
+    ("{{ $x \n := \n 1 \n }}", None), ("{{range $x = 0}}{{$x}}{{end}}", None),
+    ("{{$x:=.}}{{$x +2}}", None),
+    ("{{}}", "missing value for command"), ("hello{{range", "unclosed action"),
+    ("{{end}}", "unexpected {{end}}"), ("{{else}}", "unexpected {{else}}"),
+    ("{{if .X}}1{{else}}2{{else}}3{{end}}", "expected end; found {{else}}"),
+    ("hello{{range .x}}", "unexpected EOF"), ("hello{{undefined}}", 'function "undefined"'),
+    ("{{$x}}", 'undefined variable "$x"'), ("{{with $x := 4}}{{end}}{{$x}}", "undefined variable"),
+    ("{{template .X}}", "in template clause"), ("{{printf 3, 4}}", 'unexpected "," in operand'),
+    ("{{with $v, $u := 3}}{{end}}", "too many declarations in with"),
+    ("{{range $u, $v, $w := 3}}{{end}}", "too many declarations in range"),
+    ("{{printf (printf .).}}", "in operand"), ("{{printf 3`x`}}", "in operand"),
+    ("{{if .X}}a{{else if .Y}}b{{end}}{{end}}", "unexpected {{end}}"),
+    ("{{range .}}{{end}} {{break}}", "{{break}} outside {{range}}"),
+    ("{{range .}}{{else}}{{continue}}{{end}}", "{{continue}} outside {{range}}"),
+    ("{{$x:=.}}{{$x!2}}", "bad character U+0021 '!'"), ("{{true.E}}", "unexpected . after term"),
+    ("{{12|.}}", "non executable command in pipeline stage 2"),
+    ('{{block "foo"}}hello{{end}}', "missing value for block clause"),
+    ("{{/*}}", "unclosed comment"), ("{{.X (1 2 3}}", "unclosed left paren"),
+    ("{{.X 1 2 3 ) }}", "unexpected right paren"), ("{{a#}}", "'#'"),
+    ("{{'a}}", "unterminated character constant"), ('{{"a}}', "unterminated quoted string"),
+    ("{{`a}}", "unterminated raw quoted string"), ("{{0xi}}", "bad number syntax"),
+    ("{{define `a`}}a{{end}}{{define `a`}}b{{end}}", "multiple definition of template"),
+    ("{{range $k, .}}{{end}}", "range can only initialize variables"),
+]
+
+
+@pytest.mark.parametrize("text,error", GO_TEMPLATE_CASES)
+def test_go_template_parser_matches_go(text, error):
+    from amlint.gotemplate import parse
+    parsed = parse(text, {"printf", "contains"})
+    if error is None:
+        assert parsed.error is None, parsed.error.message
+    else:
+        assert parsed.error is not None and error in parsed.error.message
+
+
+def test_go_template_lines_and_names():
+    from amlint.gotemplate import line_of, parse
+    parsed = parse("line1\n{{define `x`}}line2\n{{", set())
+    assert parsed.error.message == "unclosed action" and line_of("line1\n{{define `x`}}line2\n{{",
+                                                                  parsed.error.pos) == 3
+    parsed = parse('{{ define "a" }}{{ template "b" . }}{{ end }}{{ block "c" . }}x{{ end }}',
+                   set())
+    assert set(parsed.defines) == {"a", "c"}
+    assert [n for n, _ in parsed.calls] == ["b", "c"]
+
+
+def _slack(**fields):
+    return {"route": {"receiver": "r"}, "receivers": [
+        {"name": "r", "slack_configs": [dict({"api_url_file": "/s", "channel": "#a"}, **fields)]}]}
+
+
+def _tpl(cfg, **kwargs):
+    return {f.where: (f.code, f.msg) for f in lint(cfg, **kwargs)
+            if "template" in f.code and f.code != "template-file-missing"}
+
+
+def test_bad_template_in_a_field():
+    found = _tpl(_slack(title="[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }",
+                        text="{{ range .Alerts }}\n  {{ .Labels.x | toUpperCase }}\n{{ end }}"))
+    code, msg = found["receivers[r].slack_configs[0].title"]
+    assert code == "bad-template"
+    assert 'unexpected "}" in operand' in msg and "Slack still sends the message" in msg
+    code, msg = found["receivers[r].slack_configs[0].text"]
+    assert 'line 2 of the text: function "toUpperCase" not defined' in msg
+    cfg = _slack()
+    cfg["receivers"][0]["email_configs"] = [{"to": "a@b.c", "html": "{{ if .X }}"}]
+    code, msg = _tpl(cfg)["receivers[r].email_configs[0].html"]
+    assert "unexpected EOF" in msg and "the notification fails and isn't sent" in msg
+
+
+def test_bad_template_in_a_webhook_url():
+    cfg = {"route": {"receiver": "r"}, "receivers": [{"name": "r", "webhook_configs": [
+        {"url": "https://hooks.internal/{{ .GroupLabels.team | toLower }}"}]}]}
+    code, msg = _tpl(cfg)["receivers[r].webhook_configs[0].url"]
+    assert 'function "toLower" not defined' in msg
+    assert "Alertmanager 0.31 and later parse it when they load the config" in msg
+
+
+def test_templates_that_parse_are_quiet():
+    cfg = _slack(
+        title='[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}'
+              '{{ end }}] {{ .CommonLabels.alertname }}',
+        text='{{ range .Alerts }}*{{ .Labels.severity }}* {{ .Annotations.summary }} '
+             '{{ .StartsAt.Format "15:04" }} {{ $.ExternalURL }}{{ end }}'
+             '{{ range .CommonLabels.SortedPairs }}{{ .Name }}={{ .Value }}{{ end }}'
+             '{{ template "slack.default.footer" . }}',
+        fields=[{"title": "{{ .GroupLabels.alertname }}", "value": "{{ .CommonLabels.missing }}"}],
+    )
+    assert _tpl(cfg) == {}
+
+
+def _project(tmp_path, files, cfg):
+    (tmp_path / "templates").mkdir()
+    for name, text in files.items():
+        (tmp_path / "templates" / name).write_text(text)
+    cfg = dict(cfg, templates=["templates/*.tmpl"])
+    return cfg, str(tmp_path)
+
+
+def test_undefined_template(tmp_path):
+    cfg, base = _project(tmp_path, {
+        "slack.tmpl": '{{ define "slack.myorg.title" }}{{ .Status }}{{ end }}\n'
+                      '{{ define "slack.myorg.text" }}{{ template "slack.myorg.row" . }}{{ end }}',
+    }, _slack(title='{{ template "slack.myorg.titel" . }}',
+              text='{{ template "slack.myorg.text" . }}{{ template "slack.default.text" . }}'))
+    found = _tpl(cfg, basedir=base)
+    code, msg = found["receivers[r].slack_configs[0].title"]
+    assert code == "undefined-template"
+    assert 'calls template "slack.myorg.titel"' in msg
+    assert '(did you mean "slack.myorg.title"?)' in msg
+    code, msg = found["templates[0]"]
+    assert code == "undefined-template"
+    assert 'Template file templates/slack.tmpl, line 2, calls template "slack.myorg.row"' in msg
+    assert "receivers[r].slack_configs[0].text" not in found
+
+
+def test_undefined_template_needs_every_file(tmp_path):
+    cfg = _slack(title='{{ template "mine" . }}')
+    assert "receivers[r].slack_configs[0].title" in _tpl(cfg)  # no templates: at all
+    cfg["templates"] = ["/etc/alertmanager/templates/*.tmpl"]
+    assert _tpl(cfg, basedir=str(tmp_path)) == {}
+    cfg["templates"] = ["templates/*.tmpl"]
+    assert _tpl(cfg) == {}  # stdin: nothing to read relative paths against
+
+
+def test_bad_template_file(tmp_path):
+    cfg, base = _project(tmp_path, {
+        "a.tmpl": '{{ define "a" }}\n  {{ .Status | toUpperCase }}\n{{ end }}',
+        "b.tmpl": '{{ define "b" }}x{{ end }}{{ define "b" }}y{{ end }}',
+    }, _slack(title='{{ template "c" . }}'))
+    found = {}
+    for f in lint(cfg, basedir=base):
+        found.setdefault(f.code, []).append(f.msg)
+    assert found["bad-template-file"] == [
+        'Template file templates/a.tmpl, line 2: function "toUpperCase" not defined. '
+        "Alertmanager refuses to load this config.",
+        'Template file templates/b.tmpl, line 1: template: multiple definition of template "b". '
+        "Alertmanager refuses to load this config.",
+    ]
+    assert "undefined-template" not in found  # what a broken file defines is unknown
+
+
+def test_template_unknown_field_in_a_field():
+    found = _tpl(_slack(
+        title="{{ .Labels.alertname }}",
+        text="{{ range .Alerts }}{{ .Annotations.summary }} in {{ .CommonLabels.cluster }}"
+             "{{ end }}{{ .Commonlabels.x }}{{ .Alerts.Labels }}{{ .Status.Foo }}"))
+    code, msg = found["receivers[r].slack_configs[0].title"]
+    assert code == "template-unknown-field"
+    assert ".Labels on the notification data, which has no field Labels" in msg
+    assert "use .CommonLabels" in msg
+    assert '"can\'t evaluate field Labels in type *template.Data"' in msg
+    text = [f.msg for f in lint(_slack(text=(
+        "{{ range .Alerts }}{{ .Annotations.summary }} in {{ .CommonLabels.cluster }}"
+        "{{ end }}{{ .Commonlabels.x }}{{ .Alerts.Labels }}{{ .Status.Foo }}")))
+        if f.code == "template-unknown-field"]
+    assert len(text) == 4
+    assert "use $.CommonLabels" in text[0]
+    assert "(did you mean .CommonLabels?)" in text[1]
+    assert ".Labels on the list of alerts" in text[2]
+    assert ".Foo on a string" in text[3]
+
+
+def test_template_unknown_field_follows_calls(tmp_path):
+    cfg, base = _project(tmp_path, {"t.tmpl": (
+        '{{ define "text" }}{{ range .Alerts }}{{ template "row" . }}{{ end }}'
+        "{{ .Labels.x }}{{ end }}\n"
+        '{{ define "row" }}{{ .Labels.severity }} {{ .Receiver }}{{ end }}\n'
+        '{{ define "unused" }}{{ .Whatever }}{{ end }}\n'
+        '{{ define "both" }}{{ .Labels.x }}{{ end }}\n'
+    )}, _slack(text='{{ template "text" . }}{{ template "both" . }}'
+                    '{{ range .Alerts }}{{ template "both" . }}{{ end }}'))
+    msgs = sorted(f.msg for f in lint(cfg, basedir=base) if f.code == "template-unknown-field")
+    assert len(msgs) == 2
+    assert 'line 1, in "text": .Labels on the notification data' in msgs[0]
+    assert 'line 2, in "row": .Receiver on one alert' in msgs[1]
+    assert "The template runs on one alert here" in msgs[1]
+
+
+def test_templates_in_kubernetes_inputs(tmp_path, capsys):
+    secret = """\
+apiVersion: v1
+kind: Secret
+metadata: {name: alertmanager-main}
+stringData:
+  slack.tmpl: |
+    {{ define "slack.title" }}{{ .Labels.alertname }}{{ end }}
+  alertmanager.yaml: |
+    templates: [/etc/alertmanager/config/*.tmpl]
+    route: {receiver: r}
+    receivers:
+      - name: r
+        slack_configs:
+          - {api_url_file: /s, channel: '#a', title: '{{ template "slack.titel" . }}'}
+"""
+    path = tmp_path / "secret.yml"
+    path.write_text(secret)
+    main(["check", "--format", "json", str(path)])
+    found = {f["code"]: f["message"] for f in json.loads(capsys.readouterr().out)}
+    assert 'calls template "slack.titel"' in found["undefined-template"]
+    assert "slack.tmpl in the Secret" not in found.get("undefined-template", "")
+    mimir = """\
+template_files:
+  t.tmpl: '{{ define "t" }}{{ end }'
+alertmanager_config: |
+  route: {receiver: r}
+  receivers: [{name: r}]
+"""
+    path.write_text(mimir)
+    main(["check", "--format", "json", str(path)])
+    found = {f["code"]: f["message"] for f in json.loads(capsys.readouterr().out)}
+    assert found["bad-template-file"].startswith("Template file t.tmpl in template_files, line 1")
+
+
+def test_no_template_checks_with_helm_tpl_config(tmp_path, capsys):
+    values = """\
+alertmanager:
+  tplConfig: true
+  config:
+    route: {receiver: r}
+    receivers:
+      - name: r
+        slack_configs:
+          - api_url_file: /s
+            channel: '{{ .Values.channel | quote }}'
+            title: '{{ "{{" }} .CommonLabels.alertname {{ "}}" }}'
+"""
+    path = tmp_path / "values.yml"
+    path.write_text(values)
+    main(["check", "--format", "json", str(path)])
+    assert not [f for f in json.loads(capsys.readouterr().out) if "template" in f["code"]]
+    path.write_text(values.replace("  tplConfig: true\n", ""))
+    main(["check", "--format", "json", str(path)])
+    assert "bad-template" in {f["code"] for f in json.loads(capsys.readouterr().out)}
+
+
+def test_bad_regex_null_match_re_value():
+    """`match_re: {label: }` leaves Go's Regexp nil: Alertmanager rejects the config
+    ("invalid regexp value"), so amlint fix must not turn it into =~"" either."""
+    cfg = {"route": {"receiver": "a", "routes": [
+        {"match_re": {"team": None}, "receiver": "a"}]},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_match_re": {"sev": None}, "target_matchers": ["x=y"]}]}
+    found = {f.where: f.msg for f in lint(cfg) if f.code == "bad-regex"}
+    assert "match_re value for 'team' is empty (null)" in found["route.routes[0]"]
+    assert "source_match_re value for 'sev'" in found["inhibit_rules[0]"]
+    text = "route:\n  receiver: a\n  routes:\n    - match_re:\n        team:\n      receiver: a\n" \
+           "receivers:\n  - name: a\n"
+    new, fixed, left = _fix(text)
+    assert new == text and left == ["route.routes[0].match_re"]
+
+
+@pytest.mark.parametrize("section,field,value,secret", [
+    ("discord_configs", "webhook_url", "http://localhost/discord", False),
+    ("discord_configs", "webhook_url",
+     "https://discord.com/api/webhooks/1234567890/AbCdEf-GhIjKl0123", True),
+    ("msteams_configs", "webhook_url", "http://localhost/msteams", False),
+    ("mattermost_configs", "webhook_url",
+     "https://chat.acme.io/hooks/xg7n4k2pq9fbtrw3m8yd5ehz1a", True),
+    ("slack_configs", "api_url", "https://hooks.slack.com/services/TOKEN", False),
+    ("slack_configs", "api_url", "https://hooks.slack.com/services/x/x/x", False),
+    ("telegram_configs", "bot_token", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", False),
+])
+def test_plaintext_secret_webhook_fields(section, field, value, secret):
+    """Seen in public configs: local test URLs, Slack URLs with a word for the token, and
+    the bot token from Telegram's docs are examples."""
+    cfg = _receiver(**{section: [{field: value, "channel": "#x", "chat_id": 1}]})
+    assert bool(_secrets(cfg)) is secret

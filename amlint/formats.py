@@ -22,14 +22,14 @@ import binascii
 import copy
 import gzip
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import yaml
 from yaml.constructor import SafeConstructor
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
-from .goyaml import AlertmanagerLoader, keep_strings
+from .goyaml import AlertmanagerLoader, keep_interval_strings, keep_strings
 from .linter import (
     _parse_duration,
     _scalar,
@@ -98,6 +98,24 @@ class BundledTemplates:
     names: List[str]
     directory: Optional[str]  # where Alertmanager reads them; None: `templates:` isn't checked
     source: str               # where they are, for messages
+    files: Dict[str, str] = field(default_factory=dict)  # name -> text, where amlint can read it
+    all_loaded: bool = False  # every file is loaded, whatever `templates:` says (Mimir)
+
+
+def _texts(entries, encoded: bool) -> Dict[str, str]:
+    """The text of each string value of a mapping, base64-decoded if `encoded`; values that
+    can't be read are left out."""
+    out: Dict[str, str] = {}
+    for key, value in (entries.items() if isinstance(entries, dict) else ()):
+        if not isinstance(value, str):
+            continue
+        if encoded:
+            try:
+                value = base64.b64decode("".join(value.split()), validate=True).decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError):
+                continue
+        out[str(key)] = value
+    return out
 
 
 # Regions: where a part of the config came from. Each maps a path in its own config to a
@@ -254,6 +272,12 @@ class Loaded:
         # (code, where) of findings about what the operator adds, such as the continue: true
         # on a resource's route when it is the last one
         self.by_design = by_design or set()
+        # the config is kept where plain-text secrets belong (a Kubernetes Secret, the
+        # operator's resources), or where *_file fields can't be used (Mimir rejects them)
+        self.secrets_ok = False
+        # Helm renders the config with tpl first, so {{ }} in it may be Helm's, not
+        # Alertmanager's: notification templates in it aren't checked
+        self.helm_tpl = False
         self._region = region
 
     def locate(self, where: str) -> Position:
@@ -276,7 +300,9 @@ def apply_locations(findings: list, loaded: Loaded) -> list:
     nor of two rules of one namespace muting each other."""
     for f in findings:
         f.line, f.col = loaded.locate(f.where)
-    findings = [f for f in findings if (f.code, f.where) not in loaded.by_design]
+    findings = [f for f in findings if (f.code, f.where) not in loaded.by_design
+                and not (loaded.secrets_ok and f.code == "plaintext-secret")
+                and not (loaded.helm_tpl and f.code in ("bad-template", "undefined-template"))]
     if loaded.uninjected is not None:
         without = {(f.code, f.where, f.msg) for check in (check_dead_inhibitions,
                    check_circular_inhibition) for f in check(loaded.uninjected)}
@@ -288,7 +314,7 @@ def apply_locations(findings: list, loaded: Loaded) -> list:
 # Reading YAML
 
 def _construct(node: Node):
-    return SafeConstructor().construct_document(node)
+    return SafeConstructor().construct_document(keep_interval_strings(node))
 
 
 def _construct_config(node: Node):
@@ -485,8 +511,13 @@ def load_input(text: str, input_format: Optional[str] = None,
     if not crs:
         cfg, region, templates = _read_base(base, text, outer, notes, comments, problems)
         _no_route_cycle(cfg.get("route"), "route")
-        return Loaded(cfg, base.cls, region, comments, problems, templates, notes)
-    return _operator(text, docs, crs, base, matcher_strategy, outer, notes, comments, problems)
+        loaded = Loaded(cfg, base.cls, region, comments, problems, templates, notes)
+        loaded.secrets_ok = base.cls == "mimir" or base.kind == "Secret"
+        loaded.helm_tpl = base.cls == "helm" and base.get("alertmanager", "tplConfig") is True
+        return loaded
+    loaded = _operator(text, docs, crs, base, matcher_strategy, outer, notes, comments, problems)
+    loaded.secrets_ok = True
+    return loaded
 
 
 def _no_route_cycle(route, path: str, what: str = "") -> None:
@@ -530,7 +561,8 @@ def _read_base(doc: _Doc, text: str, outer: Suppressions, notes: List[Note],
     # Mimir loads every template_files entry, whatever `templates:` says, and rejects
     # `templates:` entries with a path, so they aren't checked against files.
     names = sorted(str(k) for k in files) if isinstance(files, dict) else []
-    return cfg, region, BundledTemplates(names, None, "template_files")
+    return cfg, region, BundledTemplates(names, None, "template_files", _texts(files, False),
+                                         all_loaded=True)
 
 
 def _block_shift(node: Node, key_node: Optional[Node], text: str) -> Optional[Tuple[int, int]]:
@@ -607,12 +639,15 @@ def _read_secret(doc: _Doc, text: str, outer: Suppressions, comments: list, prob
     names = sorted({str(k) for s in ("data", "stringData", "binaryData")
                     for k in (doc.get(s) if isinstance(doc.get(s), dict) else {})
                     if str(k) not in _CONFIG_KEYS + (_GZIP_KEY,)})
+    texts = _texts(doc.get("binaryData"), True)
+    texts.update(_texts(doc.get("data"), doc.kind == "Secret"))
+    texts.update(_texts(doc.get("stringData"), False))  # wins over data, as in the API server
     if doc.kind == "Secret":
         # The operator mounts the Secret's keys in /etc/alertmanager/config. The config itself
         # is read from config_out, so only absolute paths into that directory are checked.
-        templates = BundledTemplates(names, _CONFIG_DIR, "the Secret")
+        templates = BundledTemplates(names, _CONFIG_DIR, "the Secret", texts)
     else:
-        templates = BundledTemplates(names, None, "the ConfigMap")
+        templates = BundledTemplates(names, None, "the ConfigMap", texts)
     return cfg, region, templates
 
 
@@ -636,7 +671,8 @@ def _read_helm(doc: _Doc, text: str, outer: Suppressions, notes: List[Note],
     _, am_node = _get(doc.node, "alertmanager")
     files = am.get("templateFiles")
     names = sorted(str(k) for k in files) if isinstance(files, dict) else []
-    templates = BundledTemplates(names, _CONFIG_DIR, "alertmanager.templateFiles")
+    templates = BundledTemplates(names, _CONFIG_DIR, "alertmanager.templateFiles",
+                                 _texts(files, False))
     tpl = am.get("tplConfig") is True
     string_config = am.get("stringConfig")
     config = am.get("config")
@@ -950,8 +986,9 @@ def _operator(text: str, docs: List[_Doc], crs_docs: List[_Doc], base: Optional[
     receivers = list(cfg["receivers"]) if isinstance(cfg.get("receivers"), list) else []
     rules = list(cfg.get("inhibit_rules")) if isinstance(cfg.get("inhibit_rules"), list) else []
     raw_rules = list(rules)  # the same, without the namespace matcher
-    intervals = list(cfg.get("mute_time_intervals")) \
-        if isinstance(cfg.get("mute_time_intervals"), list) else []
+    # the operator writes time_intervals:; a base config's own deprecated key stays apart
+    intervals = list(cfg.get("time_intervals")) \
+        if isinstance(cfg.get("time_intervals"), list) else []
     sub_routes: List[dict] = []
     by_design = set()
 
@@ -992,8 +1029,8 @@ def _operator(text: str, docs: List[_Doc], crs_docs: List[_Doc], base: Optional[
         for j, node in cr.items(cr.intervals_key):
             interval = cr.time_interval(node)
             target = f"spec.{cr.intervals_key}[{j}]"
-            merged.add(f"mute_time_intervals[{len(intervals)}]", cr_region, target, camel=True)
-            merged.add(f"mute_time_intervals[{interval['name']}]", cr_region, target, camel=True)
+            merged.add(f"time_intervals[{len(intervals)}]", cr_region, target, camel=True)
+            merged.add(f"time_intervals[{interval['name']}]", cr_region, target, camel=True)
             intervals.append(interval)
 
     # The resources' routes go first; with continue: true, alerts fall through to the base's.
@@ -1002,7 +1039,7 @@ def _operator(text: str, docs: List[_Doc], crs_docs: List[_Doc], base: Optional[
     route["routes"] = sub_routes + base_routes
     cfg = dict(cfg, route=route, receivers=receivers)
     if intervals:
-        cfg["mute_time_intervals"] = intervals
+        cfg["time_intervals"] = intervals
     uninjected = None
     if rules:
         cfg["inhibit_rules"] = rules
@@ -1041,7 +1078,7 @@ def _global_base(cr: _CR, am: _Doc, outer: Suppressions) -> Tuple[dict, _Region]
         cfg["inhibit_rules"] = rules
     intervals = [cr.time_interval(node) for _, node in cr.items(cr.intervals_key)]
     if intervals:
-        cfg["mute_time_intervals"] = intervals
+        cfg["time_intervals"] = intervals
     templates = []
     for item in (settings.get("templates") or []) if isinstance(settings, dict) else []:
         for kind in ("configMap", "secret"):

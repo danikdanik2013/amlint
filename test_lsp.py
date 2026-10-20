@@ -803,7 +803,10 @@ def _fix(client, uri, text, code):
     diags = [d for d in client.open(uri, text) if d.get("code") == code]
     assert diags, code
     [preferred] = [a for a in _fix_actions(client, uri, diags) if a.get("isPreferred")]
-    for edit in preferred["edit"]["changes"][uri]:
+    # the edits' positions are all in the original text: apply the last one first
+    edits = sorted(preferred["edit"]["changes"][uri], reverse=True,
+                   key=lambda e: (e["range"]["start"]["line"], e["range"]["start"]["character"]))
+    for edit in edits:
         text = _apply(text, edit)
     return preferred["title"], text
 
@@ -845,3 +848,33 @@ def test_no_continue_fix_when_it_starts_the_route(lsp, tmp_path):
     diags = [d for d in client.open(uri, text) if d.get("code") == "useless-continue"]
     titles = [a["title"] for a in _fix_actions(client, uri, diags)]
     assert titles and not any(t.startswith("Remove") for t in titles)
+
+
+def test_quick_fix_rewrites_deprecated_match(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = CONFIG.replace('    - matchers: [team="db"]\n',
+                          '    - match:\n        team: db   # the db team\n')
+    title, fixed = _fix(client, uri, text, "deprecated-match")
+    assert title == "Rewrite as matchers:"
+    assert fixed == CONFIG.replace('    - matchers: [team="db"]\n',
+                                   '    - matchers:\n        - team="db"  # the db team\n')
+
+
+def test_quick_fix_rewrites_an_inhibit_rule_and_the_interval_list(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = CONFIG + (
+        "inhibit_rules:\n"
+        "  - source_match: {severity: critical}\n"
+        "    target_matchers: [severity=\"warning\"]\n"
+        "    equal: [team]\n"
+        "mute_time_intervals:\n"
+        "  - name: nights\n"
+    )
+    title, fixed = _fix(client, uri, text, "deprecated-match")
+    assert title == "Rewrite as source_matchers:"
+    assert '  - source_matchers: [severity="critical"]\n' in fixed
+    title, fixed = _fix(client, uri, fixed, "deprecated-mute-time-intervals")
+    assert title == "Rename to time_intervals:"
+    assert fixed.endswith("time_intervals:\n  - name: nights\n")

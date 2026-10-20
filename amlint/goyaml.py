@@ -21,6 +21,11 @@ _STRING_LISTS = {side + "matchers" for side in ("", "source_", "target_")} | {
     "group_by", "equal", "mute_time_intervals", "active_time_intervals",
 }
 _STRING_VALUES = {"receiver", "name"}
+# Time interval fields, also in AlertmanagerConfig resources. Go's yaml.v2 has no base-60 ints,
+# so Alertmanager, Helm and the Kubernetes API server all read an unquoted 17:00 or 1:5 as
+# text, where PyYAML reads 1020 and 65.
+_INTERVAL_LISTS = {"weekdays", "days_of_month", "daysOfMonth", "months", "years"}
+_INTERVAL_VALUES = {"start_time", "end_time", "startTime", "endTime", "location"}
 
 
 def _as_text(node: yaml.Node) -> None:
@@ -28,32 +33,40 @@ def _as_text(node: yaml.Node) -> None:
         node.tag = _STR
 
 
-def _retag(node: yaml.Node, seen: set) -> None:
+def _retag(node: yaml.Node, seen: set, maps: set, lists: set, values: set) -> None:
     if id(node) in seen:
         return
     seen.add(id(node))
     if isinstance(node, yaml.MappingNode):
         for key, value in node.value:
             name = key.value if isinstance(key, yaml.ScalarNode) else None
-            if name in _STRING_MAPS and isinstance(value, yaml.MappingNode):
+            if name in maps and isinstance(value, yaml.MappingNode):
                 for k, v in value.value:
                     _as_text(k)
                     _as_text(v)
-            elif name in _STRING_LISTS and isinstance(value, yaml.SequenceNode):
+            elif name in lists and isinstance(value, yaml.SequenceNode):
                 for item in value.value:
                     _as_text(item)
-            elif name in _STRING_VALUES:
+            elif name in values:
                 _as_text(value)
-            _retag(value, seen)
+            _retag(value, seen, maps, lists, values)
     elif isinstance(node, yaml.SequenceNode):
         for item in node.value:
-            _retag(item, seen)
+            _retag(item, seen, maps, lists, values)
 
 
 def keep_strings(node: yaml.Node) -> yaml.Node:
     """Retag a composed document so that constructing it keeps the text of the scalars
     Alertmanager reads as strings. Returns the node."""
-    _retag(node, set())
+    _retag(node, set(), _STRING_MAPS, _STRING_LISTS | _INTERVAL_LISTS,
+           _STRING_VALUES | _INTERVAL_VALUES)
+    return node
+
+
+def keep_interval_strings(node: yaml.Node) -> yaml.Node:
+    """Retag only the time interval fields, for YAML that Helm or the Kubernetes API server
+    types before the config reaches Alertmanager. Returns the node."""
+    _retag(node, set(), set(), _INTERVAL_LISTS, _INTERVAL_VALUES)
     return node
 
 

@@ -22,6 +22,7 @@ amlint route alertmanager.yml team=db severity=critical   # where does this aler
 amlint route alertmanager.yml alertname=DiskFull --firing alertname=NodeDown   # is it inhibited?
 amlint test alertmanager.yml tests.yml                # routing unit tests
 amlint diff old.yml new.yml                           # what a change does to routing
+amlint fix alertmanager.yml                           # rewrite deprecated match:/source_match: syntax
 amlint tree alertmanager.yml                          # print the route tree
 amlint tree alertmanager.yml --format mermaid         # the route tree as a Mermaid flowchart
 amlint explain <check-code>                           # what a finding means and how to fix it
@@ -35,7 +36,7 @@ Output formats: text (default), `--format json`, `--format sarif` (GitHub Code S
 
 - [Overview](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/index.md): what amlint is, what it catches, and how it compares to amtool
 - [Install](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/install.md): pip, Docker, Homebrew, pre-commit, shell completions
-- [Usage](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/usage.md): every command and flag (check, route, test, diff, tree, explain, list, init), project config and inline suppressions
+- [Usage](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/usage.md): every command and flag (check, route, test, diff, tree, fix, explain, list, init), project config and inline suppressions
 - [Editors](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/editors.md): findings as you type and hover on routes in VS Code, Neovim and Helix, via `amlint lsp`
 - [Kubernetes, Helm and Mimir](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/kubernetes.md): the input formats amlint detects and how AlertmanagerConfig resources are merged
 - [GitHub Action](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/github-action.md): inputs, PR annotations, SARIF and the routing-diff PR comment
@@ -46,7 +47,8 @@ Output formats: text (default), `--format json`, `--format sarif` (GitHub Code S
 - [Routing checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/routing.md): unreachable, shadowed and colliding routes, matcher and regex problems
 - [Receiver checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/receivers.md): empty, unused and duplicate receivers and missing integration fields
 - [Inhibition checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/inhibition.md): inhibit rules without `equal`, circular and self-matching rules
-- [Timing checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/timing.md): group_wait, group_interval and repeat_interval problems
+- [Timing checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/timing.md): group_wait, group_interval and repeat_interval problems, and time intervals that are invalid, never active, or mute a route all the time
+- [Template checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/templates.md): notification templates that don't parse, call templates nothing defines, or read fields the data doesn't have
 - [Prometheus rules checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/rules.md): `--rules` cross-check against alerting rules
 
 ## Optional

@@ -539,3 +539,50 @@ route:
         - component="disk"
       receiver: db-pager
 ```
+
+---
+
+## deprecated-match
+
+**Level:** info · **amtool:** doesn't catch it
+
+**What goes wrong:** A route uses `match:` or `match_re:`, or an inhibition rule uses
+`source_match:`, `target_match:` or their `_re` forms. Alertmanager 0.22 replaced these keys
+with `matchers:`, `source_matchers:` and `target_matchers:`, and its docs mark the old ones
+as deprecated.
+
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - match:
+        team: db
+      match_re:
+        service: pg-.*|mysql
+      receiver: db-pager
+inhibit_rules:
+  - source_match: {severity: critical}
+    target_match: {severity: warning}
+    equal: [alertname]
+```
+
+**What Alertmanager does:** Still reads the old keys, as `label="value"` and
+`label=~"regex"` matchers. Nothing breaks today. Only the new keys can say `!=` and `!~`, or
+take UTF-8 label names.
+
+**How to fix:** Run [`amlint fix`](../usage.md#fix), or take the quick fix in your
+[editor](../editors.md). Both write the same matchers under the new key.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - team="db"
+        - service=~"pg-.*|mysql"
+      receiver: db-pager
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname]
+```

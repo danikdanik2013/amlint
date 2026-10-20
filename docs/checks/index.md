@@ -3,10 +3,10 @@
 amlint's checks catch Alertmanager config mistakes that lose alerts, send them to the wrong
 place, or mute them when they shouldn't be.
 
-amlint has **38 checks**. `amtool check-config` also catches **20** of them: Alertmanager
+amlint has **48 checks**. `amtool check-config` also catches **22** of them: Alertmanager
 refuses to load those configs, and amlint reports them so one run covers everything. The
-other **18** are configs that amtool accepts and Alertmanager runs, just not the way you
-meant. Those are the main reason to run amlint.
+other **26** are configs that amtool accepts and Alertmanager runs, just not the way you
+meant, or not for much longer. Those are the main reason to run amlint.
 
 The three **Prometheus rules** checks run only with `amlint check --rules`, which compares
 your routes and inhibition rules with the alerts your Prometheus rule files define. See
@@ -35,6 +35,7 @@ catches it too.
 | Routing | [`stripped-brace`](routing.md#stripped-brace) | warn | | A bare matcher value ends in `}`, which Alertmanager strips off. |
 | Routing | [`useless-continue`](routing.md#useless-continue) | info | | `continue: true` on the last sibling route does nothing. |
 | Routing | [`deep-nesting`](routing.md#deep-nesting) | info | | The routing tree is more than 5 levels deep. |
+| Routing | [`deprecated-match`](routing.md#deprecated-match) | info | | A route uses `match:` or `match_re:`, or an inhibition rule `source_match:` or `target_match:`. `amlint fix` rewrites them. |
 | Receivers | [`duplicate-receiver`](receivers.md#duplicate-receiver) | error | ✓ | Two receivers share the same name. |
 | Receivers | [`email-no-smarthost`](receivers.md#email-no-smarthost) | error | ✓ | An `email_configs` entry has no `smarthost`, and `global.smtp_smarthost` isn't set. |
 | Receivers | [`webhook-no-url`](receivers.md#webhook-no-url) | error | ✓ | A `webhook_configs` entry has no `url` or `url_file`. |
@@ -48,15 +49,24 @@ catches it too.
 | Receivers | [`wechat-no-corp-id`](receivers.md#wechat-no-corp-id) | error | ✓ | A `wechat_configs` entry has no `corp_id`, and `global.wechat_api_corp_id` isn't set. |
 | Receivers | [`sns-no-target`](receivers.md#sns-no-target) | error | ✓ | An `sns_configs` entry has none of `topic_arn`, `phone_number` or `target_arn`. |
 | Receivers | [`template-file-missing`](receivers.md#template-file-missing) | error | | A relative `templates:` path matches no file next to the config (warn for a glob). |
+| Receivers | [`plaintext-secret`](receivers.md#plaintext-secret) | warn | | An API key, token, password or webhook URL with a token is written into the config; use the `_file` field. |
 | Receivers | [`empty-receiver`](receivers.md#empty-receiver) | warn | | A receiver has no integration, like `slack_configs` (info for the root route's receiver or one named like `null`). |
 | Receivers | [`unused-receiver`](receivers.md#unused-receiver) | info | | A receiver no route uses. |
 | Inhibition | [`inhibit-no-equal`](inhibition.md#inhibit-no-equal) | warn | | An inhibition rule has no `equal:` field. |
 | Inhibition | [`circular-inhibition`](inhibition.md#circular-inhibition) | warn | | Two inhibition rules can mute each other. |
 | Inhibition | [`inhibit-same-match`](inhibition.md#inhibit-same-match) | info | | The source and target side of an inhibition rule share a `label="value"`. |
+| Timing | [`bad-time-interval`](timing.md#bad-time-interval) | error | ✓ | A time interval Alertmanager can't read: a bad time, weekday, day, month, year or `location`, or a range that ends before it starts. |
 | Timing | [`undefined-time-interval`](timing.md#undefined-time-interval) | error | ✓ | `mute_time_intervals` or `active_time_intervals` names an interval that isn't defined. |
 | Timing | [`repeat-before-group`](timing.md#repeat-before-group) | warn | | `repeat_interval` is shorter than `group_interval`. |
+| Timing | [`time-interval-never-active`](timing.md#time-interval-never-active) | warn | | A time interval a route uses never matches, for example because its years are over. |
+| Timing | [`route-always-muted`](timing.md#route-always-muted) | warn | | A route's mute and active time intervals leave no time to send. |
 | Timing | [`wait-exceeds-interval`](timing.md#wait-exceeds-interval) | warn | | `group_wait` is longer than `group_interval`. |
 | Timing | [`global-resolve-timeout-missing`](timing.md#global-resolve-timeout-missing) | info | | `global.resolve_timeout` isn't set, so Alertmanager uses its default of `5m`. |
+| Timing | [`deprecated-mute-time-intervals`](timing.md#deprecated-mute-time-intervals) | info | | The top-level list is called `mute_time_intervals:`, not `time_intervals:`. `amlint fix` renames it. |
+| Templates | [`bad-template-file`](templates.md#bad-template-file) | error | ✓ | A template file under `templates:` isn't a valid Go template. |
+| Templates | [`bad-template`](templates.md#bad-template) | error | | The template text in a notifier field, such as Slack's `title:`, doesn't parse. |
+| Templates | [`undefined-template`](templates.md#undefined-template) | error | | `{{ template "name" }}` calls a template nothing defines. |
+| Templates | [`template-unknown-field`](templates.md#template-unknown-field) | error | | A template reads a field the data doesn't have, such as `.Labels` outside `{{ range .Alerts }}`. |
 | Prometheus rules | [`route-unknown-alertname`](rules.md#route-unknown-alertname) | warn | | With `--rules`: a route matches an `alertname` no alerting rule produces. |
 | Prometheus rules | [`inhibit-unknown-alertname`](rules.md#inhibit-unknown-alertname) | warn | | With `--rules`: an inhibition rule's source or target matches an `alertname` no alerting rule produces. |
 | Prometheus rules | [`alert-hits-default-receiver`](rules.md#alert-hits-default-receiver) | info | | With `--rules`: alerts match no child route, by their static labels, and go to the root route's receiver. |

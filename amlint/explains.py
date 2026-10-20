@@ -30,6 +30,8 @@ ALSO_CAUGHT_BY_AMTOOL = {
     "victorops-no-api-key",
     "wechat-no-corp-id",
     "sns-no-target",
+    "bad-time-interval",
+    "bad-template-file",
 }
 
 # The docs page (docs/checks/<page>.md) with a section for each check, headed by its code.
@@ -38,18 +40,23 @@ _DOCS_PAGES = {
         "no-root-route", "invalid-root-route", "undefined-receiver", "groupby-ellipsis",
         "bad-regex", "bad-matcher", "bad-match-label", "unreachable-route",
         "route-match-collision", "shadowed-route", "stripped-brace", "useless-continue",
-        "deep-nesting",
+        "deep-nesting", "deprecated-match",
     ),
     "receivers": (
         "duplicate-receiver", "empty-receiver", "unused-receiver", "template-file-missing",
         "email-no-smarthost", "webhook-no-url", "pagerduty-no-routing-key", "slack-no-api-url",
         "opsgenie-no-api-key", "msteams-no-webhook-url", "telegram-no-bot-token",
         "discord-no-webhook-url", "victorops-no-api-key", "wechat-no-corp-id", "sns-no-target",
+        "plaintext-secret",
     ),
     "inhibition": ("inhibit-no-equal", "circular-inhibition", "inhibit-same-match"),
     "timing": (
         "repeat-before-group", "wait-exceeds-interval", "undefined-time-interval",
-        "global-resolve-timeout-missing",
+        "global-resolve-timeout-missing", "deprecated-mute-time-intervals", "bad-time-interval",
+        "time-interval-never-active", "route-always-muted",
+    ),
+    "templates": (
+        "bad-template-file", "bad-template", "undefined-template", "template-unknown-field",
     ),
     "rules": (
         "route-unknown-alertname", "inhibit-unknown-alertname", "alert-hits-default-receiver",
@@ -1015,5 +1022,317 @@ route:
       - alert: QueueBacklog
         expr: queue_depth > 1000
         labels: {severity: critical}""",
+    },
+
+    "deprecated-match": {
+        "level": "info",
+        "amtool": (
+            "Not caught by `amtool check-config`: Alertmanager still accepts the old "
+            "spelling, so nothing is broken yet."
+        ),
+        "summary": (
+            "A route uses match: or match_re:, or an inhibit rule source_match: or"
+            " target_match: (and their _re forms), deprecated since Alertmanager 0.22."
+        ),
+        "why": (
+            "Alertmanager 0.22 replaced these keys with matchers:, source_matchers: and "
+            "target_matchers:, and its docs mark the old ones as deprecated. They still work, "
+            "so nothing breaks today, but the new keys are the only ones that can say != and "
+            "!~ or take UTF-8 label names, and mixing both styles makes a config harder to "
+            "read. `amlint fix` rewrites them for you, and so does the quick fix in the editor."
+        ),
+        "bad": """\
+routes:
+  - match:
+      team: db
+    match_re:
+      service: pg-.*|mysql
+    receiver: db-pager
+inhibit_rules:
+  - source_match: {severity: critical}
+    target_match: {severity: warning}
+    equal: [alertname]""",
+        "good": """\
+routes:
+  - matchers:
+      - team="db"
+      - service=~"pg-.*|mysql"
+    receiver: db-pager
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname]""",
+    },
+
+    "deprecated-mute-time-intervals": {
+        "level": "info",
+        "amtool": (
+            "Not caught by `amtool check-config`: Alertmanager still accepts the old "
+            "spelling, so nothing is broken yet."
+        ),
+        "summary": (
+            "The top-level mute_time_intervals: list, deprecated since Alertmanager 0.24 in"
+            " favor of time_intervals:."
+        ),
+        "why": (
+            "Alertmanager 0.24 renamed the top-level list to time_intervals:, because routes "
+            "can now use an interval to mute (mute_time_intervals:) or to send only during it "
+            "(active_time_intervals:). The old name still works. A route's own "
+            "mute_time_intervals: key is not deprecated. `amlint fix` renames the list for you."
+        ),
+        "bad": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db
+      mute_time_intervals: [nights]
+mute_time_intervals:          # the old name of the list
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]""",
+        "good": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db
+      mute_time_intervals: [nights]   # this key on a route is fine
+time_intervals:
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]""",
+    },
+
+    "plaintext-secret": {
+        "level": "warn",
+        "summary": (
+            "An API key, token, password, or a webhook URL with a token in it, is written"
+            " into the config in plain text."
+        ),
+        "why": (
+            "Anyone who can read the config can use the secret: everyone with access to the "
+            "repository, CI logs, or the ConfigMap it is deployed from. Alertmanager reads "
+            "most of these from a file instead (api_url_file, routing_key_file, "
+            "password_file, ...), so the config can be reviewed and shared without the "
+            "secret. Values that only stand in for one (<secret>, ${VAR}, $(VAR), "
+            "{{ ... }}, example values such as mysecret or token123) are skipped, and so are "
+            "configs inside a Kubernetes Secret, AlertmanagerConfig resources, and Mimir "
+            "configs, which reject *_file fields."
+        ),
+        "bad": """\
+receivers:
+  - name: pager
+    pagerduty_configs:
+      - routing_key: 3f9a1c0be44d4f0d8d6c2b7e5a1f0c9d""",
+        "good": """\
+receivers:
+  - name: pager
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty-key""",
+    },
+
+    "bad-time-interval": {
+        "level": "error",
+        "summary": "A time interval Alertmanager can't read: a bad time, day, month, year or"
+                   " location, a range that ends before it starts, or a missing or repeated"
+                   " name.",
+        "why": (
+            "Alertmanager refuses to load the config, and amtool check-config rejects it too. "
+            "Times are HH:MM from 00:00 to 24:00 and start before they end; weekdays are names "
+            "(monday:friday, not friday:monday); days of the month are 1 to 31 or -1 to -31; "
+            "location is an IANA time zone such as Europe/Berlin."
+        ),
+        "bad": """\
+time_intervals:
+  - name: office-hours
+    time_intervals:
+      - weekdays: ['friday:monday']           # ranges can't wrap around
+        times: [{start_time: '17:00', end_time: '09:00'}]
+        location: Europe/Kiyv                   # not a time zone""",
+        "good": """\
+time_intervals:
+  - name: office-hours
+    time_intervals:
+      - weekdays: ['monday:friday']
+        times: [{start_time: '09:00', end_time: '17:00'}]
+        location: Europe/Kyiv""",
+    },
+
+    "time-interval-never-active": {
+        "level": "warn",
+        "summary": "A time interval a route uses is never active from today on.",
+        "why": (
+            "As mute_time_intervals it never mutes the route; as active_time_intervals it "
+            "stops the route from ever sending a notification. Typical causes: years that are "
+            "over, a date that doesn't exist (February 30), an empty list such as "
+            "weekdays: [], or an interval with no time_intervals: entries, which matches no "
+            "time at all."
+        ),
+        "bad": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      active_time_intervals: [on-call-2023]
+time_intervals:
+  - name: on-call-2023
+    time_intervals:
+      - years: ['2023']""",
+        "good": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      active_time_intervals: [on-call]
+time_intervals:
+  - name: on-call
+    time_intervals:
+      - weekdays: ['monday:friday']""",
+    },
+
+    "route-always-muted": {
+        "level": "warn",
+        "summary": "A route's time intervals leave no time to send: it is muted all the time.",
+        "why": (
+            "Alertmanager still routes alerts to it, and with no continue: true they stop "
+            "there, so they reach nobody. Usually a mute interval with no fields (it matches "
+            "every minute), mute intervals that together cover the whole week, or mute "
+            "intervals that cover every time the route's active intervals allow. Child routes "
+            "don't inherit time intervals. To drop alerts on purpose, route them to a "
+            "receiver with no integrations."
+        ),
+        "bad": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      active_time_intervals: [office-hours]   # 09:00-17:00
+      mute_time_intervals: [daytime]          # 08:00-20:00: covers all of it
+time_intervals:
+  - name: office-hours
+    time_intervals: [{times: [{start_time: '09:00', end_time: '17:00'}]}]
+  - name: daytime
+    time_intervals: [{times: [{start_time: '08:00', end_time: '20:00'}]}]""",
+        "good": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      active_time_intervals: [office-hours]
+time_intervals:
+  - name: office-hours
+    time_intervals: [{times: [{start_time: '09:00', end_time: '17:00'}]}]""",
+    },
+
+    "bad-template-file": {
+        "level": "error",
+        "summary": "A template file under templates: isn't a valid Go template.",
+        "why": (
+            "Alertmanager parses template files when it loads the config and refuses a config "
+            "whose files don't parse; amtool check-config rejects it too, when it can find "
+            "the files. amlint reads relative paths next to the config file, and the files "
+            "that ship in a Secret, Helm templateFiles or Mimir template_files."
+        ),
+        "bad": """\
+# templates/slack.tmpl
+{{ define "slack.title" }}
+  [{{ .Status | toUpperCase }}] {{ .CommonLabels.alertname }}
+{{ end }}""",
+        "good": """\
+# templates/slack.tmpl
+{{ define "slack.title" }}
+  [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
+{{ end }}""",
+    },
+
+    "bad-template": {
+        "level": "error",
+        "summary": "The template text in a notifier field (title:, text:, ...) doesn't parse.",
+        "why": (
+            "Alertmanager loads the config without looking at it. When it sends a "
+            "notification the template fails: the notification isn't sent, and Slack sends "
+            "it with this field and the fields after it empty. A webhook url with {{ is the "
+            "exception: Alertmanager 0.31 and later parse it at load time and refuse the "
+            "config."
+        ),
+        "bad": """\
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }'""",
+        "good": """\
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'""",
+    },
+
+    "undefined-template": {
+        "level": "error",
+        "summary": (
+            "{{ template \"name\" }} calls a template that no template file, and none of"
+            " Alertmanager's own, defines."
+        ),
+        "why": (
+            "Go only looks the name up when the template runs, so the config loads and "
+            "amtool check-config passes. When Alertmanager sends a notification it fails with "
+            "'no such template': the notification isn't sent, or Slack sends it with this "
+            "field empty. Usually a typo, or a file the templates: glob doesn't match. Only "
+            "checked when amlint can read every template file the config loads."
+        ),
+        "bad": """\
+templates:
+  - templates/*.tmpl        # defines "slack.myorg.title"
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '{{ template "slack.myorg.titel" . }}'""",
+        "good": """\
+templates:
+  - templates/*.tmpl
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '{{ template "slack.myorg.title" . }}'""",
+    },
+
+    "template-unknown-field": {
+        "level": "error",
+        "summary": (
+            "A template reads a field the notification data doesn't have, such as .Labels"
+            " outside {{ range .Alerts }}."
+        ),
+        "why": (
+            "The notification has .CommonLabels, .CommonAnnotations, .GroupLabels, .Status, "
+            ".Receiver, .ExternalURL and .Alerts; each alert in {{ range .Alerts }} has "
+            ".Labels, .Annotations, .StartsAt, .EndsAt, .GeneratorURL and .Fingerprint. "
+            "Reading another field fails when Alertmanager sends the notification ('can't "
+            "evaluate field Labels in type *template.Data'): it isn't sent, or Slack sends it "
+            "with this field empty. Labels never fail: a missing label is empty. Defines in "
+            "template files are checked with the data the fields call them with."
+        ),
+        "bad": """\
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '{{ .Labels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Labels.pod }} in {{ .CommonLabels.env }}{{ end }}'""",
+        "good": """\
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '{{ .CommonLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Labels.pod }} in {{ $.CommonLabels.env }}{{ end }}'""",
     },
 }

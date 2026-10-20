@@ -295,7 +295,7 @@ def test_receiver_and_interval_names_are_namespaced():
     assert sub["receiver"] == "team-a/payments/slack"
     assert sub["routes"][0]["receiver"] == "team-a/payments/pager"
     assert sub["routes"][0]["mute_time_intervals"] == ["team-a/payments/weekends"]
-    assert cfg["mute_time_intervals"] == [
+    assert cfg["time_intervals"] == [
         {"name": "team-a/payments/weekends",
          "time_intervals": [{"weekdays": ["saturday", "sunday"]}]},
     ]
@@ -453,7 +453,7 @@ def test_v1beta1_time_intervals_and_matchers():
     sub = loaded.cfg["route"]["routes"][0]
     assert sub["matchers"] == ['service=~"search-.*"', 'env="prod"', 'namespace="team-b"']
     assert sub["active_time_intervals"] == ["team-b/search/office"]
-    assert loaded.cfg["mute_time_intervals"][0] == {
+    assert loaded.cfg["time_intervals"][0] == {
         "name": "team-b/search/office",
         "time_intervals": [{"times": [{"start_time": "09:00", "end_time": "17:00"}]}],
     }
@@ -464,7 +464,7 @@ def test_wrong_time_intervals_field_for_the_version_is_noted():
         timeIntervals:
           - name: office
     """))
-    assert "mute_time_intervals" not in loaded.cfg
+    assert "time_intervals" not in loaded.cfg
     assert any("spec.timeIntervals is not a v1alpha1 field" in n for _, n in loaded.notes)
 
 

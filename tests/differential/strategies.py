@@ -425,6 +425,40 @@ def _integration(draw, kind: str, broken: bool = False) -> dict:
     return entry
 
 
+# Time interval fields, valid and not (bad-time-interval): formats, ranges that end before
+# they start, out-of-range days, names that aren't weekdays, months or time zones.
+INTERVAL_TIMES = ("00:00", "06:00", "09:30", "17:00", "23:59", "24:00", "8:00", "24:01",
+                  "12:60", "", "7", "07:5")
+INTERVAL_WEEKDAYS = ("monday", "Sunday", "monday:friday", "friday:monday", "saturday:sunday",
+                     "1", "mon", "MONDAY:wednesday", "monday:", "a:b:c")
+INTERVAL_DAYS = ("1", "31", "-1", "1:5", "-3:-1", "0", "32", "-32", "-1:5", "-1:-5", "5:1",
+                 "28:-1", "1:31", "x", "-31:-28")
+INTERVAL_MONTHS = ("january", "1:3", "march:january", "13", "0", "december", "dec", "jan:12",
+                   "2:1", "February:April")
+INTERVAL_YEARS = ("2024", "2020:2030", "2030:2020", "-5", "x", "2024:")
+INTERVAL_LOCATIONS = ("UTC", "Local", "", "Europe/Berlin", "America/New_York", "Etc/GMT+3",
+                      "Europe/Kiyv", "Mars/Olympus", "Europe/")
+
+
+@st.composite
+def interval_entries(draw) -> list:
+    """The time_intervals: entries of one interval, each field set or not."""
+    entries = []
+    for _ in range(draw(pick((1, 1, 2)))):
+        entry: dict = {}
+        if draw(st.booleans()):
+            entry["times"] = [{"start_time": draw(pick(INTERVAL_TIMES)),
+                               "end_time": draw(pick(INTERVAL_TIMES))}]
+        for key, values in (("weekdays", INTERVAL_WEEKDAYS), ("days_of_month", INTERVAL_DAYS),
+                            ("months", INTERVAL_MONTHS), ("years", INTERVAL_YEARS)):
+            if draw(one_in(3)):
+                entry[key] = [draw(pick(values))]
+        if draw(one_in(3)):
+            entry["location"] = draw(pick(INTERVAL_LOCATIONS))
+        entries.append(entry)
+    return entries
+
+
 # Each mistake is made in 1 of N configs, independently. Integration fields, regexes,
 # matchers and label names have many variants each (11 integrations with globals and _file
 # forms, 16 regexes, 13 matchers in a route or an inhibit rule, 8 label names under 6 keys).
@@ -433,7 +467,7 @@ MISTAKES = {
     "bad-match-label": 6,
     "groupby-ellipsis": 12, "no-root-route": 20, "root-receiver": 20, "root-matchers": 20,
     "root-match": 20, "root-continue": 20, "root-time-intervals": 20,
-    "duplicate-receiver": 12, "integration-key": 3,
+    "duplicate-receiver": 12, "integration-key": 3, "time-interval": 3, "null-regex": 20,
 }
 
 
@@ -499,6 +533,10 @@ def validation_configs(draw) -> dict:
         node, prefix = draw(pick([(child, "") for child in children]
                                  + [(rule, "source_"), (rule, "target_")]))
         node[prefix + draw(pick(("match", "match_re")))] = {draw(pick(BAD_LABEL_NAMES)): "crit"}
+    if "null-regex" in mistakes:  # match_re: {sev: } with no value
+        node, prefix = draw(pick([(child, "") for child in children]
+                                 + [(rule, "source_"), (rule, "target_")]))
+        node[prefix + "match_re"] = {"sev": None}
     if "groupby-ellipsis" in mistakes:
         some_route()["group_by"] = ["...", "alertname"]
     if "root-receiver" in mistakes:
@@ -517,6 +555,8 @@ def validation_configs(draw) -> dict:
         cfg["route"] = root
     cfg["receivers"] = receivers
     cfg["inhibit_rules"] = [rule]
-    cfg["time_intervals"] = [{"name": "night", "time_intervals": [
-        {"times": [{"start_time": "00:00", "end_time": "06:00"}]}]}]
+    night = [{"times": [{"start_time": "00:00", "end_time": "06:00"}]}]
+    if "time-interval" in mistakes:
+        night = draw(interval_entries())
+    cfg["time_intervals"] = [{"name": "night", "time_intervals": night}]
     return cfg

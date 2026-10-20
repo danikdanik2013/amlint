@@ -1,5 +1,50 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Notification templates are checked, with a Go template parser of amlint's own (no new
+  dependencies) that passes Go's own parser tests:
+  - `bad-template-file` (error): a template file under `templates:` doesn't parse. amtool
+    catches it too.
+  - `bad-template` (error): the template text in a notifier field, such as Slack's `title:`,
+    doesn't parse. Alertmanager only finds out when it sends the notification.
+  - `undefined-template` (error): `{{ template "name" }}` calls a template that no file, and
+    none of Alertmanager's own, defines.
+  - `template-unknown-field` (error): a template reads a field the data doesn't have, such
+    as `.Labels` outside `{{ range .Alerts }}`, or `.CommonLabels` inside it. Defines in
+    template files are checked with the data the fields call them with.
+
+  Template files are read next to the config file, or from the Secret, Helm `templateFiles`
+  or Mimir `template_files` they ship in.
+- `deprecated-match` (info): a route's `match:` or `match_re:`, or an inhibition rule's
+  `source_match:`, `target_match:` and their `_re` forms, which Alertmanager 0.22
+  deprecated. The message shows the `matchers:` to write instead.
+- `deprecated-mute-time-intervals` (info): the top-level `mute_time_intervals:` list, which
+  Alertmanager 0.24 renamed to `time_intervals:`.
+- `amlint fix` rewrites both in place, or prints a diff with `--diff` (exit 1 when there is
+  something to change). It reads the result back and leaves any spot alone where the
+  matchers or anything else would change. Plain configs and Helm values.
+- The editor (`amlint lsp`) offers the same rewrite as a quick fix.
+- `bad-time-interval` (error): a time interval Alertmanager refuses to load: a bad time,
+  weekday, day of the month, month, year or `location`, a range that ends before it starts,
+  or a missing or repeated name. amtool catches it too.
+- `time-interval-never-active` (warn): a time interval a route uses never matches from today
+  on, such as years that are over or February 30. As `active_time_intervals` it stops the
+  route from ever sending.
+- `route-always-muted` (warn): a route's mute and active time intervals leave no time to
+  send, such as a mute interval with no fields.
+- `plaintext-secret` (warn): an API key, token, password, or a webhook URL with a token in
+  it, written into the config instead of read from a `_file` field. Stand-in values such as
+  `<secret>`, `${VAR}` or `mysecret` are skipped, and so are configs in a Kubernetes Secret,
+  AlertmanagerConfig resources and Mimir configs.
+
+### Changed
+- Unquoted times and ranges in time intervals (`start_time: 17:00`, `days_of_month: [1:5]`)
+  are read as text, as Alertmanager reads them, not as YAML 1.1 base-60 numbers.
+- AlertmanagerConfig resources: their time intervals are merged into `time_intervals:`, the
+  key the operator writes, instead of `mute_time_intervals:`.
+
 ## [0.7.0] - 2026-10-20
 
 Highlights:
