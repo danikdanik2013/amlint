@@ -5036,3 +5036,164 @@ def test_plaintext_secret_where_secrets_belong(tmp_path, capsys):
         main(["check", "--format", "json", str(path)])
         codes = {f["code"] for f in json.loads(capsys.readouterr().out)}
         assert ("plaintext-secret" in codes) is reported, name
+
+
+# ── time intervals ───────────────────────────────────────────────────
+
+@pytest.fixture
+def today(monkeypatch):
+    import datetime
+
+    import amlint.linter
+    monkeypatch.setattr(amlint.linter, "_today", lambda: datetime.date(2026, 10, 20))
+
+
+def _intervals(defs, **routes):
+    """A config whose routes (name -> route settings) use the intervals in `defs`."""
+    return {
+        "route": {"receiver": "a", "routes": [
+            dict({"matchers": [f'team="{name}"'], "receiver": "a"}, **settings)
+            for name, settings in routes.items()]},
+        "receivers": [{"name": "a"}],
+        "time_intervals": [{"name": n, "time_intervals": e} for n, e in defs.items()],
+    }
+
+
+def _by(code, cfg):
+    return {f.where: f.msg for f in lint(cfg) if f.code == code}
+
+
+@pytest.mark.parametrize("entry,where,message", [
+    ({"times": [{"start_time": "17:00", "end_time": "09:00"}]}, "times[0]",
+     "start time cannot be equal or greater than end time"),
+    ({"times": [{"start_time": "09:00", "end_time": "09:00"}]}, "times[0]",
+     "start time cannot be equal or greater than end time"),
+    ({"times": [{"start_time": "8:00", "end_time": "09:00"}]}, "times[0]",
+     "couldn't parse timestamp 8:00, invalid format"),
+    ({"times": [{"start_time": "09:00"}]}, "times[0]",
+     "both start and end times must be provided"),
+    ({"weekdays": ["friday:monday"]}, "weekdays[0]", "start day cannot be before end day"),
+    ({"weekdays": ["1"]}, "weekdays[0]", "1 is not a valid weekday"),
+    ({"days_of_month": ["0"]}, "days_of_month[0]",
+     "0 is not a valid day of the month: out of range"),
+    ({"days_of_month": ["-1:5"]}, "days_of_month[0]",
+     "end day must be negative if start day is negative"),
+    ({"days_of_month": ["-1:-5"]}, "days_of_month[0]", "end day -5 is always before start day -1"),
+    ({"months": ["march:january"]}, "months[0]", "end month january is before start month march"),
+    ({"months": ["marchh"]}, "months[0]", "marchh is not a valid month"),
+    ({"years": ["2025:2020"]}, "years[0]", "end year 2020 is before start year 2025"),
+    ({"location": "Europe/Kiyv"}, "location", "location 'Europe/Kiyv' is not in the time zone"),
+])
+def test_bad_time_interval(entry, where, message):
+    cfg = _intervals({"x": [entry]})
+    found = _by("bad-time-interval", cfg)
+    assert list(found) == [f"time_intervals[0].time_intervals[0].{where}"]
+    msg = found[f"time_intervals[0].time_intervals[0].{where}"]
+    assert message in msg and "Alertmanager refuses to load this config" in msg
+
+
+def test_bad_time_interval_names_and_location_hint():
+    import zoneinfo
+    if "Europe/Kyiv" not in zoneinfo.available_timezones():
+        pytest.skip("no time zone database")
+    cfg = _intervals({"x": [{"location": "Europe/Kiyv"}]})
+    assert "did you mean 'Europe/Kyiv'?" in "".join(_by("bad-time-interval", cfg).values())
+    cfg["mute_time_intervals"] = [{"name": "x"}, {"time_intervals": []}]
+    found = _by("bad-time-interval", cfg)
+    assert "A mute time interval has no name" in found["mute_time_intervals[1]"]
+    assert "Time interval 'x' is not unique" in found["time_intervals[0]"]
+
+
+@pytest.mark.parametrize("entry", [
+    {"times": [{"start_time": "00:00", "end_time": "24:00"}], "location": "Local"},
+    {"weekdays": ["Monday:Friday", "saturday"], "days_of_month": ["1:5", "-3:-1", "31"],
+     "months": ["1:3", "december"], "years": ["2020:2030"], "location": "UTC"},
+    {},
+])
+def test_good_time_intervals(entry):
+    assert _by("bad-time-interval", _intervals({"x": [entry]})) == {}
+
+
+def test_unquoted_times_are_text(tmp_path, capsys):
+    """PyYAML reads an unquoted 17:00 as the base-60 number 1020 and 1:5 as 65; Alertmanager,
+    like Helm, reads text."""
+    text = ("route:\n  receiver: a\n  routes:\n"
+            "    - matchers: [x=y]\n      receiver: a\n      mute_time_intervals: [n]\n"
+            "receivers:\n  - name: a\n"
+            "time_intervals:\n  - name: n\n    time_intervals:\n"
+            "      - times: [{start_time: 9:30, end_time: 17:00}]\n"
+            "        days_of_month: [1:5]\n")
+    path = tmp_path / "am.yml"
+    path.write_text(text)
+    main(["check", "--format", "json", str(path)])
+    found = {f["code"]: f["message"] for f in json.loads(capsys.readouterr().out)}
+    assert "couldn't parse timestamp 9:30" in found["bad-time-interval"]
+    path.write_text(text.replace("9:30", "09:30"))
+    main(["check", "--format", "json", str(path)])
+    assert "bad-time-interval" not in {f["code"] for f in json.loads(capsys.readouterr().out)}
+    helm = "alertmanager:\n  config:\n" + "".join("    " + line + "\n"
+                                                for line in text.splitlines())
+    path.write_text(helm.replace("9:30", "09:30"))
+    main(["check", "--format", "json", str(path)])
+    assert "bad-time-interval" not in {f["code"] for f in json.loads(capsys.readouterr().out)}
+
+
+@pytest.mark.parametrize("entries,reason", [
+    ([{"years": ["2021:2023"]}], "every year it lists is over"),
+    ([{"days_of_month": ["30:31"], "months": ["february"]}],
+     "the days_of_month it lists don't exist in its months"),
+    ([{"weekdays": []}], "its weekdays: is an empty list"),
+    ([{"months": ["13"]}], "its months: are not between 1 and 12"),
+    ([], "it has no time_intervals: entries"),
+    ([{"years": ["2020"]}, {"months": ["13"]}], "none of its entries matches"),
+])
+def test_time_interval_never_active(today, entries, reason):
+    cfg = _intervals({"x": entries}, db={"active_time_intervals": ["x"]},
+                     web={"mute_time_intervals": ["x"]})
+    found = _by("time-interval-never-active", cfg)
+    msg = found["time_intervals[0]"]
+    assert f"Time interval 'x' is never active: {reason}" in msg
+    assert "Routes that mute with it are never muted (route.routes[1])" in msg
+    assert "Routes active only during it never send a notification (route.routes[0])" in msg
+    assert _by("route-always-muted", cfg) == {}  # the interval finding covers the route
+
+
+def test_time_interval_active_later_or_unused(today):
+    cfg = _intervals({"later": [{"years": ["2031"]}], "unused": [{"years": ["2020"]}],
+                      "leap": [{"days_of_month": ["29"], "months": ["february"]}]},
+                     db={"active_time_intervals": ["later"]},
+                     web={"mute_time_intervals": ["leap"]})
+    assert _by("time-interval-never-active", cfg) == {}
+
+
+@pytest.mark.parametrize("defs,mute,active,why", [
+    ({"always": [{}]}, ["always"], [], "its mute_time_intervals 'always' covers every minute"),
+    ({"day": [{"times": [{"start_time": "00:00", "end_time": "24:00"}]}]}, ["day"], [],
+     "its mute_time_intervals 'day' covers every minute"),
+    ({"week": [{"weekdays": ["monday:friday"]}], "weekend": [{"weekdays": ["saturday"]},
+                                                             {"weekdays": ["sunday"]}]},
+     ["week", "weekend"], [], "its mute_time_intervals together cover every minute"),
+    ({"office": [{"weekdays": ["monday:friday"],
+                  "times": [{"start_time": "09:00", "end_time": "17:00"}]}],
+      "daytime": [{"times": [{"start_time": "08:00", "end_time": "20:00"}]}]},
+     ["daytime"], ["office"], "cover every time its active_time_intervals allow"),
+])
+def test_route_always_muted(today, defs, mute, active, why):
+    cfg = _intervals(defs, db={"mute_time_intervals": mute, "active_time_intervals": active})
+    found = _by("route-always-muted", cfg)
+    assert list(found) == ["route.routes[0]"]
+    assert why in found["route.routes[0]"]
+
+
+@pytest.mark.parametrize("defs,mute,active", [
+    ({"nights": [{"times": [{"start_time": "00:00", "end_time": "08:00"}]}]}, ["nights"], []),
+    ({"week": [{"weekdays": ["monday:friday"]}],
+      "sat": [{"weekdays": ["saturday"], "location": "Europe/Berlin"}],
+      "sun": [{"weekdays": ["sunday"]}]}, ["week", "sat", "sun"], []),  # zones differ
+    ({"office": [{"weekdays": ["monday:friday"]}],
+      "nights": [{"times": [{"start_time": "00:00", "end_time": "08:00"}]}]},
+     ["nights"], ["office"]),
+])
+def test_route_not_always_muted(today, defs, mute, active):
+    cfg = _intervals(defs, db={"mute_time_intervals": mute, "active_time_intervals": active})
+    assert _by("route-always-muted", cfg) == {}

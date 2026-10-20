@@ -120,7 +120,7 @@ Full guide: [usage docs](https://danikdanik2013.github.io/amlint/usage/).
 
 ## What it catches
 
-41 checks. 21 of them catch things amtool doesn't, because the config is valid and simply
+44 checks. 23 of them catch things amtool doesn't, because the config is valid and simply
 behaves differently than you expect, or uses syntax Alertmanager has deprecated:
 
 - **Alerts that reach nobody.** A route points at a receiver that has no integration, or a
@@ -132,6 +132,8 @@ behaves differently than you expect, or uses syntax Alertmanager has deprecated:
   source and target that match the same alert.
 - **Timings that contradict themselves.** `group_wait` longer than `group_interval`, or
   `repeat_interval` shorter than `group_interval`.
+- **Time intervals that never apply, or always do.** An `active_time_intervals` whose years
+  are over, or mute intervals that cover the whole week, so a route never sends anything.
 - **Matchers Alertmanager reads differently than you do.** For example, `code=~[0-9]{3}`
   without quotes loses its closing brace.
 - **Routes for alerts that don't exist** (with `--rules`). A typo like `HighCpuUsage`
@@ -141,7 +143,7 @@ behaves differently than you expect, or uses syntax Alertmanager has deprecated:
 - **Secrets in plain text**: API keys, tokens and webhook URLs written into the config
   instead of read from a file.
 
-The other 20 checks repeat what amtool already rejects: undefined receivers, missing
+The other 21 checks repeat what amtool already rejects: undefined receivers, missing
 webhook URLs or API keys, bad regexes. They're there so one tool gives you one report, in
 one format.
 

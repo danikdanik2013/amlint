@@ -1774,6 +1774,189 @@ def check_plaintext_secrets(cfg: dict) -> List[Finding]:
     return out
 
 
+def _time_intervals(cfg: dict) -> Dict[str, Tuple[str, Optional[list]]]:
+    """name -> (path of the definition, its parsed entries or None if Alertmanager rejects
+    them), for each uniquely named interval in either top-level list."""
+    from .timeintervals import IntervalError, location_problem, parse_entry
+    out: Dict[str, Tuple[str, Optional[list]]] = {}
+    seen: Set[str] = set()
+    for key in ("mute_time_intervals", "time_intervals"):
+        for i, ti in _dict_items(cfg.get(key)):
+            name = _scalar(ti.get("name"))
+            if not name or name in seen:
+                out.pop(name, None)
+                seen.add(name)
+                continue
+            seen.add(name)
+            entries: Optional[list] = []
+            items = ti.get("time_intervals")
+            for item in items if isinstance(items, list) else []:
+                try:
+                    entry = parse_entry(item)
+                except IntervalError:
+                    entries = None
+                    break
+                if entry.location is not None and location_problem(entry.location):
+                    entries = None
+                    break
+                entries.append(entry)
+            if items is not None and not isinstance(items, list):
+                entries = None
+            out[name] = (f"{key}[{i}]", entries)
+    return out
+
+
+def _interval_users(cfg: dict) -> List[Tuple[str, List[str], List[str]]]:
+    """(path, mute names, active names) of each route that uses time intervals."""
+    out = []
+    route = _root_route(cfg)
+    for node, path in _walk_routes(route) if route else ():
+        names = []
+        for key in ("mute_time_intervals", "active_time_intervals"):
+            value = node.get(key)
+            names.append([_scalar(n) for n in value] if isinstance(value, list) else [])
+        if any(names):
+            out.append((path, names[0], names[1]))
+    return out
+
+
+# CHECK 42: a time interval Alertmanager refuses to load
+def check_bad_time_intervals(cfg: dict) -> List[Finding]:
+    """What timeinterval.go and config.go reject at load time: a missing or repeated name,
+    times, weekdays, days of the month, months and years it can't read or that end before
+    they start, and a location that isn't in the time zone database."""
+    from .timeintervals import IntervalError, location_problem, parse_entry
+    out: List[Finding] = []
+    seen: Set[str] = set()
+
+    def report(where: str, what: str) -> None:
+        out.append(Finding(ERROR, "bad-time-interval",
+                           f"{what}. Alertmanager refuses to load this config.", where))
+
+    for key in ("mute_time_intervals", "time_intervals"):
+        kind = "mute time interval" if key == "mute_time_intervals" else "time interval"
+        for i, ti in _dict_items(cfg.get(key)):
+            where = f"{key}[{i}]"
+            name = _scalar(ti.get("name"))
+            if not name:
+                report(where, f"A {kind} has no name")
+                continue
+            if name in seen:
+                report(where, f"{kind.capitalize()} '{name}' is not unique: another one in "
+                              f"time_intervals: or mute_time_intervals: has the same name")
+            seen.add(name)
+            items = ti.get("time_intervals")
+            if items is not None and not isinstance(items, list):
+                report(f"{where}.time_intervals", f"Time interval '{name}': time_intervals "
+                                                  f"must be a list")
+                continue
+            for j, item in enumerate(items or []):
+                at = f"{where}.time_intervals[{j}]"
+                try:
+                    entry = parse_entry(item)
+                except IntervalError as e:
+                    report(f"{at}.{e.where}" if e.where else at,
+                           f"Time interval '{name}': {e}")
+                    continue
+                problem = location_problem(entry.location) if entry.location else None
+                if problem:
+                    import difflib
+
+                    from .timeintervals import _ZONES
+                    hint = difflib.get_close_matches(entry.location, sorted(_ZONES or ()), n=1)
+                    did = f" (did you mean '{hint[0]}'?)" if hint else ""
+                    report(f"{at}.location",
+                           f"Time interval '{name}': location '{entry.location}' is not in the "
+                           f"time zone database{did}: {problem}")
+    return out
+
+
+def _never_reason(entries: list, today) -> str:
+    """Why an interval that is never active from `today` on never is, for messages."""
+    if not entries:
+        return ("it has no time_intervals: entries, and an interval without entries matches "
+                "no time")
+    if len(entries) > 1:
+        return "none of its entries matches any day from today on"
+    e = entries[0]
+    for field in ("times", "weekdays", "days_of_month", "months", "years"):
+        if getattr(e, field) == []:
+            return f"its {field}: is an empty list, which matches nothing"
+    if e.years is not None and all(end < today.year for _, end in e.years):
+        return "every year it lists is over"
+    if e.months is not None and all(begin > 12 or end < 1 for begin, end in e.months):
+        return "its months: are not between 1 and 12"
+    if e.days_of_month and e.months and e.weekdays is None and e.years is None:
+        return "the days_of_month it lists don't exist in its months"
+    return "no day matches its weekdays, days_of_month, months and years together"
+
+
+def _today():
+    """Today's date; a function so tests can fix it."""
+    import datetime
+    return datetime.date.today()
+
+
+# CHECK 43: a time interval a route uses that is never active
+def check_never_active_time_intervals(cfg: dict) -> List[Finding]:
+    """Only intervals a route uses: as mute_time_intervals they never mute, and as
+    active_time_intervals they stop the route from ever sending."""
+    from .timeintervals import ever_active
+    out: List[Finding] = []
+    today = _today()
+    users = _interval_users(cfg)
+    for name, (where, entries) in _time_intervals(cfg).items():
+        muted = [p for p, mute, _ in users if name in mute]
+        active = [p for p, _, act in users if name in act]
+        if entries is None or not (muted or active) or ever_active(entries, today):
+            continue
+        msg = f"Time interval '{name}' is never active: {_never_reason(entries, today)}."
+        if muted:
+            msg += f" Routes that mute with it are never muted ({', '.join(muted)})."
+        if active:
+            msg += (f" Routes active only during it never send a notification "
+                    f"({', '.join(active)}).")
+        out.append(Finding(WARN, "time-interval-never-active", msg, where))
+    return out
+
+
+# CHECK 44: a route whose time intervals leave no time to send
+def check_always_muted_routes(cfg: dict) -> List[Finding]:
+    """A mute interval that covers every minute (an entry with no fields, or times from
+    00:00 to 24:00 on every day), or mute and active intervals that together leave no time.
+    Intervals in different locations are only compared when one of them is always active.
+    A route whose active intervals are all never active is left to
+    time-interval-never-active, which names the interval."""
+    from .timeintervals import always_active, ever_active, never_sends, same_location
+    out: List[Finding] = []
+    today = _today()
+    defined = _time_intervals(cfg)
+    for path, mute, active in _interval_users(cfg):
+        names = mute + active
+        if path == "route" or any(defined.get(n, ("", None))[1] is None for n in names):
+            continue
+        entries = {n: defined[n][1] for n in names}
+        if active and not any(ever_active(entries[n], today) for n in active):
+            continue
+        always = [n for n in mute if always_active(entries[n])]
+        if always:
+            why = f"its mute_time_intervals '{always[0]}' covers every minute of every day"
+        elif same_location(entries) and never_sends([entries[n] for n in mute],
+                                                    [entries[n] for n in active], today):
+            why = ("its mute_time_intervals cover every time its active_time_intervals allow"
+                   if active else "its mute_time_intervals together cover every minute")
+        else:
+            continue
+        out.append(Finding(
+            WARN, "route-always-muted",
+            f"This route never sends a notification: {why}. Alerts that end here reach "
+            f"nobody. To drop them on purpose, send them to a receiver with no "
+            f"integrations instead.",
+            path,
+        ))
+    return out
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -1810,6 +1993,9 @@ ALL_CHECKS = [
     check_deprecated_match,
     check_deprecated_mute_time_intervals,
     check_plaintext_secrets,
+    check_bad_time_intervals,
+    check_never_active_time_intervals,
+    check_always_muted_routes,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}

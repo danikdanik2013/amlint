@@ -3,9 +3,9 @@
 amlint's checks catch Alertmanager config mistakes that lose alerts, send them to the wrong
 place, or mute them when they shouldn't be.
 
-amlint has **41 checks**. `amtool check-config` also catches **20** of them: Alertmanager
+amlint has **44 checks**. `amtool check-config` also catches **21** of them: Alertmanager
 refuses to load those configs, and amlint reports them so one run covers everything. The
-other **21** are configs that amtool accepts and Alertmanager runs, just not the way you
+other **23** are configs that amtool accepts and Alertmanager runs, just not the way you
 meant, or not for much longer. Those are the main reason to run amlint.
 
 The three **Prometheus rules** checks run only with `amlint check --rules`, which compares
@@ -55,8 +55,11 @@ catches it too.
 | Inhibition | [`inhibit-no-equal`](inhibition.md#inhibit-no-equal) | warn | | An inhibition rule has no `equal:` field. |
 | Inhibition | [`circular-inhibition`](inhibition.md#circular-inhibition) | warn | | Two inhibition rules can mute each other. |
 | Inhibition | [`inhibit-same-match`](inhibition.md#inhibit-same-match) | info | | The source and target side of an inhibition rule share a `label="value"`. |
+| Timing | [`bad-time-interval`](timing.md#bad-time-interval) | error | ✓ | A time interval Alertmanager can't read: a bad time, weekday, day, month, year or `location`, or a range that ends before it starts. |
 | Timing | [`undefined-time-interval`](timing.md#undefined-time-interval) | error | ✓ | `mute_time_intervals` or `active_time_intervals` names an interval that isn't defined. |
 | Timing | [`repeat-before-group`](timing.md#repeat-before-group) | warn | | `repeat_interval` is shorter than `group_interval`. |
+| Timing | [`time-interval-never-active`](timing.md#time-interval-never-active) | warn | | A time interval a route uses never matches, for example because its years are over. |
+| Timing | [`route-always-muted`](timing.md#route-always-muted) | warn | | A route's mute and active time intervals leave no time to send. |
 | Timing | [`wait-exceeds-interval`](timing.md#wait-exceeds-interval) | warn | | `group_wait` is longer than `group_interval`. |
 | Timing | [`global-resolve-timeout-missing`](timing.md#global-resolve-timeout-missing) | info | | `global.resolve_timeout` isn't set, so Alertmanager uses its default of `5m`. |
 | Timing | [`deprecated-mute-time-intervals`](timing.md#deprecated-mute-time-intervals) | info | | The top-level list is called `mute_time_intervals:`, not `time_intervals:`. `amlint fix` renames it. |

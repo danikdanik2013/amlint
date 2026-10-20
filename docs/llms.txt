@@ -47,7 +47,7 @@ Output formats: text (default), `--format json`, `--format sarif` (GitHub Code S
 - [Routing checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/routing.md): unreachable, shadowed and colliding routes, matcher and regex problems
 - [Receiver checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/receivers.md): empty, unused and duplicate receivers and missing integration fields
 - [Inhibition checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/inhibition.md): inhibit rules without `equal`, circular and self-matching rules
-- [Timing checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/timing.md): group_wait, group_interval and repeat_interval problems
+- [Timing checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/timing.md): group_wait, group_interval and repeat_interval problems, and time intervals that are invalid, never active, or mute a route all the time
 - [Prometheus rules checks](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/checks/rules.md): `--rules` cross-check against alerting rules
 
 ## Optional

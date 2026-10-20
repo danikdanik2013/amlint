@@ -30,6 +30,7 @@ ALSO_CAUGHT_BY_AMTOOL = {
     "victorops-no-api-key",
     "wechat-no-corp-id",
     "sns-no-target",
+    "bad-time-interval",
 }
 
 # The docs page (docs/checks/<page>.md) with a section for each check, headed by its code.
@@ -50,7 +51,8 @@ _DOCS_PAGES = {
     "inhibition": ("inhibit-no-equal", "circular-inhibition", "inhibit-same-match"),
     "timing": (
         "repeat-before-group", "wait-exceeds-interval", "undefined-time-interval",
-        "global-resolve-timeout-missing", "deprecated-mute-time-intervals",
+        "global-resolve-timeout-missing", "deprecated-mute-time-intervals", "bad-time-interval",
+        "time-interval-never-active", "route-always-muted",
     ),
     "rules": (
         "route-unknown-alertname", "inhibit-unknown-alertname", "alert-hits-default-receiver",
@@ -1124,5 +1126,102 @@ receivers:
   - name: pager
     pagerduty_configs:
       - routing_key_file: /etc/alertmanager/secrets/pagerduty-key""",
+    },
+
+    "bad-time-interval": {
+        "level": "error",
+        "summary": "A time interval Alertmanager can't read: a bad time, day, month, year or"
+                   " location, a range that ends before it starts, or a missing or repeated"
+                   " name.",
+        "why": (
+            "Alertmanager refuses to load the config, and amtool check-config rejects it too. "
+            "Times are HH:MM from 00:00 to 24:00 and start before they end; weekdays are names "
+            "(monday:friday, not friday:monday); days of the month are 1 to 31 or -1 to -31; "
+            "location is an IANA time zone such as Europe/Berlin."
+        ),
+        "bad": """\
+time_intervals:
+  - name: office-hours
+    time_intervals:
+      - weekdays: ['friday:monday']           # ranges can't wrap around
+        times: [{start_time: '17:00', end_time: '09:00'}]
+        location: Europe/Kiyv                   # not a time zone""",
+        "good": """\
+time_intervals:
+  - name: office-hours
+    time_intervals:
+      - weekdays: ['monday:friday']
+        times: [{start_time: '09:00', end_time: '17:00'}]
+        location: Europe/Kyiv""",
+    },
+
+    "time-interval-never-active": {
+        "level": "warn",
+        "summary": "A time interval a route uses is never active from today on.",
+        "why": (
+            "As mute_time_intervals it never mutes the route; as active_time_intervals it "
+            "stops the route from ever sending a notification. Typical causes: years that are "
+            "over, a date that doesn't exist (February 30), an empty list such as "
+            "weekdays: [], or an interval with no time_intervals: entries, which matches no "
+            "time at all."
+        ),
+        "bad": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      active_time_intervals: [on-call-2023]
+time_intervals:
+  - name: on-call-2023
+    time_intervals:
+      - years: ['2023']""",
+        "good": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      active_time_intervals: [on-call]
+time_intervals:
+  - name: on-call
+    time_intervals:
+      - weekdays: ['monday:friday']""",
+    },
+
+    "route-always-muted": {
+        "level": "warn",
+        "summary": "A route's time intervals leave no time to send: it is muted all the time.",
+        "why": (
+            "Alertmanager still routes alerts to it, and with no continue: true they stop "
+            "there, so they reach nobody. Usually a mute interval with no fields (it matches "
+            "every minute), mute intervals that together cover the whole week, or mute "
+            "intervals that cover every time the route's active intervals allow. Child routes "
+            "don't inherit time intervals. To drop alerts on purpose, route them to a "
+            "receiver with no integrations."
+        ),
+        "bad": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      active_time_intervals: [office-hours]   # 09:00-17:00
+      mute_time_intervals: [daytime]          # 08:00-20:00: covers all of it
+time_intervals:
+  - name: office-hours
+    time_intervals: [{times: [{start_time: '09:00', end_time: '17:00'}]}]
+  - name: daytime
+    time_intervals: [{times: [{start_time: '08:00', end_time: '20:00'}]}]""",
+        "good": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db-pager
+      active_time_intervals: [office-hours]
+time_intervals:
+  - name: office-hours
+    time_intervals: [{times: [{start_time: '09:00', end_time: '17:00'}]}]""",
     },
 }

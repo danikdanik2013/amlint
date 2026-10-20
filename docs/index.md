@@ -51,7 +51,7 @@ fix a finding, run `amlint explain <check>`, for example `amlint explain unreach
 
 ## What it catches
 
-There are 41 checks. 21 of them find configs that amtool accepts but that don't behave the
+There are 44 checks. 23 of them find configs that amtool accepts but that don't behave the
 way you expect, or use syntax Alertmanager has deprecated:
 
 - **Alerts that reach nobody.** A route points at a receiver with no integration, or a
@@ -59,6 +59,7 @@ way you expect, or use syntax Alertmanager has deprecated:
 - **Routes that can never match.** An earlier sibling route catches every alert first.
 - **Inhibit rules that mute too much.** No `equal` labels, or rules that mute each other.
 - **Timings that contradict themselves.** For example, `group_wait` longer than `group_interval`.
+- **Time intervals that never apply, or always do**, so a route never sends anything.
 - **Matchers Alertmanager reads differently than you do.** For example, `code=~[0-9]{3}`
   without quotes loses its closing brace.
 - **Routes for alerts that don't exist.** With `--rules`, a typo in an `alertname` stops
@@ -67,7 +68,7 @@ way you expect, or use syntax Alertmanager has deprecated:
 - **Secrets in plain text**: API keys and webhook URLs written into the config instead of
   read from a file.
 
-The other 20 repeat what amtool already rejects, so one tool gives you one report.
+The other 21 repeat what amtool already rejects, so one tool gives you one report.
 [See all checks](checks/index.md).
 
 ## Why not just amtool?

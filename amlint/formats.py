@@ -29,7 +29,7 @@ import yaml
 from yaml.constructor import SafeConstructor
 from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 
-from .goyaml import AlertmanagerLoader, keep_strings
+from .goyaml import AlertmanagerLoader, keep_interval_strings, keep_strings
 from .linter import (
     _parse_duration,
     _scalar,
@@ -292,7 +292,7 @@ def apply_locations(findings: list, loaded: Loaded) -> list:
 # Reading YAML
 
 def _construct(node: Node):
-    return SafeConstructor().construct_document(node)
+    return SafeConstructor().construct_document(keep_interval_strings(node))
 
 
 def _construct_config(node: Node):

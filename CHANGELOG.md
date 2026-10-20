@@ -12,12 +12,22 @@
   something to change). It reads the result back and leaves any spot alone where the
   matchers or anything else would change. Plain configs and Helm values.
 - The editor (`amlint lsp`) offers the same rewrite as a quick fix.
+- `bad-time-interval` (error): a time interval Alertmanager refuses to load: a bad time,
+  weekday, day of the month, month, year or `location`, a range that ends before it starts,
+  or a missing or repeated name. amtool catches it too.
+- `time-interval-never-active` (warn): a time interval a route uses never matches from today
+  on, such as years that are over or February 30. As `active_time_intervals` it stops the
+  route from ever sending.
+- `route-always-muted` (warn): a route's mute and active time intervals leave no time to
+  send, such as a mute interval with no fields.
 - `plaintext-secret` (warn): an API key, token, password, or a webhook URL with a token in
   it, written into the config instead of read from a `_file` field. Stand-in values such as
   `<secret>` or `${VAR}` are skipped, and so are configs in a Kubernetes Secret,
   AlertmanagerConfig resources and Mimir configs.
 
 ### Changed
+- Unquoted times and ranges in time intervals (`start_time: 17:00`, `days_of_month: [1:5]`)
+  are read as text, as Alertmanager reads them, not as YAML 1.1 base-60 numbers.
 - AlertmanagerConfig resources: their time intervals are merged into `time_intervals:`, the
   key the operator writes, instead of `mute_time_intervals:`.
 
