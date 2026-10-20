@@ -120,8 +120,8 @@ Full guide: [usage docs](https://danikdanik2013.github.io/amlint/usage/).
 
 ## What it catches
 
-38 checks. 18 of them catch things amtool doesn't, because the config is valid and simply
-behaves differently than you expect:
+40 checks. 20 of them catch things amtool doesn't, because the config is valid and simply
+behaves differently than you expect, or uses syntax Alertmanager has deprecated:
 
 - **Alerts that reach nobody.** A route points at a receiver that has no integration, or a
   catch-all route sits above more specific ones so they never match.
@@ -136,6 +136,8 @@ behaves differently than you expect:
   without quotes loses its closing brace.
 - **Routes for alerts that don't exist** (with `--rules`). A typo like `HighCpuUsage`
   vs `HighCPUUsage` silently kills a branch.
+- **Deprecated syntax** such as `match:` and `source_match:`, which `amlint fix` rewrites
+  as `matchers:` for you.
 
 The other 20 checks repeat what amtool already rejects: undefined receivers, missing
 webhook URLs or API keys, bad regexes. They're there so one tool gives you one report, in

@@ -23,7 +23,9 @@ amlint lsp --help    # check that the command is there
   [`amlint route`](usage.md#route).
 - **Quick fixes** that change the config: a misspelled receiver or time interval
   (`undefined-receiver`, `undefined-time-interval`) offers "Change 'db-pagr' to 'db-pager'"
-  for the closest names, and `useless-continue` offers to remove the `continue: true` line.
+  for the closest names, `useless-continue` offers to remove the `continue: true` line, and
+  deprecated syntax (`deprecated-match`, `deprecated-mute-time-intervals`) is rewritten the
+  way [`amlint fix`](usage.md#fix) does it.
 - **Quick fixes** for a finding you accept: add `# amlint: disable=<code>` to its line, or
   `# amlint: disable-file=<code>` to the top of the file. See
   [inline suppressions](usage.md#inline-suppressions).

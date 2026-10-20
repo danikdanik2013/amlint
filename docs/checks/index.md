@@ -3,10 +3,10 @@
 amlint's checks catch Alertmanager config mistakes that lose alerts, send them to the wrong
 place, or mute them when they shouldn't be.
 
-amlint has **38 checks**. `amtool check-config` also catches **20** of them: Alertmanager
+amlint has **40 checks**. `amtool check-config` also catches **20** of them: Alertmanager
 refuses to load those configs, and amlint reports them so one run covers everything. The
-other **18** are configs that amtool accepts and Alertmanager runs, just not the way you
-meant. Those are the main reason to run amlint.
+other **20** are configs that amtool accepts and Alertmanager runs, just not the way you
+meant, or not for much longer. Those are the main reason to run amlint.
 
 The three **Prometheus rules** checks run only with `amlint check --rules`, which compares
 your routes and inhibition rules with the alerts your Prometheus rule files define. See
@@ -35,6 +35,7 @@ catches it too.
 | Routing | [`stripped-brace`](routing.md#stripped-brace) | warn | | A bare matcher value ends in `}`, which Alertmanager strips off. |
 | Routing | [`useless-continue`](routing.md#useless-continue) | info | | `continue: true` on the last sibling route does nothing. |
 | Routing | [`deep-nesting`](routing.md#deep-nesting) | info | | The routing tree is more than 5 levels deep. |
+| Routing | [`deprecated-match`](routing.md#deprecated-match) | info | | A route uses `match:` or `match_re:`, or an inhibition rule `source_match:` or `target_match:`. `amlint fix` rewrites them. |
 | Receivers | [`duplicate-receiver`](receivers.md#duplicate-receiver) | error | ✓ | Two receivers share the same name. |
 | Receivers | [`email-no-smarthost`](receivers.md#email-no-smarthost) | error | ✓ | An `email_configs` entry has no `smarthost`, and `global.smtp_smarthost` isn't set. |
 | Receivers | [`webhook-no-url`](receivers.md#webhook-no-url) | error | ✓ | A `webhook_configs` entry has no `url` or `url_file`. |
@@ -57,6 +58,7 @@ catches it too.
 | Timing | [`repeat-before-group`](timing.md#repeat-before-group) | warn | | `repeat_interval` is shorter than `group_interval`. |
 | Timing | [`wait-exceeds-interval`](timing.md#wait-exceeds-interval) | warn | | `group_wait` is longer than `group_interval`. |
 | Timing | [`global-resolve-timeout-missing`](timing.md#global-resolve-timeout-missing) | info | | `global.resolve_timeout` isn't set, so Alertmanager uses its default of `5m`. |
+| Timing | [`deprecated-mute-time-intervals`](timing.md#deprecated-mute-time-intervals) | info | | The top-level list is called `mute_time_intervals:`, not `time_intervals:`. `amlint fix` renames it. |
 | Prometheus rules | [`route-unknown-alertname`](rules.md#route-unknown-alertname) | warn | | With `--rules`: a route matches an `alertname` no alerting rule produces. |
 | Prometheus rules | [`inhibit-unknown-alertname`](rules.md#inhibit-unknown-alertname) | warn | | With `--rules`: an inhibition rule's source or target matches an `alertname` no alerting rule produces. |
 | Prometheus rules | [`alert-hits-default-receiver`](rules.md#alert-hits-default-receiver) | info | | With `--rules`: alerts match no child route, by their static labels, and go to the root route's receiver. |

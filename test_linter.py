@@ -1030,6 +1030,7 @@ def test_broken_yml_integration():
         "groupby-ellipsis",
         "unused-receiver",
         "empty-receiver",
+        "deprecated-match",
     }
 
 
@@ -4618,3 +4619,303 @@ def test_cli_test_without_tests_file_or_mapping_exits_2(tmp_path, capsys, monkey
     (tmp_path / ".amlint.yml").write_text("tests: [a.yml]\n")
     assert main(["test", cfg_path.name]) == 2
     assert "must map config files to test files" in capsys.readouterr().err
+
+
+# ── deprecated syntax and amlint fix ─────────────────────────────────
+
+def _deprecated(cfg):
+    return [f for f in lint(cfg) if f.code.startswith("deprecated-")]
+
+
+def test_deprecated_match_on_routes_and_inhibit_rules():
+    cfg = {
+        "route": {"receiver": "a", "routes": [
+            {"match": {"team": "db"}, "match_re": {"service": "pg-.*"}, "receiver": "a"},
+            {"match": {"team": "web"}, "matchers": ['env="prod"'], "receiver": "a"},
+            {"matchers": ['team="api"'], "receiver": "a"},
+        ]},
+        "receivers": [{"name": "a"}],
+        "inhibit_rules": [{"source_match": {"severity": "critical"},
+                           "target_match_re": {"severity": "warning|info"},
+                           "equal": ["alertname"]}],
+    }
+    found = {f.where: f for f in _deprecated(cfg)}
+    assert set(found) == {"route.routes[0].match", "route.routes[1].match",
+                          "inhibit_rules[0].source_match", "inhibit_rules[0].target_match_re"}
+    assert all(f.level == "info" and f.code == "deprecated-match" for f in found.values())
+    assert 'Write matchers: [team="db", service=~"pg-.*"] instead' in \
+        found["route.routes[0].match"].msg
+    assert "match: and match_re: are deprecated" in found["route.routes[0].match"].msg
+    assert 'Add team="web" to its matchers: instead' in found["route.routes[1].match"].msg
+    assert 'Write target_matchers: [severity=~"warning|info"]' in \
+        found["inhibit_rules[0].target_match_re"].msg
+
+
+def test_deprecated_match_skips_the_root_route_and_unwritable_labels():
+    root = {"route": {"receiver": "a", "match": {"team": "db"}}, "receivers": [{"name": "a"}]}
+    assert _deprecated(root) == []  # invalid-root-route reports it
+    bad = {"route": {"receiver": "a", "routes": [{"match": {"k8s.ns": "x"}, "receiver": "a"}]},
+           "receivers": [{"name": "a"}]}
+    [f] = _deprecated(bad)
+    assert "Write" not in f.msg and "amlint fix" not in f.msg  # bad-match-label covers it
+
+
+def test_deprecated_mute_time_intervals():
+    interval = [{"name": "nights", "time_intervals": [{"weekdays": ["sunday"]}]}]
+    base = {"route": {"receiver": "a", "routes": [
+        {"matchers": ["x=y"], "receiver": "a", "mute_time_intervals": ["nights"]}]},
+        "receivers": [{"name": "a"}]}
+    [f] = _deprecated(dict(base, mute_time_intervals=interval))
+    assert (f.code, f.where, f.level) == ("deprecated-mute-time-intervals",
+                                          "mute_time_intervals", "info")
+    assert "Rename the key to time_intervals:" in f.msg
+    assert _deprecated(dict(base, time_intervals=interval)) == []
+    [f] = _deprecated(dict(base, time_intervals=interval, mute_time_intervals=[]))
+    assert "Move its entries into the time_intervals: list" in f.msg
+
+
+@pytest.mark.parametrize("op,value", [
+    ("=", "critical"), ("=", 'say "hi"'), ("=", "C:\\temp"), ("=~", "\\d+|x"),
+    ("=", "two\nlines"), ("=", "ünïcode"), ("=~", ""), ("=", "a, b"), ("=", "{x}"),
+])
+def test_written_matcher_reads_back_the_same(op, value):
+    from amlint.linter import _parse_matcher_entry, written_matcher
+    entry = written_matcher("label", op, value)
+    assert _parse_matcher_entry(entry) == (("label", op, value),)
+
+
+def test_written_matcher_needs_a_classic_label_name():
+    from amlint.linter import written_matcher
+    assert written_matcher("k8s.ns", "=", "x") is None
+
+
+LEGACY = """\
+# a config from 2021
+route:
+  receiver: default
+  routes:
+    - match:
+        team: db        # the database team
+        severity: critical
+      match_re:
+        service: "pg-.*|mysql"
+      receiver: db-pager
+    - receiver: web
+      match: {team: web}
+      continue: true
+    - match:
+        team: api
+      matchers: [env="prod"]
+      receiver: api
+    - receiver: ops
+      matchers:
+        - env="prod"
+      match_re:
+        team: 'ops|sre'
+    - match: {path: 'C:\\temp "x"'}
+      receiver: ops
+receivers:
+  - name: default
+  - name: db-pager
+  - name: web
+  - name: api
+  - name: ops
+inhibit_rules:
+  - source_match:
+      severity: critical
+    target_match_re:
+      severity: warning|info
+    equal: [alertname]
+mute_time_intervals:
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]
+"""
+
+FIXED = """\
+# a config from 2021
+route:
+  receiver: default
+  routes:
+    - matchers:
+        - team="db"  # the database team
+        - severity="critical"
+        - service=~"pg-.*|mysql"
+      receiver: db-pager
+    - receiver: web
+      matchers: [team="web"]
+      continue: true
+    - matchers: [env="prod", team="api"]
+      receiver: api
+    - receiver: ops
+      matchers:
+        - env="prod"
+        - team=~"ops|sre"
+    - matchers: [path="C:\\\\temp \\"x\\""]
+      receiver: ops
+receivers:
+  - name: default
+  - name: db-pager
+  - name: web
+  - name: api
+  - name: ops
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity=~"warning|info"
+    equal: [alertname]
+time_intervals:
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]
+"""
+
+
+def _fix(text, fmt=None):
+    from amlint.fixes import fix_text
+    from amlint.formats import apply_locations, load_input
+    loaded = load_input(text, fmt)
+    findings = apply_locations([f for f in lint(loaded.cfg) if f.code.startswith("deprecated-")],
+                               loaded)
+    new, fixed, left = fix_text(text, loaded, findings)
+    return new, [f.where for f in fixed], [f.where for f in left]
+
+
+def test_fix_rewrites_deprecated_syntax():
+    new, fixed, left = _fix(LEGACY)
+    assert new == FIXED
+    assert len(fixed) == 8 and left == []
+    cfg = yaml.safe_load(new)
+    assert _deprecated(cfg) == []
+    assert cfg["route"]["routes"][4]["matchers"] == ['path="C:\\\\temp \\"x\\""']
+
+
+def test_fix_keeps_the_routing():
+    from amlint.routing import Router
+    old, new = yaml.safe_load(LEGACY), yaml.safe_load(_fix(LEGACY)[0])
+    for labels in ({"team": "db", "severity": "critical", "service": "pg-main"},
+                   {"team": "web"}, {"team": "api", "env": "prod"}, {"team": "sre", "env": "prod"},
+                   {"path": 'C:\\temp "x"'}, {"team": "db"}):
+        assert [m.receiver for m in Router(old).match(labels)] == \
+            [m.receiver for m in Router(new).match(labels)]
+
+
+@pytest.mark.parametrize("route", [
+    "    - {match: {team: db}, receiver: db}\n",                   # a flow mapping
+    "    - <<: *base\n      match: {team: db}\n      receiver: db\n",  # a merge key
+    "    - match: {team: db}\n      match: {team: web}\n      receiver: db\n",  # twice
+])
+def test_fix_leaves_what_it_cannot_rewrite(route):
+    text = ("base: &base {group_wait: 1s}\n" if "*base" in route else "") + \
+        "route:\n  receiver: db\n  routes:\n" + route + "receivers:\n  - name: db\n"
+    try:
+        yaml.safe_load(text)
+    except yaml.YAMLError:
+        pytest.skip("PyYAML rejects it")
+    new, fixed, left = _fix(text, "alertmanager")
+    assert new == text and fixed == [] and left
+
+
+def test_fix_first_key_of_a_list_item():
+    text = ("route:\n  receiver: a\n  routes:\n"
+            "    - match:\n        team: db\n      match_re:\n        env: prod|stage\n"
+            "      matchers: [x=\"y\"]\n      receiver: a\n"
+            "receivers:\n  - name: a\n")
+    new, fixed, left = _fix(text)
+    assert left == []
+    assert "    - matchers: [x=\"y\", team=\"db\", env=~\"prod|stage\"]\n      receiver: a\n" \
+        in new
+
+
+def test_fix_empty_match():
+    text = "route:\n  receiver: a\n  routes:\n    - match:\n      receiver: a\n" \
+           "receivers:\n  - name: a\n"
+    new, _, left = _fix(text)
+    assert left == []
+    assert "    - matchers: []\n      receiver: a\n" in new
+
+
+def test_fix_helm_values():
+    text = """\
+alertmanager:
+  config:
+    route:
+      receiver: "null"
+      routes:
+        - match: {alertname: Watchdog}
+          receiver: "null"
+    receivers:
+      - name: "null"
+"""
+    new, fixed, left = _fix(text)
+    assert left == [] and len(fixed) == 1
+    assert '        - matchers: [alertname="Watchdog"]\n' in new
+
+
+def test_fix_not_in_a_secret():
+    text = """\
+apiVersion: v1
+kind: Secret
+metadata: {name: alertmanager-main}
+stringData:
+  alertmanager.yaml: |
+    route:
+      receiver: a
+      routes:
+        - match: {team: db}
+          receiver: a
+    receivers:
+      - name: a
+"""
+    new, fixed, left = _fix(text)
+    assert new == text and fixed == [] and left == ["route.routes[0].match"]
+
+
+def test_cli_fix_in_place(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "am.yml").write_text(LEGACY)
+    assert main(["fix", "am.yml"]) == 0
+    assert (tmp_path / "am.yml").read_text() == FIXED
+    out = capsys.readouterr().out
+    assert "✔ fixed  [deprecated-match]  ·  am.yml:5:7  ·  route.routes[0].match" in out
+    assert "am.yml: fixed 8 of 8" in out
+    assert main(["fix", "am.yml"]) == 0
+    assert "am.yml: nothing to fix" in capsys.readouterr().out
+    assert main(["check", "am.yml"]) == 0
+
+
+def test_cli_fix_diff_writes_nothing(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "am.yml").write_text(LEGACY)
+    assert main(["fix", "--diff", "am.yml"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out.startswith("--- am.yml\n+++ am.yml\n")
+    assert '+        - team="db"  # the database team\n' in captured.out
+    assert "✔ fixed" in captured.err
+    assert (tmp_path / "am.yml").read_text() == LEGACY
+    (tmp_path / "am.yml").write_text(FIXED)
+    assert main(["fix", "--diff", "am.yml"]) == 0
+    assert capsys.readouterr().out == ""
+
+
+def test_cli_fix_keeps_crlf_and_suppressed_spots(tmp_path, capsys, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    text = ("route:\n  receiver: a\n  routes:\n"
+            "    - match: {team: db}  # amlint: disable=deprecated-match\n      receiver: a\n"
+            "    - match: {team: web}\n      receiver: a\n"
+            "receivers:\n  - name: a\n")
+    (tmp_path / "am.yml").write_bytes(text.replace("\n", "\r\n").encode())
+    assert main(["fix", "am.yml"]) == 0
+    new = (tmp_path / "am.yml").read_bytes().decode()
+    assert new == text.replace("    - match: {team: web}", '    - matchers: [team="web"]') \
+        .replace("\n", "\r\n")
+
+
+def test_cli_fix_stdin(capsys, monkeypatch):
+    import io
+    monkeypatch.setattr("sys.stdin", io.StringIO(LEGACY))
+    assert main(["fix", "-"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == FIXED
+    assert "✔ fixed" in captured.err

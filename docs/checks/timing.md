@@ -144,3 +144,46 @@ global:
 route:
   receiver: default
 ```
+
+---
+
+## deprecated-mute-time-intervals
+
+**Level:** info · **amtool:** doesn't catch it
+
+**What goes wrong:** The list of time intervals at the top level of the config is called
+`mute_time_intervals:`. Alertmanager 0.24 renamed it to `time_intervals:`, because a route
+can now use an interval to mute (`mute_time_intervals:`) or to send only during it
+(`active_time_intervals:`).
+
+```yaml title="Bad"
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db
+      mute_time_intervals: [nights]
+mute_time_intervals:          # the old name of the list
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]
+```
+
+**What Alertmanager does:** Still reads the old name. Nothing breaks today.
+
+**How to fix:** Rename the list to `time_intervals:`, or run
+[`amlint fix`](../usage.md#fix). A route's own `mute_time_intervals:` key is not deprecated:
+keep it.
+
+```yaml title="Fixed"
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db
+      mute_time_intervals: [nights]   # this key on a route is fine
+time_intervals:
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]
+```

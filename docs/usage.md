@@ -788,6 +788,7 @@ use `--exit-zero` instead.
 | `test` | Every case passes and coverage meets `--fail-under` | A case fails, or coverage is below `--fail-under` | Input can't be read, the config can't be simulated, or the tests file isn't a list of cases |
 | `route` | The alert was routed, delivered or not | — | Input can't be read, the config can't be simulated, or a label isn't `label=value` |
 | `tree` | Always, findings or not | — | No root route, or input can't be read |
+| `fix` | Done, or with `--diff`, nothing to change | With `--diff`: something to change | Input can't be read |
 
 "Input can't be read" means: file not found, YAML that doesn't parse, a file that isn't an
 Alertmanager config in the format given or detected, or, for `check --rules`, a glob that
@@ -844,6 +845,69 @@ separate `amlint check` step.
 To get the routing diff as a PR comment, use the GitHub Action's
 [`diff-base`](github-action.md#routing-diff-as-a-pr-comment) input.
 
+## Rewrite deprecated syntax { #fix }
+
+`amlint fix` rewrites the syntax Alertmanager has deprecated. `match:` and `match_re:` become
+`matchers:`, an inhibition rule's `source_match:` and `target_match:` become
+`source_matchers:` and `target_matchers:`, and the top-level `mute_time_intervals:` list
+becomes `time_intervals:`.
+
+```bash
+amlint fix alertmanager.yml          # rewrite the file
+amlint fix --diff alertmanager.yml   # print the changes, write nothing
+```
+
+```console
+$ amlint fix --diff alertmanager.yml
+  ✔ fixed  [deprecated-match]  ·  alertmanager.yml:4:7  ·  route.routes[0].match
+  ✔ fixed  [deprecated-match]  ·  alertmanager.yml:9:7  ·  route.routes[1].match
+  ✔ fixed  [deprecated-match]  ·  alertmanager.yml:19:5  ·  inhibit_rules[0].source_match
+  ✔ fixed  [deprecated-match]  ·  alertmanager.yml:20:5  ·  inhibit_rules[0].target_match
+--- alertmanager.yml
++++ alertmanager.yml
+@@ -1,12 +1,11 @@
+ route:
+   receiver: default
+   routes:
+-    - match:
+-        team: db        # the database team
+-      match_re:
+-        service: pg-.*|mysql
++    - matchers:
++        - team="db"  # the database team
++        - service=~"pg-.*|mysql"
+       receiver: db-pager
+-    - match: {team: web}
++    - matchers: [team="web"]
+       receiver: web
+ receivers:
+   - name: default
+@@ -16,6 +15,6 @@
+   - name: web
+     webhook_configs: [{url: http://alerts.example.com/web}]
+ inhibit_rules:
+-  - source_match: {severity: critical}
+-    target_match: {severity: warning}
++  - source_matchers: [severity="critical"]
++    target_matchers: [severity="warning"]
+     equal: [alertname]
+```
+
+**Good to know**
+
+- Before it writes, amlint reads the new config back and checks that every route and
+  inhibition rule has the same matchers as before, and that nothing else changed. When it
+  can't make such a change, it leaves that spot as it was and prints `✗ left`.
+- Only the rewritten keys change. Comments on the `match:` entries move to the new ones.
+- `--diff` exits `1` when there is something to change, so CI can require the new syntax.
+- It rewrites plain configs and kube-prometheus-stack Helm values. A config inside a Secret,
+  a ConfigMap or a Mimir string is checked, but not rewritten.
+- `# amlint: disable=deprecated-match` comments and `ignore:` in the
+  [project config](#project-config) keep a spot as it is.
+- `amlint fix -` reads the config from stdin and prints the fixed config.
+
+The [editor](#lsp) offers the same rewrite as a quick fix.
+
 ## See findings in your editor { #lsp }
 
 `amlint lsp` is a language server. Your editor starts it and shows amlint's findings as you
@@ -854,8 +918,9 @@ type, on the lines `amlint check` reports. You don't run it yourself.
 - **Hover on a route** shows its matchers, receiver, `group_by` and timings, where each
   value comes from, and an example alert that ends there. It is the same simulation as
   [`route`](#route).
-- **Quick fixes** add `# amlint: disable=<code>` to the line, or
-  `# amlint: disable-file=<code>` to the top of the file.
+- **Quick fixes** rewrite deprecated syntax the way [`fix`](#fix) does, or add
+  `# amlint: disable=<code>` to the line, or `# amlint: disable-file=<code>` to the top of the
+  file.
 
 It reads every format `check` reads. YAML files without an Alertmanager config, such as
 Kubernetes manifests, get no findings.

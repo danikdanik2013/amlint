@@ -38,7 +38,7 @@ _DOCS_PAGES = {
         "no-root-route", "invalid-root-route", "undefined-receiver", "groupby-ellipsis",
         "bad-regex", "bad-matcher", "bad-match-label", "unreachable-route",
         "route-match-collision", "shadowed-route", "stripped-brace", "useless-continue",
-        "deep-nesting",
+        "deep-nesting", "deprecated-match",
     ),
     "receivers": (
         "duplicate-receiver", "empty-receiver", "unused-receiver", "template-file-missing",
@@ -49,7 +49,7 @@ _DOCS_PAGES = {
     "inhibition": ("inhibit-no-equal", "circular-inhibition", "inhibit-same-match"),
     "timing": (
         "repeat-before-group", "wait-exceeds-interval", "undefined-time-interval",
-        "global-resolve-timeout-missing",
+        "global-resolve-timeout-missing", "deprecated-mute-time-intervals",
     ),
     "rules": (
         "route-unknown-alertname", "inhibit-unknown-alertname", "alert-hits-default-receiver",
@@ -1015,5 +1015,85 @@ route:
       - alert: QueueBacklog
         expr: queue_depth > 1000
         labels: {severity: critical}""",
+    },
+
+    "deprecated-match": {
+        "level": "info",
+        "amtool": (
+            "Not caught by `amtool check-config`: Alertmanager still accepts the old "
+            "spelling, so nothing is broken yet."
+        ),
+        "summary": (
+            "A route uses match: or match_re:, or an inhibit rule source_match: or"
+            " target_match: (and their _re forms), deprecated since Alertmanager 0.22."
+        ),
+        "why": (
+            "Alertmanager 0.22 replaced these keys with matchers:, source_matchers: and "
+            "target_matchers:, and its docs mark the old ones as deprecated. They still work, "
+            "so nothing breaks today, but the new keys are the only ones that can say != and "
+            "!~ or take UTF-8 label names, and mixing both styles makes a config harder to "
+            "read. `amlint fix` rewrites them for you, and so does the quick fix in the editor."
+        ),
+        "bad": """\
+routes:
+  - match:
+      team: db
+    match_re:
+      service: pg-.*|mysql
+    receiver: db-pager
+inhibit_rules:
+  - source_match: {severity: critical}
+    target_match: {severity: warning}
+    equal: [alertname]""",
+        "good": """\
+routes:
+  - matchers:
+      - team="db"
+      - service=~"pg-.*|mysql"
+    receiver: db-pager
+inhibit_rules:
+  - source_matchers: [severity="critical"]
+    target_matchers: [severity="warning"]
+    equal: [alertname]""",
+    },
+
+    "deprecated-mute-time-intervals": {
+        "level": "info",
+        "amtool": (
+            "Not caught by `amtool check-config`: Alertmanager still accepts the old "
+            "spelling, so nothing is broken yet."
+        ),
+        "summary": (
+            "The top-level mute_time_intervals: list, deprecated since Alertmanager 0.24 in"
+            " favor of time_intervals:."
+        ),
+        "why": (
+            "Alertmanager 0.24 renamed the top-level list to time_intervals:, because routes "
+            "can now use an interval to mute (mute_time_intervals:) or to send only during it "
+            "(active_time_intervals:). The old name still works. A route's own "
+            "mute_time_intervals: key is not deprecated. `amlint fix` renames the list for you."
+        ),
+        "bad": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db
+      mute_time_intervals: [nights]
+mute_time_intervals:          # the old name of the list
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]""",
+        "good": """\
+route:
+  receiver: default
+  routes:
+    - matchers: [team="db"]
+      receiver: db
+      mute_time_intervals: [nights]   # this key on a route is fine
+time_intervals:
+  - name: nights
+    time_intervals:
+      - times: [{start_time: "00:00", end_time: "06:00"}]""",
     },
 }

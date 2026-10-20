@@ -950,8 +950,9 @@ def _operator(text: str, docs: List[_Doc], crs_docs: List[_Doc], base: Optional[
     receivers = list(cfg["receivers"]) if isinstance(cfg.get("receivers"), list) else []
     rules = list(cfg.get("inhibit_rules")) if isinstance(cfg.get("inhibit_rules"), list) else []
     raw_rules = list(rules)  # the same, without the namespace matcher
-    intervals = list(cfg.get("mute_time_intervals")) \
-        if isinstance(cfg.get("mute_time_intervals"), list) else []
+    # the operator writes time_intervals:; a base config's own deprecated key stays apart
+    intervals = list(cfg.get("time_intervals")) \
+        if isinstance(cfg.get("time_intervals"), list) else []
     sub_routes: List[dict] = []
     by_design = set()
 
@@ -992,8 +993,8 @@ def _operator(text: str, docs: List[_Doc], crs_docs: List[_Doc], base: Optional[
         for j, node in cr.items(cr.intervals_key):
             interval = cr.time_interval(node)
             target = f"spec.{cr.intervals_key}[{j}]"
-            merged.add(f"mute_time_intervals[{len(intervals)}]", cr_region, target, camel=True)
-            merged.add(f"mute_time_intervals[{interval['name']}]", cr_region, target, camel=True)
+            merged.add(f"time_intervals[{len(intervals)}]", cr_region, target, camel=True)
+            merged.add(f"time_intervals[{interval['name']}]", cr_region, target, camel=True)
             intervals.append(interval)
 
     # The resources' routes go first; with continue: true, alerts fall through to the base's.
@@ -1002,7 +1003,7 @@ def _operator(text: str, docs: List[_Doc], crs_docs: List[_Doc], base: Optional[
     route["routes"] = sub_routes + base_routes
     cfg = dict(cfg, route=route, receivers=receivers)
     if intervals:
-        cfg["mute_time_intervals"] = intervals
+        cfg["time_intervals"] = intervals
     uninjected = None
     if rules:
         cfg["inhibit_rules"] = rules
@@ -1041,7 +1042,7 @@ def _global_base(cr: _CR, am: _Doc, outer: Suppressions) -> Tuple[dict, _Region]
         cfg["inhibit_rules"] = rules
     intervals = [cr.time_interval(node) for _, node in cr.items(cr.intervals_key)]
     if intervals:
-        cfg["mute_time_intervals"] = intervals
+        cfg["time_intervals"] = intervals
     templates = []
     for item in (settings.get("templates") or []) if isinstance(settings, dict) else []:
         for kind in ("configMap", "secret"):

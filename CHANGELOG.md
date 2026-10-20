@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- `deprecated-match` (info): a route's `match:` or `match_re:`, or an inhibition rule's
+  `source_match:`, `target_match:` and their `_re` forms, which Alertmanager 0.22
+  deprecated. The message shows the `matchers:` to write instead.
+- `deprecated-mute-time-intervals` (info): the top-level `mute_time_intervals:` list, which
+  Alertmanager 0.24 renamed to `time_intervals:`.
+- `amlint fix` rewrites both in place, or prints a diff with `--diff` (exit 1 when there is
+  something to change). It reads the result back and leaves any spot alone where the
+  matchers or anything else would change. Plain configs and Helm values.
+- The editor (`amlint lsp`) offers the same rewrite as a quick fix.
+
+### Changed
+- AlertmanagerConfig resources: their time intervals are merged into `time_intervals:`, the
+  key the operator writes, instead of `mute_time_intervals:`.
+
 ## [0.7.0] - 2026-10-20
 
 Highlights:

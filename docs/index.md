@@ -51,8 +51,8 @@ fix a finding, run `amlint explain <check>`, for example `amlint explain unreach
 
 ## What it catches
 
-There are 38 checks. 18 of them find configs that amtool accepts but that don't behave the
-way you expect:
+There are 40 checks. 20 of them find configs that amtool accepts but that don't behave the
+way you expect, or use syntax Alertmanager has deprecated:
 
 - **Alerts that reach nobody.** A route points at a receiver with no integration, or a
   catch-all route sits above more specific ones.

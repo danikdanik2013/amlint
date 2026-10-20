@@ -31,6 +31,7 @@ import yaml
 
 from .config import ConfigError, load_project_config, tests_for_config
 from .explains import EXPLAINS, docs_url
+from .fixes import FIXABLE, fix_edits
 from .formats import FormatError, Loaded, apply_locations, load_input
 from .linter import ERROR, INFO, WARN, _dict_items, _matchers, _scalar, _walk_routes, lint
 from .routing import GROUP_BY_ALL, RouteOpts, Router, RoutingError, probe_label_sets
@@ -1100,9 +1101,11 @@ class Server:
         return actions
 
     @staticmethod
-    def _action(title: str, uri: str, diag: dict, edit: dict, preferred: bool = False) -> dict:
+    def _action(title: str, uri: str, diag: dict, edit, preferred: bool = False) -> dict:
+        """A quick fix that makes one edit, or a list of them."""
+        edits = edit if isinstance(edit, list) else [edit]
         action = {"title": title, "kind": "quickfix", "diagnostics": [diag],
-                  "edit": {"changes": {uri: [edit]}}}
+                  "edit": {"changes": {uri: edits}}}
         if preferred:
             action["isPreferred"] = True
         return action
@@ -1113,6 +1116,8 @@ class Server:
         if analysis.loaded is None:
             return []
         cfg, lines = analysis.loaded.cfg, analysis.lines
+        if code in FIXABLE:
+            return self._rewrite(uri, doc, analysis.loaded, diag, code, where)
         if code in ("undefined-receiver", "undefined-time-interval"):
             receiver = code == "undefined-receiver"
             keys = ("receivers",) if receiver else ("time_intervals", "mute_time_intervals")
@@ -1154,6 +1159,33 @@ class Server:
             return [self._action("Remove continue: true (it does nothing here)", uri, diag,
                                  edit, preferred=True)]
         return []
+
+    def _rewrite(self, uri: str, doc: _Document, loaded: Loaded, diag: dict, code: str,
+                 where: str) -> List[dict]:
+        """The quick fix `amlint fix` would make for this finding."""
+        edits = fix_edits(doc.text, loaded, code, where)
+        if not edits:
+            return []
+        newline = "\r\n" if "\r\n" in doc.text else "\n"
+        changes = [{"range": {"start": self._position(doc.text, start),
+                              "end": self._position(doc.text, end)},
+                    "newText": new.replace("\n", newline)}
+                   for start, end, new in edits]
+        if code == "deprecated-match":
+            key = where.rsplit(".", 1)[-1]
+            title = f"Rewrite as {key[:key.index('match')]}matchers:"
+        else:
+            title = "Rename to time_intervals:"
+        return [self._action(title, uri, diag, changes, preferred=True)]
+
+    def _position(self, text: str, offset: int) -> dict:
+        """LSP position of character `offset` of a document."""
+        line, start = 0, 0
+        for hit in _LINE_BREAK.finditer(text, 0, offset):
+            line, start = line + 1, hit.end()
+        brk = _LINE_BREAK.search(text, start)
+        current = text[start:brk.start() if brk else len(text)]
+        return {"line": line, "character": self._char(current, offset - start)}
 
     @staticmethod
     def _route_list(cfg: dict, where: str, key: str) -> list:

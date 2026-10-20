@@ -1544,6 +1544,84 @@ def check_shadowed_routes(cfg: dict) -> List[Finding]:
     return out
 
 
+def written_matcher(label: str, op: str, value: str) -> Optional[str]:
+    """A matchers: entry for (label, op, value) that Alertmanager reads back as exactly that,
+    with both of its parsers where possible, or None if there is no such entry."""
+    if not _LEGACY_LABEL_NAME.fullmatch(label):
+        return None
+    want = [(label, op, value)]
+    for quote in (_go_quote, _classic_quote):
+        entry = f"{label}{op}{quote(value)}"
+        if _classic_matchers(entry) == want and _utf8_matchers(entry) == want:
+            return entry
+    entry = f"{label}{op}{_classic_quote(value)}"
+    return entry if _parse_matcher_entry(entry) == tuple(want) else None
+
+
+def legacy_matchers(node: dict, prefix: str = "") -> Optional[List[str]]:
+    """The match: and match_re: maps of a route (or of one side of an inhibit rule) as
+    matchers: entries, or None if one of them can't be written as an entry."""
+    out = []
+    for key, op in (("match", "="), ("match_re", "=~")):
+        value = node.get(prefix + key)
+        if value is None:
+            continue
+        if not isinstance(value, dict):
+            return None
+        for label, v in value.items():
+            entry = written_matcher(_scalar(label), op, _scalar(v))
+            if entry is None:
+                return None
+            out.append(entry)
+    return out
+
+
+# CHECK 39: match: / match_re: and the inhibit rule spellings, deprecated since 0.22
+def check_deprecated_match(cfg: dict) -> List[Finding]:
+    """matchers: replaced match: and match_re: in Alertmanager 0.22. The old keys still work,
+    and the root route takes neither (invalid-root-route reports that)."""
+    out: List[Finding] = []
+    for node, where, prefix in _matcher_nodes(cfg):
+        keys = [prefix + k for k in ("match", "match_re") if prefix + k in node]
+        if not keys or where == "route":
+            continue
+        new = prefix + "matchers"
+        entries = legacy_matchers(node, prefix)
+        said = " and ".join(f"{k}:" for k in keys)
+        msg = (f"{said} {'is' if len(keys) == 1 else 'are'} deprecated: Alertmanager 0.22 "
+               f"replaced {'it' if len(keys) == 1 else 'them'} with {new}:.")
+        if entries:
+            ours = ", ".join(entries)
+            if node.get(new):
+                msg += f" Add {ours} to its {new}: instead"
+            else:
+                msg += f" Write {new}: [{ours}] instead"
+            msg += "; `amlint fix` can do it for you."
+        out.append(Finding(INFO, "deprecated-match", msg, f"{where}.{keys[0]}"))
+    return out
+
+
+# CHECK 40: top-level mute_time_intervals:, deprecated since 0.24
+def check_deprecated_mute_time_intervals(cfg: dict) -> List[Finding]:
+    """time_intervals: replaced the top-level mute_time_intervals: in Alertmanager 0.24. A
+    route's own mute_time_intervals: key is not deprecated."""
+    if "mute_time_intervals" not in cfg:
+        return []
+    if "time_intervals" in cfg:
+        how = ("Move its entries into the time_intervals: list; routes refer to them by name "
+               "either way.")
+    else:
+        how = ("Rename the key to time_intervals:; routes refer to the intervals by name either "
+               "way. `amlint fix` renames it for you.")
+    return [Finding(
+        INFO, "deprecated-mute-time-intervals",
+        "The top-level mute_time_intervals: is deprecated: Alertmanager 0.24 replaced it with "
+        f"time_intervals:, which both mute_time_intervals: and active_time_intervals: of a "
+        f"route can use. {how}",
+        "mute_time_intervals",
+    )]
+
+
 ALL_CHECKS = [
     check_undefined_receivers,
     check_unused_receivers,
@@ -1577,6 +1655,8 @@ ALL_CHECKS = [
     check_sns_no_target,
     check_root_route,
     check_shadowed_routes,
+    check_deprecated_match,
+    check_deprecated_mute_time_intervals,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}
