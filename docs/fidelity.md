@@ -64,8 +64,9 @@ How the job runs (`.github/workflows/differential.yml`):
 - label sets with labels missing, empty, or set to values the matchers look for
 - configs with up to two of the mistakes `amtool check-config` rejects, including
   integration fields covered (or not) by a `_file` variant or a `global:` default,
-  `matchers:` entries that neither matcher parser reads, and `match:` / `match_re:` keys
-  that aren't classic label names (`k8s.ns`, `1a`, a null key)
+  `matchers:` entries that neither matcher parser reads, `match:` / `match_re:` keys
+  that aren't classic label names (`k8s.ns`, `1a`, a null key), and time intervals with
+  times, weekdays, days, months, years and locations Alertmanager reads or rejects
 - inhibit rules with `equal:`, rules matching both sides, and alerts that match several
   rules
 
@@ -131,8 +132,10 @@ same way, and `amlint check` reports the cases that are probably not what you me
 ## Not covered yet
 
 - Alerts use label names from a small pool.
-- `group_by`, timings and time intervals aren't compared, because amtool doesn't print them.
+- `group_by`, timings and when time intervals are active aren't compared, because amtool
+  doesn't print them. Whether amtool accepts a time interval is.
   The inhibition test reads only receivers and inhibitions from the API.
 - Only `matchers:` entries, `match:` maps, receivers and inhibit rules are generated.
   Integration settings beyond the fields amlint checks, templates, and YAML features such as
-  anchors and merge keys are not.
+  anchors and merge keys are not. The template parser is tested against Go's own parser
+  tests instead.
