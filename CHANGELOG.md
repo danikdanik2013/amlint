@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-20
+
+Highlights:
+
+- **Notification templates that break when they're sent.** amlint parses templates the way
+  Alertmanager does and finds syntax errors, templates nothing defines, and fields the data
+  doesn't have, such as `.Labels` outside `{{ range .Alerts }}`. Alertmanager loads these
+  configs fine; the notification fails, or Slack sends it empty. The editor shows them in
+  `.tmpl` files too.
+- **`amlint fix`** rewrites deprecated `match:` and `source_match:` syntax as `matchers:`, in
+  place or as a diff, and only where the result routes the same.
+- **Time intervals:** ones Alertmanager rejects, ones that are never active, and routes they
+  mute all the time.
+- **Secrets in plain text:** API keys, tokens and webhook URLs written into the config.
+
 ### Added
 - Notification templates are checked, with a Go template parser of amlint's own (no new
   dependencies) that passes Go's own parser tests:
@@ -43,6 +58,10 @@
   it, written into the config instead of read from a `_file` field. Stand-in values such as
   `<secret>`, `${VAR}` or `mysecret` are skipped, and so are configs in a Kubernetes Secret,
   AlertmanagerConfig resources and Mimir configs.
+
+### Fixed
+- `bad-regex` reports a `match_re` key with no value (`match_re: {team: }`): Alertmanager
+  refuses that config ("invalid regexp value"), and amlint read it as the regex `""`.
 
 ### Changed
 - Unquoted times and ranges in time intervals (`start_time: 17:00`, `days_of_month: [1:5]`)

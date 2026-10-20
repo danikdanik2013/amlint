@@ -1,26 +1,10 @@
 # Roadmap
 
-Where amlint is going after 0.7.0, release by release. This is a plan, not a promise: items
+Where amlint is going after 0.8.0, release by release. This is a plan, not a promise: items
 can move between releases or drop out. Want to work on one? Open an issue first, so two
 people don't build the same thing.
 
 Last updated: 2026-10-20.
-
-## 0.8: templates and notifications
-
-The biggest class of silent failures amlint doesn't catch yet.
-
-- **Check notification templates.** Go template syntax in `.tmpl` files and in fields such as
-  `title:` and `text:`, and `{{ template "name" }}` calls to templates that don't exist.
-  Alertmanager only notices at send time, and the notification goes out empty. This is a big
-  item: amlint needs its own template parser, with no new dependencies.
-- **Deprecated syntax, with fixes.** `match`/`match_re` → `matchers`,
-  `source_match`/`target_match` → `source_matchers`/`target_matchers`, top-level
-  `mute_time_intervals` → `time_intervals`. Fixed by `amlint fix` or a quick fix in the editor.
-- **Secrets in plain text.** API keys and webhook URLs with tokens written into the config;
-  suggest the `*_file` fields. Must stay quiet on `testdata/real-world`.
-- **Time intervals:** an invalid `location`, intervals that are never active, and a route
-  whose intervals mute it all the time.
 
 ## 0.9: scale and team policies
 
