@@ -30,7 +30,7 @@ Matcher = Tuple[str, str, str]
 
 
 class Finding:
-    __slots__ = ("level", "code", "msg", "where", "line", "col")
+    __slots__ = ("level", "code", "msg", "where", "line", "col", "template_at")
 
     def __init__(self, level: str, code: str, msg: str, where: str = "") -> None:
         self.level = level
@@ -40,6 +40,9 @@ class Finding:
         # 1-based position of `where` in the source file, filled in by the CLI
         self.line: Optional[int] = None
         self.col: Optional[int] = None
+        # a problem inside a template file on disk: (its absolute path, normcase'd, and the
+        # character offset in it), so editors can show it in that file too
+        self.template_at: Optional[Tuple[str, int]] = None
 
 
 def _dict_items(value) -> List[Tuple[int, dict]]:
@@ -2039,11 +2042,12 @@ _VALID_LEVELS = {ERROR, WARN, INFO}
 
 
 def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None,
-         rules=None, template_files=None) -> List[Finding]:
+         rules=None, template_files=None, template_texts=None) -> List[Finding]:
     """Run every check. `rules`, the alerting rules from amlint.rules.load_rules, adds the
     checks against Prometheus rules. `template_files` (amlint.formats.BundledTemplates) are
     the template files that ship with the config; templates: is then checked against them
-    instead of files under `basedir`."""
+    instead of files under `basedir`. `template_texts` ({absolute path, normcase'd: text})
+    is read instead of those template files on disk: an editor's unsaved changes."""
     findings: List[Finding] = []
     for check in ALL_CHECKS:
         findings.extend(check(cfg))
@@ -2053,7 +2057,7 @@ def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None,
         findings.extend(check_template_files(cfg, basedir))
     from .templates import check_templates, template_sources  # builds on this module
     sources = template_sources(cfg, None if template_files is not None else basedir,
-                               template_files)
+                               template_files, template_texts)
     findings.extend(check_templates(cfg, sources))
     if rules is not None:
         from .rules import check_rules  # imported here: rules.py builds on this module

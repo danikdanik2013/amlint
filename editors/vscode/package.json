@@ -35,7 +35,8 @@
     "sre"
   ],
   "activationEvents": [
-    "onLanguage:yaml"
+    "onLanguage:yaml",
+    "workspaceContains:**/*.tmpl"
   ],
   "main": "./out/extension.js",
   "capabilities": {

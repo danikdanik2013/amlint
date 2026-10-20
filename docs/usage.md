@@ -922,6 +922,10 @@ type, on the lines `amlint check` reports. You don't run it yourself.
 - **Quick fixes** rewrite deprecated syntax the way [`fix`](#fix) does, or add
   `# amlint: disable=<code>` to the line, or `# amlint: disable-file=<code>` to the top of the
   file.
+- **Template files** (`.tmpl`) show `bad-template-file`, `undefined-template` and
+  `template-unknown-field` on the line where the problem is, for every config in the
+  workspace folder whose `templates:` globs load the file. A template file no config loads
+  gets its syntax errors only.
 
 It reads every format `check` reads. YAML files without an Alertmanager config, such as
 Kubernetes manifests, get no findings.

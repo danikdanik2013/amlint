@@ -94,8 +94,10 @@ class Client:
             if message.get("id") == self.ids:
                 return message
 
-    def initialize(self, root=None, encodings=None) -> dict:
+    def initialize(self, root=None, encodings=None, related=False) -> dict:
         capabilities = {"general": {"positionEncodings": encodings}} if encodings else {}
+        if related:
+            capabilities["textDocument"] = {"publishDiagnostics": {"relatedInformation": True}}
         result = self.request("initialize", {
             "processId": None, "capabilities": capabilities,
             "rootUri": root.as_uri() if root else None,
@@ -878,3 +880,132 @@ def test_quick_fix_rewrites_an_inhibit_rule_and_the_interval_list(lsp, tmp_path)
     title, fixed = _fix(client, uri, fixed, "deprecated-mute-time-intervals")
     assert title == "Rename to time_intervals:"
     assert fixed.endswith("time_intervals:\n  - name: nights\n")
+
+
+# ── Template files ────────────────────────────────────────────────────
+
+TEMPLATE_CONFIG = """\
+route:
+  receiver: slack
+receivers:
+  - name: slack
+    slack_configs:
+      - api_url_file: /etc/alertmanager/slack-url
+        channel: '#alerts'
+        title: '{{ template "slack.myorg.title" . }}'
+        text: '{{ template "slack.myorg.text" . }}'
+templates:
+  - templates/*.tmpl
+"""
+TEMPLATES_LINE = 10  # 0-based line of `  - templates/*.tmpl`
+TITLE = '{{ define "slack.myorg.title" }}{{ .Status | toUpper }}{{ end }}\n'
+
+
+def _template_project(tmp_path, template: str, config: str = TEMPLATE_CONFIG):
+    """alertmanager.yml and templates/slack.tmpl on disk; their URIs."""
+    (tmp_path / "templates").mkdir()
+    (tmp_path / "alertmanager.yml").write_text(config)
+    (tmp_path / "templates" / "slack.tmpl").write_text(template)
+    return _uri(tmp_path / "alertmanager.yml"), _uri(tmp_path / "templates" / "slack.tmpl")
+
+
+def _spot(text: str, line: int, token: str) -> dict:
+    """The LSP range of `token` on a line (0-based) of `text`."""
+    start = text.splitlines()[line].index(token)
+    return {"start": {"line": line, "character": start},
+            "end": {"line": line, "character": start + len(token)}}
+
+
+def test_template_syntax_error_in_the_file(lsp, tmp_path):
+    template = TITLE + '{{ define "slack.myorg.text" }}\n  {{ .Status | toUpperCase }}\n{{ end }}\n'
+    config_uri, uri = _template_project(tmp_path, template)
+    client = lsp(root=tmp_path, related=True)
+    [diag] = client.open(uri, template)
+    assert diag["code"] == "bad-template-file"
+    assert diag["range"] == _spot(template, 2, "toUpperCase")
+    assert diag["severity"] == 1 and diag["source"] == "amlint"
+    assert diag["message"] == (
+        'Template file templates/slack.tmpl, line 3: function "toUpperCase" not defined. '
+        "Alertmanager refuses to load this config.")
+    assert diag["codeDescription"]["href"].endswith("#bad-template-file")
+    [related] = diag["relatedInformation"]
+    assert related["location"]["uri"] == config_uri
+    assert related["location"]["range"]["start"]["line"] == TEMPLATES_LINE
+
+    # the config still has it on its templates: line, with the same message and link
+    config = _by_code(client.open(config_uri, TEMPLATE_CONFIG))["bad-template-file"]
+    assert config["range"]["start"]["line"] == TEMPLATES_LINE
+    assert (config["message"], config["codeDescription"]) == \
+        (diag["message"], diag["codeDescription"])
+    # no quick fix writes an `# amlint:` comment into the template
+    assert _actions(client, uri, diag) == []
+
+
+def test_undefined_template_called_from_a_template_file(lsp, tmp_path):
+    template = (TITLE + '{{ define "slack.myorg.text" }}\n'
+                '{{ range .Alerts }}{{ template "slack.myorg.rows" . }}{{ end }}\n'
+                '{{ end }}\n'
+                '{{ define "slack.myorg.row" }}{{ .Labels.alertname }}{{ end }}\n')
+    _, uri = _template_project(tmp_path, template)
+    [diag] = lsp().open(uri, template)  # no workspace folder: the config is one level up
+    assert diag["code"] == "undefined-template"
+    assert diag["range"] == _spot(template, 2, '"slack.myorg.rows"')
+    assert diag["message"].startswith(
+        'Template file templates/slack.tmpl, line 3, calls template "slack.myorg.rows", '
+        'which no template file defines (did you mean "slack.myorg.row"?).')
+    assert "relatedInformation" not in diag  # the client didn't ask for it
+
+
+def test_unknown_field_in_a_define_a_config_field_calls(lsp, tmp_path):
+    template = (TITLE + '{{ define "slack.myorg.text" }}\n'
+                '{{ .Status }}: {{ .Labels.severity }}\n'
+                '{{ end }}\n')
+    config_uri, uri = _template_project(tmp_path, template)
+    client = lsp(root=tmp_path)
+    [diag] = client.open(uri, template)
+    assert diag["code"] == "template-unknown-field"
+    assert diag["range"] == _spot(template, 2, ".Labels")
+    assert diag["message"].startswith(
+        'Template file templates/slack.tmpl, line 3, in "slack.myorg.text": .Labels on the '
+        "notification data, which has no field Labels.")
+
+    # the type of the data comes from the config: called on one alert, .Labels is fine
+    client.open(config_uri, TEMPLATE_CONFIG)
+    assert client.diagnostics(uri, 1) != []  # opening the config lints the template again
+    per_alert = TEMPLATE_CONFIG.replace(
+        "text: '{{ template \"slack.myorg.text\" . }}'",
+        "text: '{{ range .Alerts }}{{ template \"slack.myorg.text\" . }}{{ end }}'")
+    client.change(config_uri, per_alert, 2)
+    assert client.diagnostics(uri, 1) == []
+
+
+def test_template_file_reads_the_open_buffers(lsp, tmp_path):
+    template = TITLE + '{{ define "slack.myorg.text" }}{{ .Status }}{{ end }}\n'
+    config_uri, uri = _template_project(tmp_path, template)  # clean on disk
+    client = lsp(root=tmp_path)
+    assert "bad-template-file" not in _by_code(client.open(config_uri, TEMPLATE_CONFIG))
+    broken = template.replace("{{ .Status }}", "{{ .Status | nope }}")
+    assert [d["code"] for d in client.open(uri, broken)] == ["bad-template-file"]
+    assert "bad-template-file" in _by_code(client.diagnostics(config_uri, 1))
+    assert client.change(uri, template, 2) == []
+    assert "bad-template-file" not in _by_code(client.diagnostics(config_uri, 1))
+    client.change(uri, broken, 3)
+    assert "bad-template-file" in _by_code(client.diagnostics(config_uri, 1))
+    client.notify("textDocument/didClose", {"textDocument": {"uri": uri}})
+    assert client.diagnostics(uri) == []
+    assert "bad-template-file" not in _by_code(client.diagnostics(config_uri, 1))  # disk again
+
+
+def test_template_file_no_config_loads(lsp, tmp_path):
+    template = '{{ define "x" }}{{ template "nowhere" . }}{{ .Foo }}{{ end }}\n{{ if }}\n'
+    path = tmp_path / "orphan.tmpl"
+    path.write_text(template)
+    (tmp_path / "other.yml").write_text("services:\n  web:\n    image: nginx\n")
+    client = lsp(root=tmp_path)
+    [diag] = client.open(_uri(path), template)
+    assert diag["code"] == "bad-template-file"
+    assert diag["range"] == _spot(template, 1, "}")
+    assert diag["message"] == ("Template file orphan.tmpl, line 2: missing value for if. "
+                               "Alertmanager refuses to load a config that loads this file.")
+    # undefined templates and fields need a config: nothing to say without one
+    assert client.change(_uri(path), template.replace("{{ if }}", ""), 2) == []

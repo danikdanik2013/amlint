@@ -52,6 +52,13 @@ Every YAML file that holds an Alertmanager config:
 
 Other YAML files, such as Kubernetes manifests or Prometheus rule files, get no findings.
 
+**Template files** (`.tmpl`) get the template findings of the configs that load them, on
+the line where the problem is: a syntax error, a call to a template no file defines, or a
+field the data doesn't have, such as `.Labels` outside `{{ range .Alerts }}`. amlint finds
+those configs among the YAML files in the workspace folder, by their `templates:` globs. A
+template file no config loads gets its syntax errors only. Unsaved changes count, in the
+template and in the config.
+
 ## Settings
 
 | Setting | Default | What it does |

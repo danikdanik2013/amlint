@@ -5356,6 +5356,23 @@ def test_bad_template_file(tmp_path):
     assert "undefined-template" not in found  # what a broken file defines is unknown
 
 
+def test_template_texts_replace_the_files_and_findings_know_their_place(tmp_path):
+    cfg, base = _project(tmp_path, {"a.tmpl": '{{ define "a" }}x{{ end }}'},
+                         _slack(title='{{ template "a" . }}'))
+    path = os.path.normcase(os.path.abspath(os.path.join(base, "templates", "a.tmpl")))
+    assert _tpl(cfg, basedir=base) == {}
+    text = '{{ define "a" }}\n{{ nope }}{{ end }}'  # an editor's unsaved change
+    [f] = [f for f in lint(cfg, basedir=base, template_texts={path: text})
+           if f.code == "bad-template-file"]
+    assert "a.tmpl, line 2: function \"nope\" not defined" in f.msg
+    assert f.template_at == (path, text.index("nope"))
+    text = '{{ define "a" }}{{ template "b" . }}{{ end }}'
+    [f] = [f for f in lint(cfg, basedir=base, template_texts={path: text})
+           if f.code == "undefined-template"]
+    assert f.where == "templates[0]" and f.template_at == (path, text.index('"b"'))
+    assert all(f.template_at is None for f in lint(_slack(title="{{ .Labels.x }}")))
+
+
 def test_template_unknown_field_in_a_field():
     found = _tpl(_slack(
         title="{{ .Labels.alertname }}",

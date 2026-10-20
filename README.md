@@ -91,7 +91,8 @@ Or don't install anything and use the
 
 **In your editor:** install the [amlint extension for VS Code](https://marketplace.visualstudio.com/items?itemName=dpyly.amlint), or set up
 [Neovim or Helix](https://danikdanik2013.github.io/amlint/editors/). You see findings as you
-type, and a hover on each route shows where its alerts go.
+type, in the config and in its `.tmpl` template files, and a hover on each route shows where
+its alerts go.
 
 **Using an AI coding assistant?** In Claude Code, run
 `/plugin marketplace add danikdanik2013/amlint` and then `/plugin install amlint@amlint`. Claude

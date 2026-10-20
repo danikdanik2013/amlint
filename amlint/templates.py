@@ -65,12 +65,15 @@ class Source(NamedTuple):
     where: str  # the `templates:` entry that loads it
     name: str   # for messages
     text: str
+    path: Optional[str] = None  # a file on disk: its absolute path, normcase'd
 
 
-def template_sources(cfg: dict, basedir: Optional[str], bundled) -> Optional[List[Source]]:
+def template_sources(cfg: dict, basedir: Optional[str], bundled,
+                     texts: Optional[Dict[str, str]] = None) -> Optional[List[Source]]:
     """The template files Alertmanager loads for `cfg`, in the order it loads them, or None
     when amlint can't read all of them (an absolute path on disk, or no file to read
-    relative paths against). `bundled` is the input's BundledTemplates, if any."""
+    relative paths against). `bundled` is the input's BundledTemplates, if any. `texts`
+    ({absolute path, normcase'd: text}) is read instead of those files on disk."""
     templates = cfg.get("templates")
     if bundled is not None and bundled.all_loaded:
         return [Source("templates", f"{name} in {bundled.source}", bundled.files[name])
@@ -99,13 +102,23 @@ def template_sources(cfg: dict, basedir: Optional[str], bundled) -> Optional[Lis
         if basedir is None or os.path.isabs(tpl):
             return None
         for path in sorted(_glob.glob(os.path.join(basedir, tpl))):
-            try:
-                with open(path, encoding="utf-8", errors="replace") as f:
-                    text = f.read()
-            except OSError:
-                return None
-            out.append(Source(where, os.path.relpath(path, basedir), text))
+            full = os.path.normcase(os.path.abspath(path))  # one spelling per file
+            text = (texts or {}).get(full)
+            if text is None:
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as f:
+                        text = f.read()
+                except OSError:
+                    return None
+            out.append(Source(where, os.path.relpath(path, basedir), text, full))
     return out
+
+
+def _in_file(finding: Finding, src: Source, pos: int) -> Finding:
+    """`finding`, noted as being at character `pos` of the template file `src`."""
+    if src.path is not None:
+        finding.template_at = (src.path, pos)
+    return finding
 
 
 def _fields(value, path: str) -> Iterator[Tuple[str, str]]:
@@ -172,12 +185,12 @@ def check_templates(cfg: dict, sources: Optional[List[Source]]) -> List[Finding]
         defined |= set(parsed.defines)
         if parsed.error:
             files_ok = complete = False  # Alertmanager loads nothing; the rest is unknown
-            out.append(Finding(
+            out.append(_in_file(Finding(
                 ERROR, "bad-template-file",
                 f"Template file {src.name}, line {line_of(src.text, parsed.error.pos)}: "
                 f"{parsed.error.message}. Alertmanager refuses to load this config.",
                 src.where,
-            ))
+            ), src, parsed.error.pos))
         calls.append((src, parsed.calls))
 
     for r in _receivers(cfg):
@@ -230,14 +243,27 @@ def check_templates(cfg: dict, sources: Optional[List[Source]]) -> List[Finding]
                 if name in defined or name in seen:
                     continue
                 seen.add(name)
-                out.append(Finding(
+                out.append(_in_file(Finding(
                     ERROR, "undefined-template",
                     f"Template file {src.name}, line {line_of(src.text, pos)}, calls template "
                     f"\"{name}\", which no template file defines{_hint(name, defined)}. "
                     f"Notifications that use it fail when Alertmanager sends them.",
                     src.where,
-                ))
+                ), src, pos))
     return out
+
+
+def check_template_file(path: str, name: str, text: str) -> List[Finding]:
+    """bad-template-file for the template file at `path` on its own, when no config amlint
+    knows loads it."""
+    parsed = parse(text, AM_FUNCS)
+    if parsed.error is None:
+        return []
+    return [_in_file(Finding(
+        ERROR, "bad-template-file",
+        f"Template file {name}, line {line_of(text, parsed.error.pos)}: "
+        f"{parsed.error.message}. Alertmanager refuses to load a config that loads this file.",
+    ), Source("", name, text, path), parsed.error.pos)]
 
 
 def _called(dots: Dict[str, Optional[str]], name: str, typ: Optional[str]) -> bool:
@@ -269,11 +295,11 @@ def _file_fields(sources: List[Source], dots: Dict[str, Optional[str]]) -> List[
             if (src.name, pos) in seen:
                 continue
             seen.add((src.name, pos))
-            out.append(Finding(
+            out.append(_in_file(Finding(
                 ERROR, "template-unknown-field",
                 f"Template file {src.name}, line {line_of(src.text, pos)}, in \"{define}\": "
                 f"{_field_problem(name, typ, dots.get(define))}, so notifications that use "
                 f"\"{define}\" fail.",
                 src.where,
-            ))
+            ), src, pos))
     return out

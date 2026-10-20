@@ -10,6 +10,10 @@ findings as you type.
   from, and an alert that reaches it, from the routing simulation behind `amlint route`.
 - Quick fixes: disable a finding with an `# amlint: disable=<code>` comment on its line, or
   `# amlint: disable-file=<code>` at the top of the file.
+- Template files (.tmpl): the template findings of each config that loads the file, at
+  their place in it. The configs are the YAML files in the workspace folder (as on disk)
+  and the open ones (as in the editor). With no config loading it, only syntax errors.
+  Open template files are read as in the editor, for the configs too.
 
 Standard library only: the base protocol (JSON-RPC 2.0 messages framed by Content-Length
 headers) is implemented here, and documents are synced in full.
@@ -23,6 +27,7 @@ import re
 import sys
 import threading
 import traceback
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import unquote, urlparse
 from urllib.request import url2pathname
@@ -37,6 +42,7 @@ from .linter import ERROR, INFO, WARN, _dict_items, _matchers, _scalar, _walk_ro
 from .routing import GROUP_BY_ALL, RouteOpts, Router, RoutingError, probe_label_sets
 from .rules import CONFIG_SOURCE, RulesError, load_rules, project_rule_patterns, rule_files
 from .source import _COMMENT_RE, _DIRECTIVE_RE
+from .templates import check_template_file, template_sources
 
 try:
     from importlib.metadata import version as _pkg_version
@@ -69,6 +75,15 @@ _ROUTE_SETTINGS = (
     "receiver", "group_by", "group_wait", "group_interval", "repeat_interval",
     "mute_time_intervals", "active_time_intervals",
 )
+# A config that may load template files from disk has `templates:` at the top.
+_TEMPLATES_KEY = re.compile(r"^[\"']?templates[\"']?[ \t]*:", re.M)
+# Searching a workspace folder for the configs that load a template file skips hidden
+# directories and these, and stops after this many files.
+_SKIP_DIRS = frozenset({"node_modules", "__pycache__", "venv", "vendor"})
+_MAX_FILES = 20000
+_MAX_CONFIG_BYTES = 2 * 1024 * 1024
+# What a diagnostic in a template file covers: the token where the problem is.
+_TEMPLATE_TOKEN = re.compile(r"\"(?:[^\"\\\n]|\\.)*\"|`[^`\n]*`|[.$]?\w+|\S")
 
 
 # ── Base protocol ─────────────────────────────────────────────────────
@@ -164,6 +179,11 @@ def _uri_path(uri: str) -> Optional[str]:
     if parsed.netloc and parsed.netloc != "localhost":
         path = f"//{parsed.netloc}{path}"
     return path
+
+
+def _norm(path: str) -> str:
+    """One spelling of a file's path, to compare it with the paths amlint.templates uses."""
+    return os.path.normcase(os.path.abspath(path))
 
 
 def _content_end(text: str, start: int) -> int:
@@ -531,6 +551,7 @@ class _Document:
     def __init__(self, uri: str, text: str, version) -> None:
         self.uri = uri
         self.path = _uri_path(uri)
+        self.template = bool(self.path) and self.path.lower().endswith(".tmpl")
         self.text = text
         self.version = version
         self.analysis: Optional[_Analysis] = None
@@ -713,10 +734,14 @@ class Server:
         self.initialized = False
         self.shut_down = False
         self.encoding = "utf-16"
+        self.related = False  # the client shows a diagnostic's relatedInformation
         self.folders: List[str] = []
         # (folder, globs) -> (files with their mtime and size, the alerting rules in them)
         self._rules: Dict[tuple, tuple] = {}
         self._tests: Dict[str, tuple] = {}  # test file -> (mtime and size, label sets)
+        self._yaml_files: Dict[str, List[str]] = {}  # folder -> the YAML files under it
+        # YAML file -> (mtime and size, its text and Loaded if it is a config with templates:)
+        self._on_disk: Dict[str, tuple] = {}
         self._requests = {
             "initialize": self._initialize,
             "shutdown": self._shutdown,
@@ -793,9 +818,11 @@ class Server:
     # lifecycle
 
     def _initialize(self, params: dict) -> dict:
-        offered = ((params.get("capabilities") or {}).get("general") or {}).get(
-            "positionEncodings") or []
+        capabilities = params.get("capabilities") or {}
+        offered = (capabilities.get("general") or {}).get("positionEncodings") or []
         self.encoding = "utf-32" if "utf-32" in offered else "utf-16"
+        self.related = bool(((capabilities.get("textDocument") or {}).get(
+            "publishDiagnostics") or {}).get("relatedInformation"))
         self._set_folders(params.get("workspaceFolders") or [])
         if not self.folders:
             root = params.get("rootUri")
@@ -839,14 +866,16 @@ class Server:
 
     def _did_open(self, params: dict) -> None:
         item = params["textDocument"]
-        self.docs[item["uri"]] = _Document(item["uri"], item["text"], item.get("version"))
+        doc = self.docs[item["uri"]] = _Document(item["uri"], item["text"], item.get("version"))
         self.pending[item["uri"]] = None
+        self._dependents(doc, doc.text)
 
     def _did_change(self, params: dict) -> None:
         ident = params["textDocument"]
         doc = self.docs.get(ident["uri"])
         if doc is None:
             return
+        old = doc.text
         for change in params.get("contentChanges") or []:
             if "range" in change:  # an incremental change, though the server asks for full ones
                 start, end = (self._offset(doc.text, change["range"][k]) for k in ("start", "end"))
@@ -856,6 +885,20 @@ class Server:
         doc.version = ident.get("version")
         doc.analysis = None
         self.pending[doc.uri] = None
+        self._dependents(doc, old)
+
+    def _dependents(self, doc: _Document, old: str) -> None:
+        """Lint again the open documents that read `doc`, which changed from `old`: the
+        template files when a config with templates: changes, and the configs with
+        templates: when a template file does."""
+        if not doc.template and not (_TEMPLATES_KEY.search(old)
+                                     or _TEMPLATES_KEY.search(doc.text)):
+            return
+        for other in self.docs.values():
+            if other is not doc and other.template != doc.template and (
+                    other.template or _TEMPLATES_KEY.search(other.text)):
+                other.analysis = None
+                self.pending[other.uri] = None
 
     def _offset(self, text: str, pos: dict) -> int:
         """Index in `text` of an LSP position, for _did_change."""
@@ -868,13 +911,16 @@ class Server:
 
     def _did_close(self, params: dict) -> None:
         uri = params["textDocument"]["uri"]
-        self.docs.pop(uri, None)
+        doc = self.docs.pop(uri, None)
         self.pending.pop(uri, None)
         self._send({"method": "textDocument/publishDiagnostics",
                     "params": {"uri": uri, "diagnostics": []}})
+        if doc is not None:
+            self._dependents(doc, doc.text)  # they read it from disk again
 
     def _relint_all(self, params) -> None:
-        """.amlint.yml or pyproject.toml may have changed."""
+        """.amlint.yml or pyproject.toml may have changed, or other files."""
+        self._yaml_files.clear()
         for doc in self.docs.values():
             doc.analysis = None
             self.pending[doc.uri] = None
@@ -932,15 +978,19 @@ class Server:
 
     # linting
 
-    def _project(self, doc: _Document) -> Tuple[dict, str]:
-        """The .amlint.yml (or pyproject.toml) of the workspace folder holding the document,
-        else of the document's own directory; and that directory."""
+    def _workspace_folder(self, path: str) -> Optional[str]:
+        """The innermost workspace folder holding `path`, if any."""
+        path = os.path.abspath(path)
+        inside = [f for f in self.folders
+                  if path.startswith(os.path.join(os.path.abspath(f), ""))]
+        return max(inside, key=len) if inside else None
+
+    def _project(self, path: Optional[str]) -> Tuple[dict, str]:
+        """The .amlint.yml (or pyproject.toml) of the workspace folder holding the document
+        at `path`, else of the document's own directory; and that directory."""
         folder = os.getcwd()
-        if doc.path:
-            path = os.path.abspath(doc.path)
-            inside = [f for f in self.folders
-                      if path.startswith(os.path.join(os.path.abspath(f), ""))]
-            folder = max(inside, key=len) if inside else os.path.dirname(path)
+        if path:
+            folder = self._workspace_folder(path) or os.path.dirname(os.path.abspath(path))
         try:
             proj = load_project_config(folder)
             return (proj if isinstance(proj, dict) else {}), folder
@@ -972,7 +1022,10 @@ class Server:
         if doc.analysis is None:
             analysis = _Analysis(doc.text)
             try:
-                self._lint(doc, analysis)
+                if doc.template:
+                    self._lint_template(doc, analysis)
+                else:
+                    self._lint(doc, analysis)
             except Exception:
                 self.log(f"amlint: linting {doc.uri} failed:\n{traceback.format_exc()}")
                 analysis.diagnostics, analysis.loaded = [], None
@@ -993,7 +1046,7 @@ class Server:
             return  # some other YAML file
         analysis.loaded = loaded
 
-        proj, folder = self._project(doc)
+        proj, folder = self._project(doc.path)
         severity = proj.get("severity")
         basedir = os.path.dirname(doc.path) if doc.path and loaded.templates is None else None
         alerts, rules_error = self._alert_rules(proj, folder)
@@ -1004,7 +1057,8 @@ class Server:
                                      f"checks against them are off."})
         findings = lint(loaded.cfg, ignore=set(proj.get("ignore") or []),
                         severity=severity if isinstance(severity, dict) else None,
-                        basedir=basedir, rules=alerts, template_files=loaded.templates)
+                        basedir=basedir, rules=alerts, template_files=loaded.templates,
+                        template_texts=self._open_templates())
         for f in apply_locations(findings, loaded):
             diags.append({
                 "range": self._line_range(lines, f.line - 1, f.col - 1),
@@ -1031,6 +1085,136 @@ class Server:
         for line, note in loaded.notes:
             diags.append({"range": self._line_range(lines, (line or 1) - 1),
                           "severity": _HINT, "source": "amlint", "message": note})
+
+    # template files
+
+    def _open_templates(self) -> Dict[str, str]:
+        """{absolute path: text} of the template files open in the editor."""
+        return {_norm(d.path): d.text for d in self.docs.values() if d.template}
+
+    def _lint_template(self, doc: _Document, analysis: _Analysis) -> None:
+        """The template findings of each config that loads this template file, at their
+        place in it; or its syntax errors when no config amlint knows loads it."""
+        path = _norm(doc.path)
+        texts = self._open_templates()
+        found: Dict[tuple, dict] = {}  # (code, offset, message) -> diagnostic
+        loaded_by = False
+        for cfg_path, cfg_uri, cfg_text, loaded in self._configs_for(path):
+            basedir = os.path.dirname(cfg_path)
+            sources = template_sources(loaded.cfg, basedir, None, texts)
+            if not any(s.path == path for s in sources or []):
+                continue
+            loaded_by = True
+            proj, _ = self._project(cfg_path)
+            severity = proj.get("severity")
+            findings = lint(loaded.cfg, ignore=set(proj.get("ignore") or []),
+                            severity=severity if isinstance(severity, dict) else None,
+                            basedir=basedir, template_texts=texts)
+            for f in apply_locations(findings, loaded):
+                if f.template_at is None or f.template_at[0] != path:
+                    continue
+                key = (f.code, f.template_at[1], f.msg)
+                if key not in found:
+                    found[key] = self._template_diagnostic(doc.text, f)
+                if self.related:
+                    line, col = loaded.locate(f.where)
+                    found[key].setdefault("relatedInformation", []).append({
+                        "location": {"uri": cfg_uri, "range": self._line_range(
+                            _lines(cfg_text), line - 1, col - 1)},
+                        "message": "The config entry that loads this file",
+                    })
+        if not loaded_by:
+            proj, _ = self._project(path)
+            severity = proj.get("severity")
+            for f in check_template_file(path, os.path.basename(path), doc.text):
+                if f.code in (proj.get("ignore") or []):
+                    continue
+                if isinstance(severity, dict) and severity.get(f.code) in _SEVERITY:
+                    f.level = severity[f.code]
+                found[(f.code, f.template_at[1], f.msg)] = self._template_diagnostic(doc.text, f)
+        analysis.diagnostics.extend(found.values())
+
+    def _template_diagnostic(self, text: str, f) -> dict:
+        start = f.template_at[1]
+        token = _TEMPLATE_TOKEN.match(text, start)
+        return {
+            "range": {"start": self._position(text, start),
+                      "end": self._position(text, token.end() if token else start)},
+            "severity": _SEVERITY[f.level],
+            "code": f.code,
+            "codeDescription": {"href": docs_url(f.code)},
+            "source": "amlint",
+            "message": f.msg,
+        }
+
+    def _configs_for(self, path: str) -> List[Tuple[str, str, str, Loaded]]:
+        """(path, uri, text, Loaded) of each config that may load the template file at
+        `path`: the open ones as in the editor, and the YAML files of its workspace folder
+        (or of its directory and the one above) as on disk."""
+        found: Dict[str, tuple] = {}
+        for d in list(self.docs.values()):
+            if d.path and not d.template and _TEMPLATES_KEY.search(d.text):
+                loaded = self.analyze(d).loaded
+                if loaded is not None and loaded.templates is None:
+                    found[_norm(d.path)] = (os.path.abspath(d.path), d.uri, d.text, loaded)
+        for yaml_path in self._yaml_near(path):
+            if _norm(yaml_path) not in found:
+                config = self._disk_config(yaml_path)
+                if config is not None:
+                    found[_norm(yaml_path)] = (yaml_path, Path(yaml_path).as_uri()) + config
+        return [found[key] for key in sorted(found)]
+
+    def _yaml_near(self, path: str) -> List[str]:
+        """The YAML files that may hold a config loading the template file at `path`."""
+        folder = self._workspace_folder(path)
+        if folder is None:
+            here = os.path.dirname(os.path.abspath(path))
+            dirs = dict.fromkeys([here, os.path.dirname(here)])
+            out = []
+            for d in dirs:
+                try:
+                    names = sorted(os.listdir(d))
+                except OSError:
+                    continue
+                out += [os.path.join(d, n) for n in names if n.endswith((".yml", ".yaml"))]
+            return out
+        if folder not in self._yaml_files:
+            out, seen = [], 0
+            for top, dirs, files in os.walk(os.path.abspath(folder)):
+                dirs[:] = sorted(d for d in dirs if not d.startswith(".") and d not in _SKIP_DIRS)
+                seen += len(files)
+                out += [os.path.join(top, n) for n in sorted(files)
+                        if n.endswith((".yml", ".yaml"))]
+                if seen > _MAX_FILES:
+                    self.log(f"amlint: {folder} has more than {_MAX_FILES} files; template "
+                             f"files are checked only with the configs among the first ones.", 2)
+                    break
+            self._yaml_files[folder] = out
+        return self._yaml_files[folder]
+
+    def _disk_config(self, path: str) -> Optional[Tuple[str, Loaded]]:
+        """(text, Loaded) of the YAML file at `path` if it is a config that reads template
+        files from disk; read again only when the file changes."""
+        try:
+            stat = os.stat(path)
+        except OSError:
+            return None
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        cached = self._on_disk.get(path)
+        if cached is None or cached[0] != stamp:
+            config = None
+            if stat.st_size <= _MAX_CONFIG_BYTES:
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as f:
+                        text = f.read()
+                    if _TEMPLATES_KEY.search(text):
+                        loaded = load_input(text)
+                        if loaded.templates is None and {"route", "receivers"} & set(loaded.cfg):
+                            config = (text, loaded)
+                except (OSError, FormatError):
+                    pass
+            cached = self._on_disk[path] = (stamp, config)
+        return cached[1]
 
     def _format_error(self, e: FormatError, text: str, lines: List[str]) -> dict:
         """A diagnostic for a config amlint can't read, at the error's position if known."""
@@ -1075,8 +1259,8 @@ class Server:
         doc = self.docs.get(uri)
         context = params.get("context") or {}
         only = context.get("only")
-        if doc is None or only and "quickfix" not in only:
-            return []
+        if doc is None or doc.template or only and "quickfix" not in only:
+            return []  # a `# amlint:` comment in a template file would be in the notification
         lines = _lines(doc.text)
         actions, done = [], set()
         for diag in context.get("diagnostics") or []:
@@ -1303,7 +1487,7 @@ class Server:
 
     def _completion(self, params: dict) -> List[dict]:
         doc = self.docs.get(params["textDocument"]["uri"])
-        if doc is None:
+        if doc is None or doc.template:
             return []
         lines = _lines(doc.text)
         pos = params["position"]
@@ -1330,7 +1514,7 @@ class Server:
                      for key in ("time_intervals", "mute_time_intervals")
                      for _, t in _dict_items(cfg.get(key)) if t.get("name")}
         else:
-            proj, folder = self._project(doc)
+            proj, folder = self._project(doc.path)
             alerts, _ = self._alert_rules(proj, folder)
             values = _label_values(cfg, alerts)
             if what == "label":
@@ -1374,7 +1558,7 @@ class Server:
         analysis = self.analyze(doc)
         if analysis.loaded is None:
             return []
-        proj, folder = self._project(doc)
+        proj, folder = self._project(doc.path)
         try:
             files = tests_for_config(proj, doc.path, folder)
             label_sets = [ls for f in files or [] for ls in self._test_label_sets(f)]
