@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- VS Code extension 0.1.1: an amlint older than 0.6.0 (or none at all) on VS Code's `PATH`
+  no longer makes the server start and crash in a loop. The extension checks
+  `amlint --version` first and says what to install or set in `amlint.path`.
+
 ## [0.6.1] - 2026-10-17
 
 ### Added

@@ -4,3 +4,5 @@ tsconfig.json
 PUBLISHING.md
 .gitignore
 **/*.vsix
+test/**
+out/test/**
