@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+- Template files (`.tmpl`): amlint's template findings show in the file itself, on the
+  line where the problem is, not only on the config's `templates:` line. Needs amlint 0.8.0
+  or newer; older versions stay silent on them.
+
 ## [0.1.1]
 
 - No more restart loop when `amlint.path` points at an amlint without `amlint lsp`. Before

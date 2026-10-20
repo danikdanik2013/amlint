@@ -1,5 +1,6 @@
-// Starts `amlint lsp` for YAML files. The server decides which files are Alertmanager
-// configs and stays silent on the rest, so the extension doesn't have to.
+// Starts `amlint lsp` for YAML files and Go template files (.tmpl). The server decides
+// which files are Alertmanager configs, and which configs load a template file, and stays
+// silent on the rest, so the extension doesn't have to.
 
 import * as os from "os";
 import * as path from "path";
@@ -96,6 +97,8 @@ async function start(userAsked: boolean): Promise<void> {
     documentSelector: [
       { scheme: "file", language: "yaml" },
       { scheme: "untitled", language: "yaml" },
+      // notification templates: findings in the file, from the configs that load it
+      { scheme: "file", pattern: "**/*.tmpl" },
     ],
     synchronize: { fileEvents: watcher },
     outputChannel: output,

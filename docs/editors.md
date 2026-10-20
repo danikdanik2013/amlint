@@ -16,6 +16,10 @@ amlint lsp --help    # check that the command is there
 - **Findings as you type**, on the same lines `amlint check` reports. amlint lints the editor
   buffer, so you don't have to save first. Each check code links to its section in these
   docs.
+- **Findings in template files** (`.tmpl`), on the line where the problem is:
+  `bad-template-file`, `undefined-template` and `template-unknown-field`, with the same
+  message as on the config's `templates:` line. See
+  [which files get findings](#which-files-get-findings).
 - **Hover on a route**: its matchers and the matchers on the way to it, its receiver,
   `group_by` and timings, and where each value comes from: set on this route, inherited from
   a parent, or Alertmanager's default. It also shows an example alert that ends on the route
@@ -84,6 +88,22 @@ Every YAML file that holds an Alertmanager config, in any format `amlint check` 
 Other YAML files, such as Kubernetes manifests or Prometheus rule files, get nothing. A
 config that doesn't parse gets one error at the broken line.
 
+**Template files** (`.tmpl`, amlint 0.8.0 or newer) get the template findings of every
+config that loads them:
+
+- a syntax error, such as a function Alertmanager doesn't have
+- a call to a template that no file defines
+- a field the data doesn't have, such as `.Labels` in a define a Slack `text:` calls with
+  the notification data. The type comes from the calls in the config, so the finding is in
+  the template file, but the fix may be in the config.
+
+amlint finds the configs among the YAML files in the workspace folder, and keeps those
+whose `templates:` globs match the file, resolved against each config's directory. Outside
+a workspace folder it looks in the template's directory and the one above it. A template
+file no config loads gets its syntax errors only. Unsaved changes count both ways: edit a
+template and the config's `templates:` line updates, edit the config and the template
+updates.
+
 ## VS Code
 
 Install the [amlint extension](https://marketplace.visualstudio.com/items?itemName=dpyly.amlint) from the Marketplace: search for "amlint" in the
@@ -125,7 +145,7 @@ Neovim 0.11 or newer. In your config:
 ```lua
 vim.lsp.config("amlint", {
   cmd = { "amlint", "lsp" },
-  filetypes = { "yaml" },
+  filetypes = { "yaml", "template" },  -- Neovim calls .tmpl files "template"
   root_markers = { ".amlint.yml", ".amlint.yaml", ".git" },
 })
 vim.lsp.enable("amlint")
@@ -146,6 +166,12 @@ args = ["lsp"]
 [[language]]
 name = "yaml"
 language-servers = ["amlint", "yaml-language-server"]
+
+# template files: Helix has no language for .tmpl, so add it to Go templates
+[[language]]
+name = "gotmpl"
+file-types = ["gotmpl", "tmpl"]
+language-servers = ["amlint", "gopls"]
 ```
 
 Helix asks the first server in the list for hovers, so put amlint first to get its route
@@ -153,8 +179,8 @@ hovers.
 
 ## Other editors
 
-Configure your LSP client to run `amlint lsp` over stdio for YAML files. The server needs
-no initialization options.
+Configure your LSP client to run `amlint lsp` over stdio for YAML files and `.tmpl`
+template files. The server needs no initialization options.
 
 ## Configure the checks
 
@@ -173,3 +199,8 @@ matches nothing, a warning on the first line says so.
 - The Prometheus rules checks (`check --rules`) don't run in the editor.
 - `template-file-missing` looks for template files next to the file on disk, so a new file
   that was never saved skips it.
+- A template file is checked with a config only when amlint can read every file the config
+  loads. A config with an absolute path in `templates:` (`/etc/alertmanager/*.tmpl`) can't
+  be followed, so its template files get syntax errors only.
+- amlint searches the workspace folder for configs once. A config file added later counts
+  once you open it, or after a restart of the server (**amlint: Restart Server**).

@@ -17,6 +17,11 @@
 
   Template files are read next to the config file, or from the Secret, Helm `templateFiles`
   or Mimir `template_files` they ship in.
+- The editor (`amlint lsp`) shows the template findings in template files (`.tmpl`) too, on
+  the line where the problem is, for each config in the workspace folder that loads the
+  file. A template file no config loads gets its syntax errors. Unsaved changes to a
+  template file count for the configs that load it. The VS Code extension lints `.tmpl`
+  files.
 - `deprecated-match` (info): a route's `match:` or `match_re:`, or an inhibition rule's
   `source_match:`, `target_match:` and their `_re` forms, which Alertmanager 0.22
   deprecated. The message shows the `matchers:` to write instead.

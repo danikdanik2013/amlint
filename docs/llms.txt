@@ -37,7 +37,7 @@ Output formats: text (default), `--format json`, `--format sarif` (GitHub Code S
 - [Overview](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/index.md): what amlint is, what it catches, and how it compares to amtool
 - [Install](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/install.md): pip, Docker, Homebrew, pre-commit, shell completions
 - [Usage](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/usage.md): every command and flag (check, route, test, diff, tree, fix, explain, list, init), project config and inline suppressions
-- [Editors](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/editors.md): findings as you type and hover on routes in VS Code, Neovim and Helix, via `amlint lsp`
+- [Editors](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/editors.md): findings as you type (in configs and their `.tmpl` template files) and hover on routes in VS Code, Neovim and Helix, via `amlint lsp`
 - [Kubernetes, Helm and Mimir](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/kubernetes.md): the input formats amlint detects and how AlertmanagerConfig resources are merged
 - [GitHub Action](https://raw.githubusercontent.com/danikdanik2013/amlint/main/docs/github-action.md): inputs, PR annotations, SARIF and the routing-diff PR comment
 
