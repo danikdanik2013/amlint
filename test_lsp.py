@@ -94,13 +94,14 @@ class Client:
             if message.get("id") == self.ids:
                 return message
 
-    def initialize(self, root=None, encodings=None, related=False) -> dict:
+    def initialize(self, root=None, encodings=None, related=False, folders=()) -> dict:
         capabilities = {"general": {"positionEncodings": encodings}} if encodings else {}
         if related:
             capabilities["textDocument"] = {"publishDiagnostics": {"relatedInformation": True}}
         result = self.request("initialize", {
             "processId": None, "capabilities": capabilities,
             "rootUri": root.as_uri() if root else None,
+            "workspaceFolders": [{"uri": f.as_uri(), "name": f.name} for f in folders] or None,
         })["result"]
         self.notify("initialized", {})
         return result
@@ -997,7 +998,8 @@ def test_template_file_reads_the_open_buffers(lsp, tmp_path):
 
 
 def test_template_file_no_config_loads(lsp, tmp_path):
-    template = '{{ define "x" }}{{ template "nowhere" . }}{{ .Foo }}{{ end }}\n{{ if }}\n'
+    template = ('{{ define "x" }}{{ template "nowhere" . }}{{ .CommonLabels.team }}{{ .Foo }}'
+                '{{ end }}\n{{ if }}\n')
     path = tmp_path / "orphan.tmpl"
     path.write_text(template)
     (tmp_path / "other.yml").write_text("services:\n  web:\n    image: nginx\n")
@@ -1009,3 +1011,71 @@ def test_template_file_no_config_loads(lsp, tmp_path):
                                "Alertmanager refuses to load a config that loads this file.")
     # undefined templates and fields need a config: nothing to say without one
     assert client.change(_uri(path), template.replace("{{ if }}", ""), 2) == []
+
+
+@pytest.mark.parametrize("name, template", [
+    ("dot_gitconfig.tmpl", '[user]\n  email = {{ .email | quote }}\n'
+                           '{{ if eq .chezmoi.os "darwin" }}{{ include "mac" }}{{ end }}\n'),
+    ("alertmanager.yml.tmpl", 'route:\n  receiver: slack\nreceivers:\n  - name: slack\n'
+                              '    slack_configs:\n      - api_url: {{ getenv "SLACK_URL" }}\n'),
+    ("page.tmpl", '<h1>{{ .Title }}</h1>\n{{ markdown .Body }}\n'),
+], ids=["chezmoi", "gomplate-config", "go-program"])
+def test_silent_on_other_template_files(lsp, tmp_path, name, template):
+    """No config loads them and they don't use Alertmanager's data: not amlint's business,
+    though their functions aren't Alertmanager's."""
+    (tmp_path / name).write_text(template)
+    assert lsp(root=tmp_path).open(_uri(tmp_path / name), template) == []
+
+
+def test_template_file_updates_when_a_template_it_calls_changes(lsp, tmp_path):
+    text = '{{ define "slack.myorg.text" }}{{ template "slack.myorg.row" . }}{{ end }}\n'
+    row = '{{ define "slack.myorg.row" }}{{ .Status }}{{ end }}\n'
+    _, uri = _template_project(tmp_path, TITLE + text)
+    row_path = tmp_path / "templates" / "row.tmpl"
+    row_path.write_text(row)
+    client = lsp(root=tmp_path)
+    assert client.open(uri, TITLE + text) == []
+    assert client.open(_uri(row_path), row) == []
+    client.change(_uri(row_path), row.replace("slack.myorg.row", "slack.myorg.rows"), 2)
+    [diag] = client.diagnostics(uri, 1)  # linted again with the other file's buffer
+    assert diag["code"] == "undefined-template"
+    assert diag["range"] == _spot(TITLE + text, 1, '"slack.myorg.row"')
+
+
+def test_template_file_follows_the_config_buffer(lsp, tmp_path):
+    template = TITLE + '{{ define "slack.myorg.text" }}{{ template "nope" . }}{{ end }}\n'
+    config_uri, uri = _template_project(tmp_path, template)
+    client = lsp(root=tmp_path)
+    assert [d["code"] for d in client.open(uri, template)] == ["undefined-template"]
+    client.open(config_uri, TEMPLATE_CONFIG)
+    client.diagnostics(uri, 1)
+    # without templates: in the editor, no config loads the file, though the saved one does
+    client.change(config_uri, TEMPLATE_CONFIG.replace("templates:\n  - templates/*.tmpl\n", ""), 2)
+    assert client.diagnostics(uri, 1) == []
+
+
+def test_two_configs_that_load_a_template_file_give_one_finding(lsp, tmp_path):
+    template = TITLE + '{{ define "slack.myorg.text" }}{{ template "nope" . }}{{ end }}\n'
+    config_uri, uri = _template_project(tmp_path, template)
+    (tmp_path / "staging").mkdir()
+    staging = tmp_path / "staging" / "alertmanager.yml"
+    staging.write_text(TEMPLATE_CONFIG.replace("- templates/", "- ../templates/"))
+    [diag] = lsp(root=tmp_path, related=True).open(uri, template)
+    assert diag["code"] == "undefined-template"
+    assert [r["location"]["uri"] for r in diag["relatedInformation"]] == \
+        [config_uri, _uri(staging)]
+
+
+def test_template_file_with_the_config_in_an_outer_workspace_folder(lsp, tmp_path):
+    template = TITLE + '{{ define "slack.myorg.text" }}{{ template "nope" . }}{{ end }}\n'
+    _, uri = _template_project(tmp_path, template)
+    client = lsp(folders=[tmp_path, tmp_path / "templates"])
+    assert [d["code"] for d in client.open(uri, template)] == ["undefined-template"]
+
+
+def test_template_file_survives_yaml_amlint_cannot_read(lsp, tmp_path):
+    template = TITLE + '{{ define "slack.myorg.text" }}{{ if }}{{ end }}\n'
+    _, uri = _template_project(tmp_path, template)
+    deep = "templates: []\nroute: " + "[" * 5000 + "]" * 5000 + "\n"  # RecursionError
+    (tmp_path / "deep.yml").write_text(deep)
+    assert [d["code"] for d in lsp(root=tmp_path).open(uri, template)] == ["bad-template-file"]

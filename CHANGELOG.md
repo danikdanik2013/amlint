@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Fixed
+- The editor (`amlint lsp`) no longer reports `bad-template-file` in `.tmpl` files that
+  aren't Alertmanager templates, such as chezmoi, gomplate or Go program templates with
+  functions of their own. A template file no config loads is checked only if it uses
+  Alertmanager's data (`.Alerts`, `.CommonLabels` and the like) or calls its templates.
+- In template files the editor also:
+  - updates a file when an open template file it calls changes;
+  - follows the config as it is in the editor, so removing `templates:` there counts
+    before you save;
+  - shows a problem that several configs find (prod and staging loading one file) once;
+  - finds configs in the outer workspace folder when the templates sit in an inner one;
+  - keeps working when a YAML file in the workspace can't be read, such as one nested
+    thousands of levels deep.
+
 ## [0.8.0] - 2026-10-20
 
 Highlights:

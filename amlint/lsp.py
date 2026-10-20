@@ -12,7 +12,8 @@ findings as you type.
   `# amlint: disable-file=<code>` at the top of the file.
 - Template files (.tmpl): the template findings of each config that loads the file, at
   their place in it. The configs are the YAML files in the workspace folder (as on disk)
-  and the open ones (as in the editor). With no config loading it, only syntax errors.
+  and the open ones (as in the editor). With no config loading it, only syntax errors, and
+  only if it reads Alertmanager's data or calls its templates.
   Open template files are read as in the editor, for the configs too.
 
 Standard library only: the base protocol (JSON-RPC 2.0 messages framed by Content-Length
@@ -77,6 +78,14 @@ _ROUTE_SETTINGS = (
 )
 # A config that may load template files from disk has `templates:` at the top.
 _TEMPLATES_KEY = re.compile(r"^[\"']?templates[\"']?[ \t]*:", re.M)
+# A template file that no config loads is checked only if it reads Alertmanager's data or
+# calls Alertmanager's templates. Other .tmpl files (chezmoi, gomplate, Go programs) have
+# functions of their own, and aren't amlint's business.
+_LOOKS_LIKE_TEMPLATE = re.compile(
+    r"\.(?:Alerts|CommonLabels|CommonAnnotations|GroupLabels|ExternalURL|GeneratorURL)\b"
+    r"|\{\{-?\s*(?:template|block)\s+\"(?:__|[a-z0-9]+\.default\.)")
+# The file part of a template finding's message, which names the file relative to the config
+_TEMPLATE_FILE_PART = re.compile(r"^Template file .+?, line \d+")
 # Searching a workspace folder for the configs that load a template file skips hidden
 # directories and these, and stops after this many files.
 _SKIP_DIRS = frozenset({"node_modules", "__pycache__", "venv", "vendor"})
@@ -890,13 +899,14 @@ class Server:
     def _dependents(self, doc: _Document, old: str) -> None:
         """Lint again the open documents that read `doc`, which changed from `old`: the
         template files when a config with templates: changes, and the configs with
-        templates: when a template file does."""
+        templates: and the other template files when a template file does (they may call
+        its templates)."""
         if not doc.template and not (_TEMPLATES_KEY.search(old)
                                      or _TEMPLATES_KEY.search(doc.text)):
             return
         for other in self.docs.values():
-            if other is not doc and other.template != doc.template and (
-                    other.template or _TEMPLATES_KEY.search(other.text)):
+            if other is not doc and (other.template or doc.template
+                                     and _TEMPLATES_KEY.search(other.text)):
                 other.analysis = None
                 self.pending[other.uri] = None
 
@@ -978,12 +988,12 @@ class Server:
 
     # linting
 
-    def _workspace_folder(self, path: str) -> Optional[str]:
-        """The innermost workspace folder holding `path`, if any."""
+    def _workspace_folder(self, path: str, outermost: bool = False) -> Optional[str]:
+        """The innermost (or outermost) workspace folder holding `path`, if any."""
         path = os.path.abspath(path)
         inside = [f for f in self.folders
                   if path.startswith(os.path.join(os.path.abspath(f), ""))]
-        return max(inside, key=len) if inside else None
+        return (min if outermost else max)(inside, key=len) if inside else None
 
     def _project(self, path: Optional[str]) -> Tuple[dict, str]:
         """The .amlint.yml (or pyproject.toml) of the workspace folder holding the document
@@ -1094,10 +1104,11 @@ class Server:
 
     def _lint_template(self, doc: _Document, analysis: _Analysis) -> None:
         """The template findings of each config that loads this template file, at their
-        place in it; or its syntax errors when no config amlint knows loads it."""
+        place in it; or its syntax errors when no config amlint knows loads it and it looks
+        like an Alertmanager template. A problem that several configs find is shown once."""
         path = _norm(doc.path)
         texts = self._open_templates()
-        found: Dict[tuple, dict] = {}  # (code, offset, message) -> diagnostic
+        found: Dict[tuple, dict] = {}  # (code, offset, problem) -> diagnostic
         loaded_by = False
         for cfg_path, cfg_uri, cfg_text, loaded in self._configs_for(path):
             basedir = os.path.dirname(cfg_path)
@@ -1113,7 +1124,7 @@ class Server:
             for f in apply_locations(findings, loaded):
                 if f.template_at is None or f.template_at[0] != path:
                     continue
-                key = (f.code, f.template_at[1], f.msg)
+                key = (f.code, f.template_at[1], _TEMPLATE_FILE_PART.sub("", f.msg))
                 if key not in found:
                     found[key] = self._template_diagnostic(doc.text, f)
                 if self.related:
@@ -1123,10 +1134,10 @@ class Server:
                             _lines(cfg_text), line - 1, col - 1)},
                         "message": "The config entry that loads this file",
                     })
-        if not loaded_by:
+        if not loaded_by and _LOOKS_LIKE_TEMPLATE.search(doc.text):
             proj, _ = self._project(path)
             severity = proj.get("severity")
-            for f in check_template_file(path, os.path.basename(path), doc.text):
+            for f in check_template_file(path, os.path.basename(doc.path), doc.text):
                 if f.code in (proj.get("ignore") or []):
                     continue
                 if isinstance(severity, dict) and severity.get(f.code) in _SEVERITY:
@@ -1150,10 +1161,14 @@ class Server:
     def _configs_for(self, path: str) -> List[Tuple[str, str, str, Loaded]]:
         """(path, uri, text, Loaded) of each config that may load the template file at
         `path`: the open ones as in the editor, and the YAML files of its workspace folder
-        (or of its directory and the one above) as on disk."""
-        found: Dict[str, tuple] = {}
+        (or of its directory and the one above) as on disk. An open file counts as in the
+        editor even when it holds no config there."""
+        found: Dict[str, Optional[tuple]] = {}
         for d in list(self.docs.values()):
-            if d.path and not d.template and _TEMPLATES_KEY.search(d.text):
+            if not d.path or d.template:
+                continue
+            found[_norm(d.path)] = None
+            if _TEMPLATES_KEY.search(d.text):
                 loaded = self.analyze(d).loaded
                 if loaded is not None and loaded.templates is None:
                     found[_norm(d.path)] = (os.path.abspath(d.path), d.uri, d.text, loaded)
@@ -1162,11 +1177,11 @@ class Server:
                 config = self._disk_config(yaml_path)
                 if config is not None:
                     found[_norm(yaml_path)] = (yaml_path, Path(yaml_path).as_uri()) + config
-        return [found[key] for key in sorted(found)]
+        return [found[key] for key in sorted(found) if found[key] is not None]
 
     def _yaml_near(self, path: str) -> List[str]:
         """The YAML files that may hold a config loading the template file at `path`."""
-        folder = self._workspace_folder(path)
+        folder = self._workspace_folder(path, outermost=True)
         if folder is None:
             here = os.path.dirname(os.path.abspath(path))
             dirs = dict.fromkeys([here, os.path.dirname(here)])
@@ -1211,7 +1226,7 @@ class Server:
                         loaded = load_input(text)
                         if loaded.templates is None and {"route", "receivers"} & set(loaded.cfg):
                             config = (text, loaded)
-                except (OSError, FormatError):
+                except Exception:  # any YAML file in the folder: one amlint can't read is no config
                     pass
             cached = self._on_disk[path] = (stamp, config)
         return cached[1]
