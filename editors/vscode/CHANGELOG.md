@@ -8,6 +8,7 @@
   doesn't start it. **amlint: Restart Server** or a changed `amlint.path` checks again.
 - A server that crashes is restarted at most twice in three minutes, then the extension
   stops and says so, instead of restarting it again and again.
+- An icon, and a dark banner on the Marketplace page.
 
 ## [0.1.0]
 

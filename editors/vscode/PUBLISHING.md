@@ -13,8 +13,18 @@ the `.vsix` and keeps it as a workflow artifact. These are the steps for a maint
    December 1, 2026 (see below): create a personal access token in Azure DevOps
    (https://dev.azure.com, User settings → Personal access tokens): organization
    **All accessible organizations**, scope **Marketplace → Manage**.
-4. Optional: add a 128×128 PNG as `icon.png` and `"icon": "icon.png"` in `package.json`.
-   The Marketplace shows a placeholder without one.
+4. The icon is `images/icon.png`, drawn by `images/make_icon.py` (standard library only). To
+   change it, edit the script and run `python3 make_icon.py` in `images/`.
+5. For Open VSX (VSCodium, Cursor, Gitpod), once: sign in on https://open-vsx.org with
+   GitHub, sign its publisher agreement, create an access token in your profile settings,
+   and create the `dpyly` namespace (it must match `publisher`):
+
+   ```bash
+   npx ovsx create-namespace dpyly -p <open-vsx-token>
+   ```
+
+   Then add the token as the `OVSX_PAT` secret of the `openvsx` environment (Settings →
+   Environments) so the publish workflow can use it.
 
 ## Each release
 
@@ -37,7 +47,9 @@ the `.vsix` and keeps it as a workflow artifact. These are the steps for a maint
 
    Or upload the `.vsix` by hand on https://marketplace.visualstudio.com/manage.
 
-4. Optional: also publish to Open VSX (VSCodium, Cursor, Gitpod) with
+4. Publish the same version to Open VSX: run the **Publish VS Code extension to Open VSX**
+   workflow (Actions → Run workflow). It tests, packages and publishes with the `OVSX_PAT`
+   secret. From your own machine instead:
    `npx ovsx publish amlint-<version>.vsix -p <open-vsx-token>`.
 
 ## Automating it later
@@ -57,8 +69,8 @@ To publish from CI instead of uploading by hand:
   publisher as a Contributor. The workflow then signs in with `azure/login` and runs
   `npx vsce publish --azure-credential`. Microsoft documents the setup for Azure Pipelines
   only: https://code.visualstudio.com/api/working-with-extensions/publishing-extension
-- **Open VSX** (VSCodium, Cursor) takes a token that Azure's retirement doesn't affect:
-  `npx ovsx publish <file>.vsix -p $OVSX_PAT`.
+- **Open VSX** (VSCodium, Cursor) takes a token that Azure's retirement doesn't affect.
+  `.github/workflows/vscode-openvsx.yml` already publishes with it, when started by hand.
 
 Don't trigger publishing with a tag that starts with `v`: `publish.yml` publishes amlint to
 PyPI on every `v*` tag.

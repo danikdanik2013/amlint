@@ -6,3 +6,4 @@ PUBLISHING.md
 **/*.vsix
 test/**
 out/test/**
+images/make_icon.py

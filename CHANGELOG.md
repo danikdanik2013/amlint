@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+- The VS Code extension has an icon, and a workflow that publishes it to Open VSX for
+  Cursor, VSCodium and Gitpod. It runs only when started by hand, with an `OVSX_PAT` secret;
+  the steps are in `editors/vscode/PUBLISHING.md`.
+
 ### Fixed
 - VS Code extension 0.1.1: an amlint older than 0.6.0 (or none at all) on VS Code's `PATH`
   no longer makes the server start and crash in a loop. The extension checks

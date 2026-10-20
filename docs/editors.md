@@ -69,6 +69,11 @@ Extensions view, or run:
 code --install-extension dpyly.amlint
 ```
 
+**Cursor, VSCodium and Gitpod** install extensions from [Open VSX](https://open-vsx.org)
+instead of the Marketplace. Until amlint is published there, install the `.vsix` from the
+latest run of the `VS Code extension` workflow (its `amlint-vscode` artifact):
+`cursor --install-extension amlint-<version>.vsix`, or `codium --install-extension ...`.
+
 Then open an `alertmanager.yml`. The extension runs the amlint you installed, so new
 checks come with `pip install -U amlint`, not with an extension update. Settings:
 

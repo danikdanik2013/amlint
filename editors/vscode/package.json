@@ -5,6 +5,11 @@
   "version": "0.1.1",
   "publisher": "dpyly",
   "license": "MIT",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#1c2654",
+    "theme": "dark"
+  },
   "homepage": "https://danikdanik2013.github.io/amlint/editors/",
   "repository": {
     "type": "git",
@@ -93,6 +98,7 @@
     "@types/vscode": "1.91.0",
     "@vscode/vsce": "4.0.0",
     "esbuild": "0.28.2",
+    "ovsx": "1.2.0",
     "typescript": "5.9.3"
   }
 }
