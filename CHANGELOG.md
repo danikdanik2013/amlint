@@ -36,7 +36,7 @@
   send, such as a mute interval with no fields.
 - `plaintext-secret` (warn): an API key, token, password, or a webhook URL with a token in
   it, written into the config instead of read from a `_file` field. Stand-in values such as
-  `<secret>` or `${VAR}` are skipped, and so are configs in a Kubernetes Secret,
+  `<secret>`, `${VAR}` or `mysecret` are skipped, and so are configs in a Kubernetes Secret,
   AlertmanagerConfig resources and Mimir configs.
 
 ### Changed

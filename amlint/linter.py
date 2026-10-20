@@ -1679,8 +1679,20 @@ _URL_SECRET_HOSTS = ("hooks.slack.com", "discord.com", "discordapp.com", "webhoo
                      "outlook.office.com", "api.telegram.org", "logic.azure.com")
 
 
-def _placeholder(value: str) -> bool:
-    return not value.strip() or bool(_PLACEHOLDER.search(value))
+# Words in a key or password that is only an example (mysecret, token123, test-password).
+_EXAMPLE_WORD = re.compile(r"secret|passw|token|api_?key|api-key|sample|test|demo|fake|"
+                           r"precious", re.IGNORECASE)
+
+
+def _placeholder(value: str, url: bool = False) -> bool:
+    """Whether a value only stands in for a secret. A key or password also does when it
+    names itself (mysecret), is short, or is one plain word: real ones are random."""
+    if not value.strip() or _PLACEHOLDER.search(value):
+        return True
+    if url:
+        return False
+    return bool(_EXAMPLE_WORD.search(value)) or len(value) < 8 or \
+        (value.isalpha() and len(value) < 16)
 
 
 def _url_secret(url: str) -> Optional[str]:
@@ -1704,7 +1716,8 @@ def _url_secret(url: str) -> Optional[str]:
 
 def _secret_problem(section: str, field: str, value) -> Optional[str]:
     """Why the value of `field` is a secret in plain text, or None."""
-    if not isinstance(value, str) or _placeholder(value):
+    url = field in ("url", "slack_api_url", "api_url", "webhook_url", "mattermost_webhook_url")
+    if not isinstance(value, str) or _placeholder(value, url):
         return None
     if field in ("url", "slack_api_url", "api_url"):
         what = _url_secret(value)

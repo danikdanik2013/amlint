@@ -679,8 +679,9 @@ receivers:
 ```
 
 **Not reported:** values that only stand in for a secret (`<secret>`, `${SLACK_URL}`,
-`$(SLACK_URL)`, `{{ ... }}`, `xxxx`, example values), a Slack `api_url` that isn't a
-webhook, and configs kept where plain-text secrets belong: inside a Kubernetes Secret, in
+`$(SLACK_URL)`, `{{ ... }}`, `xxxx`, example values), keys and passwords that look like
+examples rather than random strings (`mysecret`, `token123`, a short value or one plain
+word), a Slack `api_url` that isn't a webhook, and configs kept where plain-text secrets belong: inside a Kubernetes Secret, in
 AlertmanagerConfig resources (they reference Secrets), and Mimir tenant configs, which
 reject `_file` fields.
 

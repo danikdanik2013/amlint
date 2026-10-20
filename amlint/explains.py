@@ -1116,9 +1116,9 @@ time_intervals:
             "most of these from a file instead (api_url_file, routing_key_file, "
             "password_file, ...), so the config can be reviewed and shared without the "
             "secret. Values that only stand in for one (<secret>, ${VAR}, $(VAR), "
-            "{{ ... }}, example values) are skipped, and so are configs inside a Kubernetes "
-            "Secret, AlertmanagerConfig resources, and Mimir configs, which reject *_file "
-            "fields."
+            "{{ ... }}, example values such as mysecret or token123) are skipped, and so are "
+            "configs inside a Kubernetes Secret, AlertmanagerConfig resources, and Mimir "
+            "configs, which reject *_file fields."
         ),
         "bad": """\
 receivers:

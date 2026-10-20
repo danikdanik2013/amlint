@@ -4946,7 +4946,7 @@ def test_plaintext_secret_in_receivers():
         email_configs=[{"to": "a@b.c", "auth_password": "hunter22"}],
         wechat_configs=[{"api_secret": "s3cr3tValue"}],
         sns_configs=[{"topic_arn": "arn:aws:sns:eu-west-1:1:t",
-                      "sigv4": {"access_key": "AKIA1", "secret_key": "wJalrXUtnFEMI"}}],
+                      "sigv4": {"access_key": "AKIA1", "secret_key": "wJalrXUtnFEMI7K7MDENG"}}],
     ))
     assert set(found) == {
         "receivers[r].pagerduty_configs[0].routing_key",
@@ -4972,7 +4972,7 @@ def test_plaintext_secret_in_global_and_http_config():
         "authorization": {"credentials_file": "/etc/am/token"},
     }}])
     cfg["global"] = {"slack_api_url": SLACK_HOOK, "opsgenie_api_key": "0a1b2c3d-4e5f",
-                     "http_config": {"oauth2": {"client_id": "x", "client_secret": "y0Zk"}}}
+                     "http_config": {"oauth2": {"client_id": "x", "client_secret": "gH7kq2LmX9vP"}}}
     assert set(_secrets(cfg)) == {
         "global.slack_api_url", "global.opsgenie_api_key",
         "global.http_config.oauth2.client_secret",
@@ -4997,7 +4997,8 @@ def test_plaintext_secret_webhook_urls(url, secret):
     "<secret>", "${PAGERDUTY_KEY}", "$(PAGERDUTY_KEY)", "{{ .Values.pagerduty.key }}",
     "xxxxxxxxxxxxxxxx", "your-routing-key", "<routing-key>", "REPLACE_ME", "changeme", "",
     "https://hooks.slack.com/services/" "T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
-    "https://hooks.slack.com/...",
+    "https://hooks.slack.com/...", "mysecret", "qwe456", "password", "token123", "myprecious",
+    "test-api-key-1",
 ])
 def test_plaintext_secret_skips_stand_ins(value):
     cfg = _receiver(pagerduty_configs=[{"routing_key": value}],
