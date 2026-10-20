@@ -751,3 +751,38 @@ def test_no_completion_outside_known_places(lsp, tmp_path):
     other = _uri(tmp_path / "docker-compose.yml")
     client.open(other, "services:\n  web:\n    receiver: \n")
     assert _complete(client, other, 2, 14) == {}
+
+
+# ── Test coverage above each route ────────────────────────────────────
+
+def _lenses(client, uri):
+    result = client.request("textDocument/codeLens", {"textDocument": {"uri": uri}})["result"]
+    return {lens["range"]["start"]["line"]: lens["command"]["title"] for lens in result}
+
+
+def test_code_lens_counts_the_tests_that_reach_each_route(lsp, tmp_path):
+    (tmp_path / "routing-tests.yml").write_text(
+        "- {labels: {team: db, severity: critical}, expect: [db-oncall]}\n"
+        "- {labels: {team: db}, expect: [db-pager]}\n"
+        "- {labels: {team: other}, expect: [default]}\n")
+    (tmp_path / ".amlint.yml").write_text("tests:\n  alertmanager.yml: routing-tests.yml\n")
+    client = lsp(root=tmp_path)
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, CONFIG)
+    assert _lenses(client, uri) == {
+        6: "2 of 3 tests reach this route",
+        10: "1 of 3 tests reach this route",
+        GHOST_LINE: "no test reaches this route",
+    }
+    # the tests file changes: the next request reads it again
+    (tmp_path / "routing-tests.yml").write_text("- {labels: {team: web}, expect: [ghost]}\n")
+    os.utime(tmp_path / "routing-tests.yml", ns=(1, 2 * 10 ** 18))
+    assert _lenses(client, uri)[GHOST_LINE] == "1 of 1 tests reach this route"
+
+
+def test_no_code_lens_without_tests_for_the_file(lsp, tmp_path):
+    (tmp_path / ".amlint.yml").write_text("tests:\n  other.yml: missing.yml\n")
+    client = lsp(root=tmp_path)
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, CONFIG)
+    assert _lenses(client, uri) == {}

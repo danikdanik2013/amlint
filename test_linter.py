@@ -4582,3 +4582,39 @@ def test_rule_files_relative_to_base(tmp_path):
     rules = _rules_dir(tmp_path)
     assert rule_files(["rules/*.yml"], base=str(tmp_path)) == [str(rules / "node.yml")]
     assert rule_files([str(rules / "*.yaml")], base="/elsewhere") == [str(rules / "k8s.yaml")]
+
+
+# ── tests: in .amlint.yml ────────────────────────────────────────────
+
+def _project_with_tests(tmp_path, mapping: str):
+    cfg_path = _write_test_config(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "infra.yml").write_text(yaml.dump([
+        {"name": "infra routes to slack", "labels": {"team": "infra"}, "receiver": "infra-slack"},
+    ]))
+    (tmp_path / "tests" / "default.yml").write_text(yaml.dump({"tests": [
+        {"name": "unmatched routes to default", "labels": {"foo": "bar"}, "receiver": "default"},
+    ]}))
+    (tmp_path / ".amlint.yml").write_text(mapping.format(config=cfg_path.name))
+    return cfg_path
+
+
+def test_cli_test_reads_the_tests_mapped_in_project_config(tmp_path, capsys, monkeypatch):
+    cfg_path = _project_with_tests(tmp_path, "tests:\n  {config}: tests/*.yml\n")
+    monkeypatch.chdir(tmp_path)
+    assert main(["test", cfg_path.name, "--format", "json"]) == 0
+    names = [r["name"] for r in json.loads(capsys.readouterr().out)]
+    assert names == ["unmatched routes to default", "infra routes to slack"]  # file order
+
+
+def test_cli_test_without_tests_file_or_mapping_exits_2(tmp_path, capsys, monkeypatch):
+    cfg_path = _write_test_config(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    assert main(["test", cfg_path.name]) == 2
+    assert "No tests file" in capsys.readouterr().err
+    (tmp_path / ".amlint.yml").write_text(f"tests:\n  {cfg_path.name}: missing/*.yml\n")
+    assert main(["test", cfg_path.name]) == 2
+    assert "'missing/*.yml' matches no files" in capsys.readouterr().err
+    (tmp_path / ".amlint.yml").write_text("tests: [a.yml]\n")
+    assert main(["test", cfg_path.name]) == 2
+    assert "must map config files to test files" in capsys.readouterr().err

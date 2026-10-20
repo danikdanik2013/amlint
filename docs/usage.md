@@ -146,6 +146,7 @@ from. If there is none, it reads `[tool.amlint]` from `pyproject.toml` in that d
 | `strict` | Same as `--strict` | `check` |
 | `severity` | Sets a check's level to `error`, `warn` or `info` | `check`, `diff`, `tree`, `lsp` |
 | `rules` | Globs of [Prometheus rule files](#checking-against-prometheus-rules), relative to the config file's directory. Added to any `--rules` | `check`, `lsp` |
+| `tests` | Maps config files to their [`amlint test`](#test) files (a glob or a list of globs), relative to the config file's directory | `test`, `lsp` |
 
 **Good to know:** amlint doesn't look in parent directories or next to the config file. Only
 the first file found is read, so `pyproject.toml` is ignored when `.amlint.yml` exists.
@@ -490,6 +491,21 @@ said `expect: [infra-slack, pager]`:
 
 `test` exits `1` if any case fails, and `2` if the config can't be simulated (see
 [`route`](#route)) or the tests file isn't a list of cases.
+
+Map each config to its tests under `tests:` in [`.amlint.yml`](#project-config), and you
+can leave the tests file out. The editor uses the same mapping to show above each route
+how many cases reach it:
+
+```yaml
+# .amlint.yml
+tests:
+  alertmanager.yml: routing-tests.yml           # a file, a glob, or a list of them
+  k8s/alertmanager-secret.yaml: [tests/k8s/*.yml]
+```
+
+```bash
+amlint test alertmanager.yml                    # runs routing-tests.yml
+```
 
 **Options**
 

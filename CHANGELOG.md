@@ -21,6 +21,13 @@
   `mute_time_intervals`/`active_time_intervals`, and label names and values in matchers,
   `match:`, `group_by` and `equal`, from the config and from the `rules:` files. It works
   while the line doesn't parse yet, with names from the last version that did.
+- `tests:` in `.amlint.yml` maps config files to their `amlint test` files (a glob or a
+  list). `amlint test alertmanager.yml` then needs no tests file, and runs the cases of every
+  mapped file in order. A missing mapping, a glob that matches nothing or a `tests:` that
+  isn't a mapping exits `2`.
+- Test coverage in the editor: above each route (but the root), how many cases of the mapped
+  test files reach it ("2 of 12 tests reach this route"), as `amlint test --coverage` counts
+  them. The test files are read again when they change.
 
 ### Changed
 - `route-unknown-alertname` and `inhibit-unknown-alertname` say "the rule files" instead of

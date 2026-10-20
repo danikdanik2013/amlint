@@ -29,10 +29,10 @@ from urllib.request import url2pathname
 
 import yaml
 
-from .config import load_project_config
+from .config import ConfigError, load_project_config, tests_for_config
 from .explains import EXPLAINS, docs_url
 from .formats import FormatError, Loaded, apply_locations, load_input
-from .linter import ERROR, INFO, WARN, _dict_items, _matchers, _walk_routes, lint
+from .linter import ERROR, INFO, WARN, _dict_items, _matchers, _scalar, _walk_routes, lint
 from .routing import GROUP_BY_ALL, RouteOpts, Router, RoutingError, probe_label_sets
 from .rules import CONFIG_SOURCE, RulesError, load_rules, project_rule_patterns, rule_files
 from .source import _COMMENT_RE, _DIRECTIVE_RE
@@ -715,6 +715,7 @@ class Server:
         self.folders: List[str] = []
         # (folder, globs) -> (files with their mtime and size, the alerting rules in them)
         self._rules: Dict[tuple, tuple] = {}
+        self._tests: Dict[str, tuple] = {}  # test file -> (mtime and size, label sets)
         self._requests = {
             "initialize": self._initialize,
             "shutdown": self._shutdown,
@@ -726,6 +727,7 @@ class Server:
             "textDocument/prepareRename": self._prepare_rename,
             "textDocument/rename": self._rename,
             "textDocument/completion": self._completion,
+            "textDocument/codeLens": self._code_lens,
         }
         self._notifications = {
             "textDocument/didOpen": self._did_open,
@@ -810,6 +812,7 @@ class Server:
                 "referencesProvider": True,
                 "renameProvider": {"prepareProvider": True},
                 "completionProvider": {"triggerCharacters": ['"', "=", "[", ","]},
+                "codeLensProvider": {"resolveProvider": False},
                 "workspace": {"workspaceFolders": {"supported": True,
                                                    "changeNotifications": True}},
             },
@@ -1247,6 +1250,58 @@ class Server:
         return [{"label": name, "kind": kind, "detail": detail,
                  "textEdit": {"range": edit_range, "newText": name}}
                 for name, detail in sorted(names.items())]
+
+    # test coverage above each route
+
+    def _test_label_sets(self, path: str) -> List[Dict[str, str]]:
+        """The labels of each case in an `amlint test` file, read again when it changes.
+        Cases amlint test would reject are left out."""
+        stat = os.stat(path)
+        stamp = (stat.st_mtime_ns, stat.st_size)
+        cached = self._tests.get(path)
+        if cached is None or cached[0] != stamp:
+            with open(path, encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+            cases = doc.get("tests") if isinstance(doc, dict) else doc
+            if not isinstance(cases, list):
+                cases = []
+            label_sets = [{str(k): _scalar(v) for k, v in case["labels"].items()}
+                          for case in cases
+                          if isinstance(case, dict) and isinstance(case.get("labels"), dict)]
+            cached = self._tests[path] = (stamp, label_sets)
+        return cached[1]
+
+    def _code_lens(self, params: dict) -> List[dict]:
+        doc = self.docs.get(params["textDocument"]["uri"])
+        if doc is None or not doc.path:
+            return []
+        analysis = self.analyze(doc)
+        if analysis.loaded is None:
+            return []
+        proj, folder = self._project(doc)
+        try:
+            files = tests_for_config(proj, doc.path, folder)
+            label_sets = [ls for f in files or [] for ls in self._test_label_sets(f)]
+        except (ConfigError, OSError, yaml.YAMLError) as e:
+            self.log(f"amlint: can't read the tests for {doc.path}: {e}", 2)
+            return []
+        router = analysis.router()
+        if not files or isinstance(router, str):
+            return []
+        reached: Dict[str, int] = {}
+        for labels in label_sets:
+            for path in {p for m in router.match(labels) for p in m.path}:
+                reached[path] = reached.get(path, 0) + 1
+        lenses = []
+        for first, _, path, _ in analysis.routes():
+            if path == "route":
+                continue  # every alert starts at the root
+            n = reached.get(path, 0)
+            title = (f"{n} of {len(label_sets)} tests reach this route" if n
+                     else "no test reaches this route")
+            lenses.append({"range": self._range(analysis.lines, first, 0, 0),
+                           "command": {"title": title, "command": ""}})
+        return lenses
 
     # outline
 

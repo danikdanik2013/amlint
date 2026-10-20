@@ -36,6 +36,10 @@ amlint lsp --help    # check that the command is there
   [`rules:`](usage.md#project-config) is set (`alertname=` completes your rule names). It
   works on a line you're still typing, with names from the last version of the file that
   parsed.
+- **Test coverage above each route**: "2 of 12 tests reach this route", or "no test
+  reaches this route", from the [`amlint test`](usage.md#test) files that
+  [`tests:`](usage.md#project-config) maps the config to. A case reaches a route when its
+  alert goes through it, as for `amlint test --coverage`.
 - **Outline**: the route tree, with each route's matchers and `→ receiver`, then the
   receivers (with their integrations), inhibit rules (`source → target`) and time
   intervals. In VS Code it's the Outline view and the breadcrumbs above the editor.

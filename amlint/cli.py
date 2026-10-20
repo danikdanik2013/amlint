@@ -36,7 +36,7 @@ from rich.text import Text
 from rich.tree import Tree
 
 from . import mermaid
-from .config import load_project_config
+from .config import ConfigError, load_project_config, tests_for_config
 from .formats import FORMATS, MATCHER_STRATEGIES, FormatError, apply_locations, load_input
 from .goyaml import AlertmanagerLoader
 from .linter import (
@@ -823,13 +823,30 @@ def _cmd_test(args) -> int:
     if router is None:
         return 2
 
-    cases = _load_test_cases(args.tests)
-    if cases is None:
-        err_console.print(
-            f"[red]Invalid test file:[/red] {escape(args.tests)} must be a list of test cases, "
-            f"or have a top-level 'tests:' list."
-        )
-        return 2
+    if args.tests:
+        files = [args.tests]
+    else:
+        try:
+            files = tests_for_config(load_project_config(), args.config, os.getcwd())
+        except ConfigError as e:
+            err_console.print(f"[red]Cannot use the project config:[/red] {escape(str(e))}",
+                              soft_wrap=True)
+            return 2
+        if not files:
+            err_console.print(
+                f"[red]No tests file:[/red] give one after {escape(args.config)}, or map the "
+                f"config to its tests under tests: in .amlint.yml", soft_wrap=True)
+            return 2
+    cases = []
+    for path in files:
+        part = _load_test_cases(path)
+        if part is None:
+            err_console.print(
+                f"[red]Invalid test file:[/red] {escape(path)} must be a list of test cases, "
+                f"or have a top-level 'tests:' list."
+            )
+            return 2
+        cases += part
 
     inhibitor = None
     if any(isinstance(case, dict) and "firing" in case for case in cases):
@@ -1206,7 +1223,8 @@ def main(argv=None):
     ptst = sub.add_parser("test", parents=[inputs],
                           help="run routing unit tests against a config")
     ptst.add_argument("config", help="path to alertmanager.yml")
-    ptst.add_argument("tests", help="path to a YAML file with a list of test cases")
+    ptst.add_argument("tests", nargs="?", help="path to a YAML file with a list of test cases "
+                      "(default: the files tests: in .amlint.yml maps the config to)")
     ptst.add_argument("--format", choices=["text", "json"], default="text")
     ptst.add_argument("--coverage", action="store_true",
                       help="list the routes no test case reaches, and the share that is reached")
