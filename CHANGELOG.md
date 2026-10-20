@@ -1,6 +1,18 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0] - 2026-10-20
+
+Highlights:
+
+- **The editor as the main tool.** `amlint lsp` adds an outline of the route tree, go to
+  definition, find references and rename for receivers and time intervals, completion for
+  names, labels and values, test coverage above each route, and quick fixes for misspelled
+  names.
+- **One project config for the CLI and the editor.** `rules:` and `tests:` in `.amlint.yml`
+  point at your Prometheus rules and `amlint test` files, so `amlint check` and
+  `amlint test` need fewer flags and the editor uses the same files.
+- **VS Code extension 0.1.1.** No more restart loop with an old or missing amlint, an icon,
+  and an Open VSX workflow for Cursor and VSCodium.
 
 ### Added
 - `rules:` in `.amlint.yml` (or `pyproject.toml`): globs of Prometheus rule files, relative

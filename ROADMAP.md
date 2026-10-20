@@ -1,27 +1,10 @@
 # Roadmap
 
-Where amlint is going after 0.6.1, release by release. This is a plan, not a promise: items
+Where amlint is going after 0.7.0, release by release. This is a plan, not a promise: items
 can move between releases or drop out. Want to work on one? Open an issue first, so two
 people don't build the same thing.
 
-Last updated: 2026-10-17.
-
-## 0.7: the editor as the main tool
-
-`amlint lsp` and the VS Code extension are new. Build on them.
-
-- **Go to definition and find references** for receiver and time interval names. **Rename a
-  receiver** and every route that uses it changes too.
-- **Completion** for receiver and time interval names, and for label names and values taken
-  from the matchers and from your Prometheus rules.
-- **`rules:` in `.amlint.yml`**, so the CLI and the editor read the same rule files, and the
-  `--rules` checks run in the editor too.
-- **Outline:** the route tree in the editor's outline view.
-- **Coverage in the editor:** above each route, how many cases in your `amlint test` file
-  reach it.
-- **More quick fixes:** "did you mean" for `undefined-receiver`, remove a `continue: true`
-  that does nothing.
-- **Open VSX** for Cursor and VSCodium users, and an icon for the extension.
+Last updated: 2026-10-20.
 
 ## 0.8: templates and notifications
 
