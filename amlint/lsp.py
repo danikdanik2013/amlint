@@ -274,6 +274,108 @@ class _RequestFailed(Exception):
     """A request that can't be done, with a message for the user (LSP RequestFailed)."""
 
 
+# ── Completion ────────────────────────────────────────────────────────
+
+# what to complete, from the text left of the cursor; it works on a line still being typed
+_INTERVAL_KEYS = {"mute_time_intervals", "active_time_intervals"}
+_MATCHER_KEYS = {"matchers", "source_matchers", "target_matchers"}
+_LABEL_LIST_KEYS = {"group_by", "equal"}
+_MATCH_KEYS = {"match", "match_re", "source_match", "source_match_re", "target_match",
+               "target_match_re"}
+_RECEIVER_VALUE = re.compile(r"\s*(?:-\s+)?receiver\s*:\s*[\"']?([^\"'\s]*)\Z")
+_FLOW_LIST = re.compile(r"\s*(?:-\s+)?([A-Za-z_]+)\s*:\s*\[(.*)\Z")
+_BLOCK_ITEM = re.compile(r"(\s*)-\s+(.*)\Z")
+_KEY_LINE = re.compile(r"\s*(?:-\s+)?([A-Za-z_]+)\s*:\s*(?:#.*)?\Z")
+_MATCH_ENTRY = re.compile(r"(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*[\"']?([^\"']*)\Z")
+_MATCH_KEY = re.compile(r"(\s*)([A-Za-z_][A-Za-z0-9_]*)\Z")
+_MATCHER_VALUE = re.compile(r"\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:=~|!~|!=|=)\s*\"?([^\"]*)\Z")
+
+
+def _parent_key(lines: List[str], line: int, indent: int) -> Optional[str]:
+    """The key of the block holding `line`: the nearest line above with less indentation."""
+    for n in range(line - 1, -1, -1):
+        text = lines[n]
+        body = text.strip()
+        if not body or body.startswith("#"):
+            continue
+        if len(text) - len(text.lstrip(" ")) < indent or (
+                len(text) - len(text.lstrip(" ")) == indent and not body.startswith("-")):
+            hit = _KEY_LINE.match(text)
+            return hit.group(1) if hit else None
+    return None
+
+
+def _item_context(key: str, item: str, col: int):
+    """What to complete in one entry of a list under `key`, typed as `item` up to `col`."""
+    text = item.lstrip()
+    if text[:1] in "\"'":
+        text = text[1:]
+    if key in _INTERVAL_KEYS:
+        return ("interval", col - len(text), None)
+    if key in _LABEL_LIST_KEYS:
+        return ("label", col - len(text), None)
+    if key in _MATCHER_KEYS:
+        value = _MATCHER_VALUE.match(text)
+        if value:
+            return ("value", col - len(value.group(2)), value.group(1))
+        if re.fullmatch(r"[A-Za-z0-9_]*", text):
+            return ("label", col - len(text), None)
+    return None
+
+
+def _completion_context(lines: List[str], line: int, col: int):
+    """(what, start column, label) to complete at the cursor, or None. `what` is receiver,
+    interval, label or value (the value of `label`); start is where the typed part begins."""
+    prefix = lines[line][:col]
+    hit = _RECEIVER_VALUE.match(prefix)
+    if hit:
+        return ("receiver", col - len(hit.group(1)), None)
+    hit = _FLOW_LIST.match(prefix)
+    if hit:
+        return _item_context(hit.group(1), hit.group(2).rsplit(",", 1)[-1], col)
+    hit = _BLOCK_ITEM.match(prefix)
+    if hit:
+        key = _parent_key(lines, line, len(hit.group(1)))
+        return _item_context(key, hit.group(2), col) if key else None
+    hit = _MATCH_ENTRY.match(prefix) or _MATCH_KEY.match(prefix)
+    if hit and _parent_key(lines, line, len(hit.group(1))) in _MATCH_KEYS:
+        if hit.re is _MATCH_KEY:
+            return ("label", col - len(hit.group(2)), None)
+        return ("value", col - len(hit.group(3)), hit.group(2))
+    return None
+
+
+def _label_values(cfg: dict, alerts) -> Dict[str, Dict[str, str]]:
+    """label -> {value: where it comes from}, from the config's matchers and the rules."""
+    found: Dict[str, Dict[str, str]] = {}
+
+    def note(label: str, value: Optional[str], source: str) -> None:
+        values = found.setdefault(label, {})
+        if value is not None:
+            values.setdefault(value, source)
+
+    root = cfg.get("route")
+    nodes = [(n, "") for n, _ in _walk_routes(root)] if isinstance(root, dict) else []
+    for _, rule in _dict_items(cfg.get("inhibit_rules")):
+        nodes += [(rule, "source_"), (rule, "target_")]
+        for label in rule.get("equal") or []:
+            note(str(label), None, "config")
+    for node, prefix in nodes:
+        for label, op, value in _matchers(node, prefix):
+            if op != "?":
+                note(label, value if op in ("=", "!=") and value else None, "config")
+        if not prefix:
+            for label in node.get("group_by") or []:
+                if label != "...":
+                    note(str(label), None, "config")
+    for alert in alerts or []:
+        for label, value in alert.labels.items():
+            note(label, value, "rules")
+        for label in alert.unknown:
+            note(label, None, "rules")
+    return found
+
+
 # ── Documents ─────────────────────────────────────────────────────────
 
 class _Probes:
@@ -431,6 +533,7 @@ class _Document:
         self.text = text
         self.version = version
         self.analysis: Optional[_Analysis] = None
+        self.last_loaded: Optional[Loaded] = None  # of the last version amlint could read
 
 
 # ── Hover text ────────────────────────────────────────────────────────
@@ -622,6 +725,7 @@ class Server:
             "textDocument/references": self._references,
             "textDocument/prepareRename": self._prepare_rename,
             "textDocument/rename": self._rename,
+            "textDocument/completion": self._completion,
         }
         self._notifications = {
             "textDocument/didOpen": self._did_open,
@@ -705,6 +809,7 @@ class Server:
                 "definitionProvider": True,
                 "referencesProvider": True,
                 "renameProvider": {"prepareProvider": True},
+                "completionProvider": {"triggerCharacters": ['"', "=", "[", ","]},
                 "workspace": {"workspaceFolders": {"supported": True,
                                                    "changeNotifications": True}},
             },
@@ -868,6 +973,8 @@ class Server:
                 self.log(f"amlint: linting {doc.uri} failed:\n{traceback.format_exc()}")
                 analysis.diagnostics, analysis.loaded = [], None
             doc.analysis = analysis
+            if analysis.loaded is not None:
+                doc.last_loaded = analysis.loaded
         return doc.analysis
 
     def _lint(self, doc: _Document, analysis: _Analysis) -> None:
@@ -1092,6 +1199,54 @@ class Server:
         edits = [{"range": self._range(analysis.lines, o.line, o.start, o.end),
                   "newText": _written(new, o.quote)} for o in self._same(analysis, occ)]
         return {"changes": {uri: edits}}
+
+    # completion
+
+    def _completion(self, params: dict) -> List[dict]:
+        doc = self.docs.get(params["textDocument"]["uri"])
+        if doc is None:
+            return []
+        lines = _lines(doc.text)
+        pos = params["position"]
+        if not 0 <= pos["line"] < len(lines):
+            return []
+        text = lines[pos["line"]]
+        col = self._col(text, pos["character"])
+        context = _completion_context(lines, pos["line"], col)
+        if context is None:
+            return []
+        loaded = self.analyze(doc).loaded or doc.last_loaded
+        if loaded is None and not _LOOKS_LIKE_CONFIG.search(doc.text):
+            return []
+        what, start, label = context
+        cfg = loaded.cfg if loaded else {}
+        names: Dict[str, str] = {}
+        if what == "receiver":
+            if loaded is not None and loaded.format == "alertmanagerconfig":
+                return []  # the operator renames receivers: config names aren't what to type
+            names = {str(r["name"]): "receiver" for _, r in _dict_items(cfg.get("receivers"))
+                     if r.get("name")}
+        elif what == "interval":
+            names = {str(t["name"]): "time interval"
+                     for key in ("time_intervals", "mute_time_intervals")
+                     for _, t in _dict_items(cfg.get(key)) if t.get("name")}
+        else:
+            proj, folder = self._project(doc)
+            alerts, _ = self._alert_rules(proj, folder)
+            values = _label_values(cfg, alerts)
+            if what == "label":
+                in_config = _label_values(cfg, None)
+                names = {k: "label" if k in in_config else "label · from rules" for k in values}
+            else:
+                typed = text[start:col]  # the matcher being typed is in the config already
+                names = {v: f"{label} · {'in the rules' if s == 'rules' else 'in the config'}"
+                         for v, s in (values.get(label) or {}).items()
+                         if not (s == "config" and v == typed)}
+        kind = {"receiver": 18, "interval": 21, "label": 5, "value": 12}[what]
+        edit_range = self._range(lines, pos["line"], start, col)
+        return [{"label": name, "kind": kind, "detail": detail,
+                 "textEdit": {"range": edit_range, "newText": name}}
+                for name, detail in sorted(names.items())]
 
     # outline
 

@@ -681,3 +681,73 @@ def test_rename_to_an_existing_name_fails(lsp, tmp_path):
     assert error["code"] == -32803
     assert "already a receiver called 'default'" in error["message"]
     assert _at(client, "textDocument/prepareRename", uri, 3, 20)["result"] is None
+
+
+# ── Completion ────────────────────────────────────────────────────────
+
+def _complete(client, uri, line, character):
+    result = client.request("textDocument/completion", {
+        "textDocument": {"uri": uri}, "position": {"line": line, "character": character},
+    })["result"]
+    return {item["label"]: item for item in result}
+
+
+def test_complete_receiver_names(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    text = NAMES.replace("      receiver: db-pager\n", "      receiver: db\n", 1)
+    client.change(uri, text, 2)
+    items = _complete(client, uri, 4, 18)  # after "receiver: db"
+    assert set(items) == {"default", "db-pager"}
+    edit = items["db-pager"]["textEdit"]
+    assert edit["range"] == {"start": {"line": 4, "character": 16},
+                             "end": {"line": 4, "character": 18}}
+    assert items["db-pager"]["detail"] == "receiver"
+
+
+def test_complete_while_the_yaml_is_broken(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    # half-typed: the document doesn't parse, so names come from the last version that did
+    broken = NAMES.replace("      receiver: db-pager\n", "      receiver: \n  - [\n", 1)
+    client.change(uri, broken, 2)
+    assert set(_complete(client, uri, 4, 16)) == {"default", "db-pager"}
+
+
+def test_complete_time_intervals_in_flow_and_block_lists(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    assert set(_complete(client, uri, 5, 29)) == {"nights", "weekends"}  # [n|ights
+    assert set(_complete(client, uri, 9, 12)) == {"nights", "weekends"}  # - n|ights
+
+
+def test_complete_labels_and_values_in_matchers(lsp, tmp_path):
+    (tmp_path / "rules").mkdir()
+    _rule_file(tmp_path / "rules" / "node.yml", "NodeDown")
+    (tmp_path / ".amlint.yml").write_text("rules: ['rules/*.yml']\n")
+    client = lsp(root=tmp_path)
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = NAMES.replace('[team="web"]', '[team="web", te]', 1)
+    client.open(uri, text)
+    labels = _complete(client, uri, 6, 31)  # [team="web", te|
+    assert {"team", "alertname"} <= set(labels)
+    assert labels["alertname"]["detail"] == "label · from rules"
+    values = _complete(client, uri, 3, 22)  # [team="d|b"]
+    assert values["db"]["detail"] == "team · in the config" and "web" in values
+    text = NAMES.replace('[team="db"]', '[team="db", alertname="N"]', 1)
+    client.change(uri, text, 2)
+    assert set(_complete(client, uri, 3, 40)) == {"NodeDown"}  # alertname="N|
+    assert {"team", "alertname"} <= set(_complete(client, uri, 3, 37))  # alertname|=
+
+
+def test_no_completion_outside_known_places(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, NAMES)
+    assert _complete(client, uri, 1, 5) == {}   # in the key "receiver"
+    other = _uri(tmp_path / "docker-compose.yml")
+    client.open(other, "services:\n  web:\n    receiver: \n")
+    assert _complete(client, other, 2, 14) == {}

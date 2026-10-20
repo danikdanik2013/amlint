@@ -29,6 +29,13 @@ amlint lsp --help    # check that the command is there
   it. Rename a receiver or a time interval and every route that uses it changes too. The new
   name keeps the old one's quotes, and gets quotes when it needs them (`"yes"`, `"123"`).
   Renaming to a name that already exists is refused.
+- **Completion**: receiver names after `receiver:`, time interval names in
+  `mute_time_intervals` and `active_time_intervals`, and label names and values in
+  `matchers`, `source_matchers`, `target_matchers`, `match:`, `group_by` and `equal`. Labels
+  and values come from the config's matchers, and from your Prometheus rules when
+  [`rules:`](usage.md#project-config) is set (`alertname=` completes your rule names). It
+  works on a line you're still typing, with names from the last version of the file that
+  parsed.
 - **Outline**: the route tree, with each route's matchers and `→ receiver`, then the
   receivers (with their integrations), inhibit rules (`source → target`) and time
   intervals. In VS Code it's the Outline view and the breadcrumbs above the editor.

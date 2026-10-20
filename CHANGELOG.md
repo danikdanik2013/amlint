@@ -17,6 +17,10 @@
   editor. Renaming changes the definition and every route's `receiver:`,
   `mute_time_intervals` and `active_time_intervals`; it keeps quotes, adds them when the new
   name needs them, and refuses a name that already exists.
+- Completion in the editor: receiver names after `receiver:`, time interval names in
+  `mute_time_intervals`/`active_time_intervals`, and label names and values in matchers,
+  `match:`, `group_by` and `equal`, from the config and from the `rules:` files. It works
+  while the line doesn't parse yet, with names from the last version that did.
 
 ### Changed
 - `route-unknown-alertname` and `inhibit-unknown-alertname` say "the rule files" instead of
