@@ -4923,9 +4923,10 @@ def test_cli_fix_stdin(capsys, monkeypatch):
 
 # ── plaintext-secret ─────────────────────────────────────────────────
 
-# split, so that secret scanners don't take this made-up URL for a real one
+# split, so that secret scanners don't take these made-up values for real ones
 SLACK_HOOK = ("https://hooks.slack.com/services/"
               "T024BE7LD/B01ABCDEF/9xQmL2vK7pR4tY8wZ3nB6cD1")
+TELEGRAM_TOKEN = "987654321:" "AAHk3vXq8mP2LwZ7tR5nY1cB9dF4gJ6sK0"
 PD_KEY = "3f9a1c0be44d4f0d8d6c2b7e5a1f0c9d"
 
 
@@ -4941,8 +4942,7 @@ def test_plaintext_secret_in_receivers():
     found = _secrets(_receiver(
         pagerduty_configs=[{"routing_key": PD_KEY}],
         slack_configs=[{"api_url": SLACK_HOOK, "channel": "#x"}],
-        telegram_configs=[{"bot_token": "987654321:AAHk3vXq8mP2LwZ7tR5nY1cB9dF4gJ6sK0",
-                           "chat_id": 1}],
+        telegram_configs=[{"bot_token": TELEGRAM_TOKEN, "chat_id": 1}],
         email_configs=[{"to": "a@b.c", "auth_password": "hunter22"}],
         wechat_configs=[{"api_secret": "s3cr3tValue"}],
         sns_configs=[{"topic_arn": "arn:aws:sns:eu-west-1:1:t",
