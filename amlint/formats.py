@@ -22,7 +22,7 @@ import binascii
 import copy
 import gzip
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 import yaml
@@ -98,6 +98,24 @@ class BundledTemplates:
     names: List[str]
     directory: Optional[str]  # where Alertmanager reads them; None: `templates:` isn't checked
     source: str               # where they are, for messages
+    files: Dict[str, str] = field(default_factory=dict)  # name -> text, where amlint can read it
+    all_loaded: bool = False  # every file is loaded, whatever `templates:` says (Mimir)
+
+
+def _texts(entries, encoded: bool) -> Dict[str, str]:
+    """The text of each string value of a mapping, base64-decoded if `encoded`; values that
+    can't be read are left out."""
+    out: Dict[str, str] = {}
+    for key, value in (entries.items() if isinstance(entries, dict) else ()):
+        if not isinstance(value, str):
+            continue
+        if encoded:
+            try:
+                value = base64.b64decode("".join(value.split()), validate=True).decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError):
+                continue
+        out[str(key)] = value
+    return out
 
 
 # Regions: where a part of the config came from. Each maps a path in its own config to a
@@ -257,6 +275,9 @@ class Loaded:
         # the config is kept where plain-text secrets belong (a Kubernetes Secret, the
         # operator's resources), or where *_file fields can't be used (Mimir rejects them)
         self.secrets_ok = False
+        # Helm renders the config with tpl first, so {{ }} in it may be Helm's, not
+        # Alertmanager's: notification templates in it aren't checked
+        self.helm_tpl = False
         self._region = region
 
     def locate(self, where: str) -> Position:
@@ -280,7 +301,8 @@ def apply_locations(findings: list, loaded: Loaded) -> list:
     for f in findings:
         f.line, f.col = loaded.locate(f.where)
     findings = [f for f in findings if (f.code, f.where) not in loaded.by_design
-                and not (loaded.secrets_ok and f.code == "plaintext-secret")]
+                and not (loaded.secrets_ok and f.code == "plaintext-secret")
+                and not (loaded.helm_tpl and f.code in ("bad-template", "undefined-template"))]
     if loaded.uninjected is not None:
         without = {(f.code, f.where, f.msg) for check in (check_dead_inhibitions,
                    check_circular_inhibition) for f in check(loaded.uninjected)}
@@ -491,6 +513,7 @@ def load_input(text: str, input_format: Optional[str] = None,
         _no_route_cycle(cfg.get("route"), "route")
         loaded = Loaded(cfg, base.cls, region, comments, problems, templates, notes)
         loaded.secrets_ok = base.cls == "mimir" or base.kind == "Secret"
+        loaded.helm_tpl = base.cls == "helm" and base.get("alertmanager", "tplConfig") is True
         return loaded
     loaded = _operator(text, docs, crs, base, matcher_strategy, outer, notes, comments, problems)
     loaded.secrets_ok = True
@@ -538,7 +561,8 @@ def _read_base(doc: _Doc, text: str, outer: Suppressions, notes: List[Note],
     # Mimir loads every template_files entry, whatever `templates:` says, and rejects
     # `templates:` entries with a path, so they aren't checked against files.
     names = sorted(str(k) for k in files) if isinstance(files, dict) else []
-    return cfg, region, BundledTemplates(names, None, "template_files")
+    return cfg, region, BundledTemplates(names, None, "template_files", _texts(files, False),
+                                         all_loaded=True)
 
 
 def _block_shift(node: Node, key_node: Optional[Node], text: str) -> Optional[Tuple[int, int]]:
@@ -615,12 +639,15 @@ def _read_secret(doc: _Doc, text: str, outer: Suppressions, comments: list, prob
     names = sorted({str(k) for s in ("data", "stringData", "binaryData")
                     for k in (doc.get(s) if isinstance(doc.get(s), dict) else {})
                     if str(k) not in _CONFIG_KEYS + (_GZIP_KEY,)})
+    texts = _texts(doc.get("binaryData"), True)
+    texts.update(_texts(doc.get("data"), doc.kind == "Secret"))
+    texts.update(_texts(doc.get("stringData"), False))  # wins over data, as in the API server
     if doc.kind == "Secret":
         # The operator mounts the Secret's keys in /etc/alertmanager/config. The config itself
         # is read from config_out, so only absolute paths into that directory are checked.
-        templates = BundledTemplates(names, _CONFIG_DIR, "the Secret")
+        templates = BundledTemplates(names, _CONFIG_DIR, "the Secret", texts)
     else:
-        templates = BundledTemplates(names, None, "the ConfigMap")
+        templates = BundledTemplates(names, None, "the ConfigMap", texts)
     return cfg, region, templates
 
 
@@ -644,7 +671,8 @@ def _read_helm(doc: _Doc, text: str, outer: Suppressions, notes: List[Note],
     _, am_node = _get(doc.node, "alertmanager")
     files = am.get("templateFiles")
     names = sorted(str(k) for k in files) if isinstance(files, dict) else []
-    templates = BundledTemplates(names, _CONFIG_DIR, "alertmanager.templateFiles")
+    templates = BundledTemplates(names, _CONFIG_DIR, "alertmanager.templateFiles",
+                                 _texts(files, False))
     tpl = am.get("tplConfig") is True
     string_config = am.get("stringConfig")
     config = am.get("config")

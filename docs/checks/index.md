@@ -3,9 +3,9 @@
 amlint's checks catch Alertmanager config mistakes that lose alerts, send them to the wrong
 place, or mute them when they shouldn't be.
 
-amlint has **44 checks**. `amtool check-config` also catches **21** of them: Alertmanager
+amlint has **48 checks**. `amtool check-config` also catches **22** of them: Alertmanager
 refuses to load those configs, and amlint reports them so one run covers everything. The
-other **23** are configs that amtool accepts and Alertmanager runs, just not the way you
+other **26** are configs that amtool accepts and Alertmanager runs, just not the way you
 meant, or not for much longer. Those are the main reason to run amlint.
 
 The three **Prometheus rules** checks run only with `amlint check --rules`, which compares
@@ -63,6 +63,10 @@ catches it too.
 | Timing | [`wait-exceeds-interval`](timing.md#wait-exceeds-interval) | warn | | `group_wait` is longer than `group_interval`. |
 | Timing | [`global-resolve-timeout-missing`](timing.md#global-resolve-timeout-missing) | info | | `global.resolve_timeout` isn't set, so Alertmanager uses its default of `5m`. |
 | Timing | [`deprecated-mute-time-intervals`](timing.md#deprecated-mute-time-intervals) | info | | The top-level list is called `mute_time_intervals:`, not `time_intervals:`. `amlint fix` renames it. |
+| Templates | [`bad-template-file`](templates.md#bad-template-file) | error | ✓ | A template file under `templates:` isn't a valid Go template. |
+| Templates | [`bad-template`](templates.md#bad-template) | error | | The template text in a notifier field, such as Slack's `title:`, doesn't parse. |
+| Templates | [`undefined-template`](templates.md#undefined-template) | error | | `{{ template "name" }}` calls a template nothing defines. |
+| Templates | [`template-unknown-field`](templates.md#template-unknown-field) | error | | A template reads a field the data doesn't have, such as `.Labels` outside `{{ range .Alerts }}`. |
 | Prometheus rules | [`route-unknown-alertname`](rules.md#route-unknown-alertname) | warn | | With `--rules`: a route matches an `alertname` no alerting rule produces. |
 | Prometheus rules | [`inhibit-unknown-alertname`](rules.md#inhibit-unknown-alertname) | warn | | With `--rules`: an inhibition rule's source or target matches an `alertname` no alerting rule produces. |
 | Prometheus rules | [`alert-hits-default-receiver`](rules.md#alert-hits-default-receiver) | info | | With `--rules`: alerts match no child route, by their static labels, and go to the root route's receiver. |

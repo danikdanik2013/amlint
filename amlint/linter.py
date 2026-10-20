@@ -2014,6 +2014,10 @@ def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None,
         findings.extend(check_bundled_templates(cfg, template_files))
     elif basedir is not None:
         findings.extend(check_template_files(cfg, basedir))
+    from .templates import check_templates, template_sources  # builds on this module
+    sources = template_sources(cfg, None if template_files is not None else basedir,
+                               template_files)
+    findings.extend(check_templates(cfg, sources))
     if rules is not None:
         from .rules import check_rules  # imported here: rules.py builds on this module
         findings.extend(check_rules(cfg, rules))

@@ -3,6 +3,20 @@
 ## [Unreleased]
 
 ### Added
+- Notification templates are checked, with a Go template parser of amlint's own (no new
+  dependencies) that passes Go's own parser tests:
+  - `bad-template-file` (error): a template file under `templates:` doesn't parse. amtool
+    catches it too.
+  - `bad-template` (error): the template text in a notifier field, such as Slack's `title:`,
+    doesn't parse. Alertmanager only finds out when it sends the notification.
+  - `undefined-template` (error): `{{ template "name" }}` calls a template that no file, and
+    none of Alertmanager's own, defines.
+  - `template-unknown-field` (error): a template reads a field the data doesn't have, such
+    as `.Labels` outside `{{ range .Alerts }}`, or `.CommonLabels` inside it. Defines in
+    template files are checked with the data the fields call them with.
+
+  Template files are read next to the config file, or from the Secret, Helm `templateFiles`
+  or Mimir `template_files` they ship in.
 - `deprecated-match` (info): a route's `match:` or `match_re:`, or an inhibition rule's
   `source_match:`, `target_match:` and their `_re` forms, which Alertmanager 0.22
   deprecated. The message shows the `matchers:` to write instead.

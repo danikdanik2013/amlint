@@ -120,7 +120,7 @@ Full guide: [usage docs](https://danikdanik2013.github.io/amlint/usage/).
 
 ## What it catches
 
-44 checks. 23 of them catch things amtool doesn't, because the config is valid and simply
+48 checks. 26 of them catch things amtool doesn't, because the config is valid and simply
 behaves differently than you expect, or uses syntax Alertmanager has deprecated:
 
 - **Alerts that reach nobody.** A route points at a receiver that has no integration, or a
@@ -128,6 +128,9 @@ behaves differently than you expect, or uses syntax Alertmanager has deprecated:
 - **Routes that can never match.** An earlier sibling route catches every alert first. This
   can be an exact duplicate (`route-match-collision`) or a broader one, such as
   `severity=~"warning|critical"` before `severity="critical"` (`shadowed-route`).
+- **Notification templates that break when they're sent.** A missing `}`, a template name
+  with a typo, or `.Labels` where the data has `.CommonLabels`. Alertmanager loads these
+  configs fine; the notification fails, or Slack sends it with an empty title.
 - **Inhibit rules that mute too much.** No `equal` labels, rules that mute each other, or
   source and target that match the same alert.
 - **Timings that contradict themselves.** `group_wait` longer than `group_interval`, or
@@ -143,7 +146,7 @@ behaves differently than you expect, or uses syntax Alertmanager has deprecated:
 - **Secrets in plain text**: API keys, tokens and webhook URLs written into the config
   instead of read from a file.
 
-The other 21 checks repeat what amtool already rejects: undefined receivers, missing
+The other 22 checks repeat what amtool already rejects: undefined receivers, missing
 webhook URLs or API keys, bad regexes. They're there so one tool gives you one report, in
 one format.
 

@@ -31,6 +31,7 @@ ALSO_CAUGHT_BY_AMTOOL = {
     "wechat-no-corp-id",
     "sns-no-target",
     "bad-time-interval",
+    "bad-template-file",
 }
 
 # The docs page (docs/checks/<page>.md) with a section for each check, headed by its code.
@@ -53,6 +54,9 @@ _DOCS_PAGES = {
         "repeat-before-group", "wait-exceeds-interval", "undefined-time-interval",
         "global-resolve-timeout-missing", "deprecated-mute-time-intervals", "bad-time-interval",
         "time-interval-never-active", "route-always-muted",
+    ),
+    "templates": (
+        "bad-template-file", "bad-template", "undefined-template", "template-unknown-field",
     ),
     "rules": (
         "route-unknown-alertname", "inhibit-unknown-alertname", "alert-hits-default-receiver",
@@ -1223,5 +1227,112 @@ route:
 time_intervals:
   - name: office-hours
     time_intervals: [{times: [{start_time: '09:00', end_time: '17:00'}]}]""",
+    },
+
+    "bad-template-file": {
+        "level": "error",
+        "summary": "A template file under templates: isn't a valid Go template.",
+        "why": (
+            "Alertmanager parses template files when it loads the config and refuses a config "
+            "whose files don't parse; amtool check-config rejects it too, when it can find "
+            "the files. amlint reads relative paths next to the config file, and the files "
+            "that ship in a Secret, Helm templateFiles or Mimir template_files."
+        ),
+        "bad": """\
+# templates/slack.tmpl
+{{ define "slack.title" }}
+  [{{ .Status | toUpperCase }}] {{ .CommonLabels.alertname }}
+{{ end }}""",
+        "good": """\
+# templates/slack.tmpl
+{{ define "slack.title" }}
+  [{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}
+{{ end }}""",
+    },
+
+    "bad-template": {
+        "level": "error",
+        "summary": "The template text in a notifier field (title:, text:, ...) doesn't parse.",
+        "why": (
+            "Alertmanager loads the config without looking at it. When it sends a "
+            "notification the template fails: the notification isn't sent, and Slack sends "
+            "it with this field and the fields after it empty. A webhook url with {{ is the "
+            "exception: Alertmanager 0.31 and later parse it at load time and refuse the "
+            "config."
+        ),
+        "bad": """\
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }'""",
+        "good": """\
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'""",
+    },
+
+    "undefined-template": {
+        "level": "error",
+        "summary": (
+            "{{ template \"name\" }} calls a template that no template file, and none of"
+            " Alertmanager's own, defines."
+        ),
+        "why": (
+            "Go only looks the name up when the template runs, so the config loads and "
+            "amtool check-config passes. When Alertmanager sends a notification it fails with "
+            "'no such template': the notification isn't sent, or Slack sends it with this "
+            "field empty. Usually a typo, or a file the templates: glob doesn't match. Only "
+            "checked when amlint can read every template file the config loads."
+        ),
+        "bad": """\
+templates:
+  - templates/*.tmpl        # defines "slack.myorg.title"
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '{{ template "slack.myorg.titel" . }}'""",
+        "good": """\
+templates:
+  - templates/*.tmpl
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '{{ template "slack.myorg.title" . }}'""",
+    },
+
+    "template-unknown-field": {
+        "level": "error",
+        "summary": (
+            "A template reads a field the notification data doesn't have, such as .Labels"
+            " outside {{ range .Alerts }}."
+        ),
+        "why": (
+            "The notification has .CommonLabels, .CommonAnnotations, .GroupLabels, .Status, "
+            ".Receiver, .ExternalURL and .Alerts; each alert in {{ range .Alerts }} has "
+            ".Labels, .Annotations, .StartsAt, .EndsAt, .GeneratorURL and .Fingerprint. "
+            "Reading another field fails when Alertmanager sends the notification ('can't "
+            "evaluate field Labels in type *template.Data'): it isn't sent, or Slack sends it "
+            "with this field empty. Labels never fail: a missing label is empty. Defines in "
+            "template files are checked with the data the fields call them with."
+        ),
+        "bad": """\
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '{{ .Labels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Labels.pod }} in {{ .CommonLabels.env }}{{ end }}'""",
+        "good": """\
+receivers:
+  - name: team-slack
+    slack_configs:
+      - channel: "#alerts"
+        title: '{{ .CommonLabels.alertname }}'
+        text: '{{ range .Alerts }}{{ .Labels.pod }} in {{ $.CommonLabels.env }}{{ end }}'""",
     },
 }

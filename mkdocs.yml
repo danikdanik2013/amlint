@@ -45,6 +45,7 @@ nav:
     - Receivers: checks/receivers.md
     - Inhibition: checks/inhibition.md
     - Timing: checks/timing.md
+    - Templates: checks/templates.md
     - Prometheus rules: checks/rules.md
   - Contributing: contributing.md
 

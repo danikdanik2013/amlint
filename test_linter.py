@@ -5197,3 +5197,253 @@ def test_route_always_muted(today, defs, mute, active, why):
 def test_route_not_always_muted(today, defs, mute, active):
     cfg = _intervals(defs, db={"mute_time_intervals": mute, "active_time_intervals": active})
     assert _by("route-always-muted", cfg) == {}
+
+
+# ── notification templates ───────────────────────────────────────────
+
+# Cases from Go's text/template/parse tests (parse_test.go): the text, and None if Go parses
+# it, or a piece of the error Go gives.
+GO_TEMPLATE_CASES = [
+    ("", None), ("{{/*\n\n\n*/}}", None), ("{{.X}}", None), ("{{printf}}", None), ("{{$}}", None),
+    ("{{with $x := 3}}{{$x 23}}{{end}}", None), ("{{$.I}}", None), ("{{printf `%d` 23}}", None),
+    ("{{.X|.Y}}", None), ("{{$x := .X|.Y}}", None), ("{{.X (.Y .Z) (.A | .B .C) (.E)}}", None),
+    ("{{(.Y .Z).Field}}", None), ("{{if .X}}true{{else if .Y}}false{{end}}", None),
+    ("{{range $x, $y := .SI}}{{.}}{{end}}", None), ("{{range .SI}}{{.}}{{break}}{{end}}", None),
+    ("{{range .SI 1 -3.2i true false 'a' nil}}{{end}}", None), ("{{template `x` .Y}}", None),
+    ("{{with .X}}hello{{else with .Y}}goodbye{{end}}", None), ("x \r\n\t{{- 3 -}}\n\n\ty", None),
+    ("{{/* hi */ -}}\n\n\ty", None), ('{{block "foo" .}}hello{{end}}', None),
+    ("{{ $x \n := \n 1 \n }}", None), ("{{range $x = 0}}{{$x}}{{end}}", None),
+    ("{{$x:=.}}{{$x +2}}", None),
+    ("{{}}", "missing value for command"), ("hello{{range", "unclosed action"),
+    ("{{end}}", "unexpected {{end}}"), ("{{else}}", "unexpected {{else}}"),
+    ("{{if .X}}1{{else}}2{{else}}3{{end}}", "expected end; found {{else}}"),
+    ("hello{{range .x}}", "unexpected EOF"), ("hello{{undefined}}", 'function "undefined"'),
+    ("{{$x}}", 'undefined variable "$x"'), ("{{with $x := 4}}{{end}}{{$x}}", "undefined variable"),
+    ("{{template .X}}", "in template clause"), ("{{printf 3, 4}}", 'unexpected "," in operand'),
+    ("{{with $v, $u := 3}}{{end}}", "too many declarations in with"),
+    ("{{range $u, $v, $w := 3}}{{end}}", "too many declarations in range"),
+    ("{{printf (printf .).}}", "in operand"), ("{{printf 3`x`}}", "in operand"),
+    ("{{if .X}}a{{else if .Y}}b{{end}}{{end}}", "unexpected {{end}}"),
+    ("{{range .}}{{end}} {{break}}", "{{break}} outside {{range}}"),
+    ("{{range .}}{{else}}{{continue}}{{end}}", "{{continue}} outside {{range}}"),
+    ("{{$x:=.}}{{$x!2}}", "bad character U+0021 '!'"), ("{{true.E}}", "unexpected . after term"),
+    ("{{12|.}}", "non executable command in pipeline stage 2"),
+    ('{{block "foo"}}hello{{end}}', "missing value for block clause"),
+    ("{{/*}}", "unclosed comment"), ("{{.X (1 2 3}}", "unclosed left paren"),
+    ("{{.X 1 2 3 ) }}", "unexpected right paren"), ("{{a#}}", "'#'"),
+    ("{{'a}}", "unterminated character constant"), ('{{"a}}', "unterminated quoted string"),
+    ("{{`a}}", "unterminated raw quoted string"), ("{{0xi}}", "bad number syntax"),
+    ("{{define `a`}}a{{end}}{{define `a`}}b{{end}}", "multiple definition of template"),
+    ("{{range $k, .}}{{end}}", "range can only initialize variables"),
+]
+
+
+@pytest.mark.parametrize("text,error", GO_TEMPLATE_CASES)
+def test_go_template_parser_matches_go(text, error):
+    from amlint.gotemplate import parse
+    parsed = parse(text, {"printf", "contains"})
+    if error is None:
+        assert parsed.error is None, parsed.error.message
+    else:
+        assert parsed.error is not None and error in parsed.error.message
+
+
+def test_go_template_lines_and_names():
+    from amlint.gotemplate import line_of, parse
+    parsed = parse("line1\n{{define `x`}}line2\n{{", set())
+    assert parsed.error.message == "unclosed action" and line_of("line1\n{{define `x`}}line2\n{{",
+                                                                  parsed.error.pos) == 3
+    parsed = parse('{{ define "a" }}{{ template "b" . }}{{ end }}{{ block "c" . }}x{{ end }}',
+                   set())
+    assert set(parsed.defines) == {"a", "c"}
+    assert [n for n, _ in parsed.calls] == ["b", "c"]
+
+
+def _slack(**fields):
+    return {"route": {"receiver": "r"}, "receivers": [
+        {"name": "r", "slack_configs": [dict({"api_url_file": "/s", "channel": "#a"}, **fields)]}]}
+
+
+def _tpl(cfg, **kwargs):
+    return {f.where: (f.code, f.msg) for f in lint(cfg, **kwargs)
+            if "template" in f.code and f.code != "template-file-missing"}
+
+
+def test_bad_template_in_a_field():
+    found = _tpl(_slack(title="[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }",
+                        text="{{ range .Alerts }}\n  {{ .Labels.x | toUpperCase }}\n{{ end }}"))
+    code, msg = found["receivers[r].slack_configs[0].title"]
+    assert code == "bad-template"
+    assert 'unexpected "}" in operand' in msg and "Slack still sends the message" in msg
+    code, msg = found["receivers[r].slack_configs[0].text"]
+    assert 'line 2 of the text: function "toUpperCase" not defined' in msg
+    cfg = _slack()
+    cfg["receivers"][0]["email_configs"] = [{"to": "a@b.c", "html": "{{ if .X }}"}]
+    code, msg = _tpl(cfg)["receivers[r].email_configs[0].html"]
+    assert "unexpected EOF" in msg and "the notification fails and isn't sent" in msg
+
+
+def test_bad_template_in_a_webhook_url():
+    cfg = {"route": {"receiver": "r"}, "receivers": [{"name": "r", "webhook_configs": [
+        {"url": "https://hooks.internal/{{ .GroupLabels.team | toLower }}"}]}]}
+    code, msg = _tpl(cfg)["receivers[r].webhook_configs[0].url"]
+    assert 'function "toLower" not defined' in msg
+    assert "Alertmanager 0.31 and later parse it when they load the config" in msg
+
+
+def test_templates_that_parse_are_quiet():
+    cfg = _slack(
+        title='[{{ .Status | toUpper }}{{ if eq .Status "firing" }}:{{ .Alerts.Firing | len }}'
+              '{{ end }}] {{ .CommonLabels.alertname }}',
+        text='{{ range .Alerts }}*{{ .Labels.severity }}* {{ .Annotations.summary }} '
+             '{{ .StartsAt.Format "15:04" }} {{ $.ExternalURL }}{{ end }}'
+             '{{ range .CommonLabels.SortedPairs }}{{ .Name }}={{ .Value }}{{ end }}'
+             '{{ template "slack.default.footer" . }}',
+        fields=[{"title": "{{ .GroupLabels.alertname }}", "value": "{{ .CommonLabels.missing }}"}],
+    )
+    assert _tpl(cfg) == {}
+
+
+def _project(tmp_path, files, cfg):
+    (tmp_path / "templates").mkdir()
+    for name, text in files.items():
+        (tmp_path / "templates" / name).write_text(text)
+    cfg = dict(cfg, templates=["templates/*.tmpl"])
+    return cfg, str(tmp_path)
+
+
+def test_undefined_template(tmp_path):
+    cfg, base = _project(tmp_path, {
+        "slack.tmpl": '{{ define "slack.myorg.title" }}{{ .Status }}{{ end }}\n'
+                      '{{ define "slack.myorg.text" }}{{ template "slack.myorg.row" . }}{{ end }}',
+    }, _slack(title='{{ template "slack.myorg.titel" . }}',
+              text='{{ template "slack.myorg.text" . }}{{ template "slack.default.text" . }}'))
+    found = _tpl(cfg, basedir=base)
+    code, msg = found["receivers[r].slack_configs[0].title"]
+    assert code == "undefined-template"
+    assert 'calls template "slack.myorg.titel"' in msg
+    assert '(did you mean "slack.myorg.title"?)' in msg
+    code, msg = found["templates[0]"]
+    assert code == "undefined-template"
+    assert 'Template file templates/slack.tmpl, line 2, calls template "slack.myorg.row"' in msg
+    assert "receivers[r].slack_configs[0].text" not in found
+
+
+def test_undefined_template_needs_every_file(tmp_path):
+    cfg = _slack(title='{{ template "mine" . }}')
+    assert "receivers[r].slack_configs[0].title" in _tpl(cfg)  # no templates: at all
+    cfg["templates"] = ["/etc/alertmanager/templates/*.tmpl"]
+    assert _tpl(cfg, basedir=str(tmp_path)) == {}
+    cfg["templates"] = ["templates/*.tmpl"]
+    assert _tpl(cfg) == {}  # stdin: nothing to read relative paths against
+
+
+def test_bad_template_file(tmp_path):
+    cfg, base = _project(tmp_path, {
+        "a.tmpl": '{{ define "a" }}\n  {{ .Status | toUpperCase }}\n{{ end }}',
+        "b.tmpl": '{{ define "b" }}x{{ end }}{{ define "b" }}y{{ end }}',
+    }, _slack(title='{{ template "c" . }}'))
+    found = {}
+    for f in lint(cfg, basedir=base):
+        found.setdefault(f.code, []).append(f.msg)
+    assert found["bad-template-file"] == [
+        'Template file templates/a.tmpl, line 2: function "toUpperCase" not defined. '
+        "Alertmanager refuses to load this config.",
+        'Template file templates/b.tmpl, line 1: template: multiple definition of template "b". '
+        "Alertmanager refuses to load this config.",
+    ]
+    assert "undefined-template" not in found  # what a broken file defines is unknown
+
+
+def test_template_unknown_field_in_a_field():
+    found = _tpl(_slack(
+        title="{{ .Labels.alertname }}",
+        text="{{ range .Alerts }}{{ .Annotations.summary }} in {{ .CommonLabels.cluster }}"
+             "{{ end }}{{ .Commonlabels.x }}{{ .Alerts.Labels }}{{ .Status.Foo }}"))
+    code, msg = found["receivers[r].slack_configs[0].title"]
+    assert code == "template-unknown-field"
+    assert ".Labels on the notification data, which has no field Labels" in msg
+    assert "use .CommonLabels" in msg
+    assert '"can\'t evaluate field Labels in type *template.Data"' in msg
+    text = [f.msg for f in lint(_slack(text=(
+        "{{ range .Alerts }}{{ .Annotations.summary }} in {{ .CommonLabels.cluster }}"
+        "{{ end }}{{ .Commonlabels.x }}{{ .Alerts.Labels }}{{ .Status.Foo }}")))
+        if f.code == "template-unknown-field"]
+    assert len(text) == 4
+    assert "use $.CommonLabels" in text[0]
+    assert "(did you mean .CommonLabels?)" in text[1]
+    assert ".Labels on the list of alerts" in text[2]
+    assert ".Foo on a string" in text[3]
+
+
+def test_template_unknown_field_follows_calls(tmp_path):
+    cfg, base = _project(tmp_path, {"t.tmpl": (
+        '{{ define "text" }}{{ range .Alerts }}{{ template "row" . }}{{ end }}'
+        "{{ .Labels.x }}{{ end }}\n"
+        '{{ define "row" }}{{ .Labels.severity }} {{ .Receiver }}{{ end }}\n'
+        '{{ define "unused" }}{{ .Whatever }}{{ end }}\n'
+        '{{ define "both" }}{{ .Labels.x }}{{ end }}\n'
+    )}, _slack(text='{{ template "text" . }}{{ template "both" . }}'
+                    '{{ range .Alerts }}{{ template "both" . }}{{ end }}'))
+    msgs = sorted(f.msg for f in lint(cfg, basedir=base) if f.code == "template-unknown-field")
+    assert len(msgs) == 2
+    assert 'line 1, in "text": .Labels on the notification data' in msgs[0]
+    assert 'line 2, in "row": .Receiver on one alert' in msgs[1]
+    assert "The template runs on one alert here" in msgs[1]
+
+
+def test_templates_in_kubernetes_inputs(tmp_path, capsys):
+    secret = """\
+apiVersion: v1
+kind: Secret
+metadata: {name: alertmanager-main}
+stringData:
+  slack.tmpl: |
+    {{ define "slack.title" }}{{ .Labels.alertname }}{{ end }}
+  alertmanager.yaml: |
+    templates: [/etc/alertmanager/config/*.tmpl]
+    route: {receiver: r}
+    receivers:
+      - name: r
+        slack_configs:
+          - {api_url_file: /s, channel: '#a', title: '{{ template "slack.titel" . }}'}
+"""
+    path = tmp_path / "secret.yml"
+    path.write_text(secret)
+    main(["check", "--format", "json", str(path)])
+    found = {f["code"]: f["message"] for f in json.loads(capsys.readouterr().out)}
+    assert 'calls template "slack.titel"' in found["undefined-template"]
+    assert "slack.tmpl in the Secret" not in found.get("undefined-template", "")
+    mimir = """\
+template_files:
+  t.tmpl: '{{ define "t" }}{{ end }'
+alertmanager_config: |
+  route: {receiver: r}
+  receivers: [{name: r}]
+"""
+    path.write_text(mimir)
+    main(["check", "--format", "json", str(path)])
+    found = {f["code"]: f["message"] for f in json.loads(capsys.readouterr().out)}
+    assert found["bad-template-file"].startswith("Template file t.tmpl in template_files, line 1")
+
+
+def test_no_template_checks_with_helm_tpl_config(tmp_path, capsys):
+    values = """\
+alertmanager:
+  tplConfig: true
+  config:
+    route: {receiver: r}
+    receivers:
+      - name: r
+        slack_configs:
+          - api_url_file: /s
+            channel: '{{ .Values.channel | quote }}'
+            title: '{{ "{{" }} .CommonLabels.alertname {{ "}}" }}'
+"""
+    path = tmp_path / "values.yml"
+    path.write_text(values)
+    main(["check", "--format", "json", str(path)])
+    assert not [f for f in json.loads(capsys.readouterr().out) if "template" in f["code"]]
+    path.write_text(values.replace("  tplConfig: true\n", ""))
+    main(["check", "--format", "json", str(path)])
+    assert "bad-template" in {f["code"] for f in json.loads(capsys.readouterr().out)}
