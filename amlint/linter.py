@@ -1681,7 +1681,8 @@ _HTTP_SECRET_FIELDS = {
 # Words in a value that is only a stand-in for the secret, as in docs and examples.
 _PLACEHOLDER = re.compile(
     r"<[^>]*>|\$\{|\$\(|\{\{|\.\.\.|x{4,}|example|change[-_ ]?me|replace|redacted|dummy|"
-    r"placeholder|your[-_ ]|todo|fixme|secret_here|insert",
+    r"placeholder|your[-_ ]|todo|fixme|secret_here|insert|"
+    r"ABC-DEF1234ghIkl",  # the bot token in Telegram's docs
     re.IGNORECASE,
 )
 # Query parameters and hosts that make a webhook URL a credential.
@@ -1707,21 +1708,32 @@ def _placeholder(value: str, url: bool = False) -> bool:
         (value.isalpha() and len(value) < 16)
 
 
+def _token_like(text: str, size: int = 8) -> bool:
+    """A random-looking token, not a word: TOKEN, x and services aren't."""
+    return len(text) >= size and not text.isalpha() and not _placeholder(text)
+
+
 def _url_secret(url: str) -> Optional[str]:
-    """What makes a URL a credential, or None."""
-    from urllib.parse import parse_qsl, urlsplit
+    """What makes a URL a credential, or None: a password, a token in the path of a
+    webhook service (or after /hooks/ on any host, as Mattermost has it), or a parameter
+    such as token=."""
+    from urllib.parse import parse_qsl, unquote, urlsplit
     try:
         parts = urlsplit(url)
     except ValueError:
         return None
     host = (parts.hostname or "").lower()
-    if parts.password:
+    if parts.password and not _placeholder(unquote(parts.password), url=True):
         return "a password"
+    segments = [unquote(seg) for seg in parts.path.split("/") if seg]
     if any(host == h or host.endswith("." + h) for h in _URL_SECRET_HOSTS) and \
-            parts.path.strip("/").count("/") >= 1:
+            any(_token_like(seg) for seg in segments):
+        return "a webhook token"
+    if any(seg.lower() in ("hooks", "webhook", "webhooks") and _token_like(nxt, 20)
+           for seg, nxt in zip(segments, segments[1:])):
         return "a webhook token"
     for name, value in parse_qsl(parts.query, keep_blank_values=True):
-        if value and _URL_SECRET_PARAM.search(name):
+        if value and _URL_SECRET_PARAM.search(name) and not _placeholder(value, url=True):
             return f"a '{name}' parameter"
     return None
 
@@ -1731,7 +1743,7 @@ def _secret_problem(section: str, field: str, value) -> Optional[str]:
     url = field in ("url", "slack_api_url", "api_url", "webhook_url", "mattermost_webhook_url")
     if not isinstance(value, str) or _placeholder(value, url):
         return None
-    if field in ("url", "slack_api_url", "api_url"):
+    if url:
         what = _url_secret(value)
         return None if what is None else f"a URL with {what} in it"
     return "a secret"

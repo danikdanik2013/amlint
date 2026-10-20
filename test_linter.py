@@ -4941,7 +4941,7 @@ def test_plaintext_secret_in_receivers():
     found = _secrets(_receiver(
         pagerduty_configs=[{"routing_key": PD_KEY}],
         slack_configs=[{"api_url": SLACK_HOOK, "channel": "#x"}],
-        telegram_configs=[{"bot_token": "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11",
+        telegram_configs=[{"bot_token": "987654321:AAHk3vXq8mP2LwZ7tR5nY1cB9dF4gJ6sK0",
                            "chat_id": 1}],
         email_configs=[{"to": "a@b.c", "auth_password": "hunter22"}],
         wechat_configs=[{"api_secret": "s3cr3tValue"}],
@@ -5464,3 +5464,21 @@ def test_bad_regex_null_match_re_value():
            "receivers:\n  - name: a\n"
     new, fixed, left = _fix(text)
     assert new == text and left == ["route.routes[0].match_re"]
+
+
+@pytest.mark.parametrize("section,field,value,secret", [
+    ("discord_configs", "webhook_url", "http://localhost/discord", False),
+    ("discord_configs", "webhook_url",
+     "https://discord.com/api/webhooks/1234567890/AbCdEf-GhIjKl0123", True),
+    ("msteams_configs", "webhook_url", "http://localhost/msteams", False),
+    ("mattermost_configs", "webhook_url",
+     "https://chat.acme.io/hooks/xg7n4k2pq9fbtrw3m8yd5ehz1a", True),
+    ("slack_configs", "api_url", "https://hooks.slack.com/services/TOKEN", False),
+    ("slack_configs", "api_url", "https://hooks.slack.com/services/x/x/x", False),
+    ("telegram_configs", "bot_token", "123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11", False),
+])
+def test_plaintext_secret_webhook_fields(section, field, value, secret):
+    """Seen in public configs: local test URLs, Slack URLs with a word for the token, and
+    the bot token from Telegram's docs are examples."""
+    cfg = _receiver(**{section: [{field: value, "channel": "#x", "chat_id": 1}]})
+    assert bool(_secrets(cfg)) is secret
