@@ -2,9 +2,14 @@
   "name": "amlint",
   "displayName": "amlint: Alertmanager config linter",
   "description": "Finds misrouted, unreachable and over-inhibited alerts in Prometheus Alertmanager configs as you type, and shows on hover where each route sends alerts.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "dpyly",
   "license": "MIT",
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#1c2654",
+    "theme": "dark"
+  },
   "homepage": "https://danikdanik2013.github.io/amlint/editors/",
   "repository": {
     "type": "git",
@@ -81,6 +86,7 @@
     "check": "tsc -p ./ --noEmit",
     "bundle": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --minify --sourcemap --outfile=out/extension.js",
     "compile": "npm run check && npm run bundle",
+    "test": "esbuild src/preflight.ts --bundle --platform=node --format=cjs --target=node20 --outfile=out/test/preflight.js --log-level=warning && node --test test/preflight.test.js",
     "package": "vsce package --no-dependencies",
     "vscode:prepublish": "npm run compile"
   },
@@ -92,6 +98,7 @@
     "@types/vscode": "1.91.0",
     "@vscode/vsce": "4.0.0",
     "esbuild": "0.28.2",
+    "ovsx": "1.2.0",
     "typescript": "5.9.3"
   }
 }

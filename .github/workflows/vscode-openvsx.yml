@@ -1,0 +1,46 @@
+name: Publish VS Code extension to Open VSX
+
+# Open VSX is the extension registry of VSCodium, Cursor and Gitpod. This runs only when a
+# maintainer starts it by hand (Actions → this workflow → Run workflow), and needs the
+# OVSX_PAT secret: see editors/vscode/PUBLISHING.md.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: openvsx
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: npm test
+
+      - name: Type-check, bundle and package
+        run: npm run package
+
+      - name: Publish to Open VSX
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          if [ -z "$OVSX_PAT" ]; then
+            echo "::error::No OVSX_PAT secret: create an Open VSX token and add it first (editors/vscode/PUBLISHING.md)."
+            exit 1
+          fi
+          npx ovsx publish amlint-*.vsix -p "$OVSX_PAT"

@@ -78,8 +78,15 @@ severity:
 
 ## Troubleshooting
 
-- **"could not start amlint lsp"**: amlint isn't installed, isn't on VS Code's `PATH`, or
-  is older than 0.6.0. Run `which amlint` in a terminal and put that path in `amlint.path`.
+- **"can't find amlint"**: amlint isn't installed, or isn't on the `PATH` VS Code sees,
+  which can differ from your terminal's. Install it with `pipx install amlint`, or run
+  `which amlint` in a terminal and put that path in `amlint.path`.
+- **"is amlint 0.x, and the editor needs 0.6.0 or newer"**: the amlint VS Code finds is too
+  old for `amlint lsp`. Upgrade it (`pipx upgrade amlint` or `pip install -U amlint`), or
+  point `amlint.path` at a newer one. Then run **amlint: Restart Server**.
+- **"stopped 3 times in a few minutes"**: the server crashed. The **amlint** output channel
+  has the error; please [open an issue](https://github.com/danikdanik2013/amlint/issues)
+  with it.
 - **No findings in a config**: check that the file's language mode (bottom right) is YAML.
   Then set `amlint.trace.server` to `messages` and look at the **amlint** output channel.
 

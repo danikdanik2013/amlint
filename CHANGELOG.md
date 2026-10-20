@@ -32,10 +32,18 @@
   and `undefined-time-interval` (the closest names, the first one preferred), and removing
   the `continue: true` line of a `useless-continue`. Diagnostics carry the finding's path in
   `data` for this.
+- The VS Code extension has an icon, and a workflow that publishes it to Open VSX for
+  Cursor, VSCodium and Gitpod. It runs only when started by hand, with an `OVSX_PAT` secret;
+  the steps are in `editors/vscode/PUBLISHING.md`.
 
 ### Changed
 - `route-unknown-alertname` and `inhibit-unknown-alertname` say "the rule files" instead of
   "the --rules files", since the rules can come from `.amlint.yml` too.
+
+### Fixed
+- VS Code extension 0.1.1: an amlint older than 0.6.0 (or none at all) on VS Code's `PATH`
+  no longer makes the server start and crash in a loop. The extension checks
+  `amlint --version` first and says what to install or set in `amlint.path`.
 
 ## [0.6.1] - 2026-10-17
 

@@ -4,3 +4,6 @@ tsconfig.json
 PUBLISHING.md
 .gitignore
 **/*.vsix
+test/**
+out/test/**
+images/make_icon.py

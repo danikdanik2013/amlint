@@ -91,6 +91,11 @@ Extensions view, or run:
 code --install-extension dpyly.amlint
 ```
 
+**Cursor, VSCodium and Gitpod** install extensions from [Open VSX](https://open-vsx.org)
+instead of the Marketplace. Until amlint is published there, install the `.vsix` from the
+latest run of the `VS Code extension` workflow (its `amlint-vscode` artifact):
+`cursor --install-extension amlint-<version>.vsix`, or `codium --install-extension ...`.
+
 Then open an `alertmanager.yml`. The extension runs the amlint you installed, so new
 checks come with `pip install -U amlint`, not with an extension update. Settings:
 
@@ -101,8 +106,15 @@ checks come with `pip install -U amlint`, not with an extension update. Settings
 | `amlint.trace.server` | `off` | `messages` or `verbose` logs the traffic to the **amlint** output channel. |
 
 **amlint: Restart Server** in the command palette restarts it, for example after you
-upgrade amlint. If VS Code says it can't start `amlint lsp`, run `which amlint` in a
-terminal and put that path in `amlint.path`.
+upgrade amlint.
+
+If it doesn't start:
+
+- **"can't find amlint"**: VS Code doesn't see amlint on its `PATH`, which can differ from
+  your terminal's. Install it with `pipx install amlint`, or run `which amlint` in a
+  terminal and put that path in `amlint.path`.
+- **"the editor needs 0.6.0 or newer"**: the amlint VS Code finds predates `amlint lsp`.
+  Upgrade it with `pipx upgrade amlint` or `pip install -U amlint`, then restart the server.
 
 ## Neovim
 
