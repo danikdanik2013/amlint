@@ -9,6 +9,10 @@
   reads the rule files again when one changes; a glob that matches nothing is a warning on
   the first line. A bad glob or a value that isn't a glob or a list of globs exits `check`
   with `2`, as a bad `--rules` does.
+- Outline in the editor (`textDocument/documentSymbol`): the route tree, each route named by
+  its matchers with `→ receiver`, then receivers (with their integrations), inhibit rules
+  (`source → target`) and time intervals. Routes that an AlertmanagerConfig adds elsewhere in
+  the file show at the top level, where they are written.
 
 ### Changed
 - `route-unknown-alertname` and `inhibit-unknown-alertname` say "the rule files" instead of

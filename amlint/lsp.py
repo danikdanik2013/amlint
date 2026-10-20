@@ -32,7 +32,7 @@ import yaml
 from .config import load_project_config
 from .explains import EXPLAINS, docs_url
 from .formats import FormatError, Loaded, apply_locations, load_input
-from .linter import ERROR, INFO, WARN, _walk_routes, lint
+from .linter import ERROR, INFO, WARN, _dict_items, _matchers, _walk_routes, lint
 from .routing import GROUP_BY_ALL, RouteOpts, Router, RoutingError, probe_label_sets
 from .rules import CONFIG_SOURCE, RulesError, load_rules, project_rule_patterns, rule_files
 from .source import _COMMENT_RE, _DIRECTIVE_RE
@@ -244,6 +244,19 @@ class _Analysis:
             end = n
         return end
 
+    def item_block(self, where: str, seen: set) -> Optional[Tuple[int, int, int]]:
+        """(first line, start column, last line) of a list entry such as `receivers[2]`,
+        if it is written in this document; `seen` drops entries that map to a place
+        already used (a config that isn't all in the document maps them to one spot)."""
+        line, col = self.loaded.locate(where)
+        line, col = line - 1, col - 1
+        if (line, col) in seen or not 0 <= line < len(self.lines):
+            return None
+        if not self.lines[line][:col].rstrip().endswith("-"):
+            return None  # not a list entry here, e.g. the place of a key above it
+        seen.add((line, col))
+        return line, col, self._block_end(line, col)
+
     def route_at(self, line: int) -> Optional[Tuple[str, dict]]:
         """The innermost route whose block holds `line`."""
         found = None
@@ -388,6 +401,58 @@ def _route_hover(analysis: _Analysis, path: str, node: dict) -> str:
     return "\n".join(out)
 
 
+# ── Outline ───────────────────────────────────────────────────────────
+
+# LSP SymbolKind values
+_NAMESPACE, _PACKAGE, _CONSTANT, _OBJECT, _EVENT = 3, 4, 14, 19, 24
+
+
+def _route_name(path: str, node: dict) -> str:
+    if path == "route":
+        return "route"
+    return ", ".join(_matcher_texts(node)) or "(catch-all)"
+
+
+def _route_detail(node: dict) -> str:
+    receiver = node.get("receiver")
+    detail = f"→ {receiver}" if isinstance(receiver, str) and receiver else "→ (inherited)"
+    return detail + (" · continue" if node.get("continue") is True else "")
+
+
+def _receiver_detail(receiver: dict) -> str:
+    kinds = [k[:-len("_configs")] for k, v in receiver.items()
+             if k.endswith("_configs") and v]
+    return ", ".join(kinds) if kinds else "no integrations"
+
+
+def _inhibit_name(rule: dict) -> str:
+    def side(prefix: str) -> str:
+        parts = [f"{label}{op}{value}" for label, op, value in _matchers(rule, prefix)]
+        return ", ".join(parts) or "any alert"
+
+    return f"{side('source_')} → {side('target_')}"
+
+
+def _interval_detail(interval: dict) -> str:
+    ranges = interval.get("time_intervals")
+    n = len(ranges) if isinstance(ranges, list) else 0
+    return f"{n} time range" + ("" if n == 1 else "s")
+
+
+def _holds(outer: dict, inner: dict) -> bool:
+    """Whether LSP range `outer` contains `inner`."""
+    def key(pos: dict) -> tuple:
+        return pos["line"], pos["character"]
+    return key(outer["start"]) <= key(inner["start"]) and key(inner["end"]) <= key(outer["end"])
+
+
+def _inhibit_detail(rule: dict) -> str:
+    equal = rule.get("equal")
+    if isinstance(equal, list) and equal:
+        return "equal: " + ", ".join(str(e) for e in equal)
+    return "no equal"
+
+
 # ── The server ────────────────────────────────────────────────────────
 
 class Server:
@@ -408,6 +473,7 @@ class Server:
             "shutdown": self._shutdown,
             "textDocument/hover": self._hover,
             "textDocument/codeAction": self._code_action,
+            "textDocument/documentSymbol": self._document_symbol,
         }
         self._notifications = {
             "textDocument/didOpen": self._did_open,
@@ -485,6 +551,7 @@ class Server:
                 "textDocumentSync": {"openClose": True, "change": _FULL_SYNC},
                 "hoverProvider": True,
                 "codeActionProvider": {"codeActionKinds": ["quickfix"]},
+                "documentSymbolProvider": True,
                 "workspace": {"workspaceFolders": {"supported": True,
                                                    "changeNotifications": True}},
             },
@@ -804,3 +871,73 @@ class Server:
         newline = "\r\n" if "\r\n" in text else "\n"
         return {"range": self._range(lines, 0, 0, 0),
                 "newText": f"# amlint: disable-file={code}{newline}"}
+
+    # outline
+
+    def _symbol(self, lines: List[str], name, detail: str, kind: int,
+                first: int, col: int, last: int) -> dict:
+        """A DocumentSymbol from (first, col) to the end of line `last`; it's selected by
+        what's written on its first line."""
+        head, tail = lines[first], lines[last]
+        end = _content_end(head, col)
+        return {
+            "name": str(name) if name not in (None, "") else "(unnamed)",
+            "detail": detail, "kind": kind,
+            "range": {"start": {"line": first, "character": self._char(head, col)},
+                      "end": {"line": last, "character": self._char(tail, len(tail))}},
+            "selectionRange": self._range(lines, first, col, end if end > col else len(head)),
+        }
+
+    def _document_symbol(self, params: dict) -> List[dict]:
+        doc = self.docs.get(params["textDocument"]["uri"])
+        if doc is None:
+            return []
+        analysis = self.analyze(doc)
+        if analysis.loaded is None:
+            return []
+        lines, cfg = analysis.lines, analysis.loaded.cfg
+        out: List[dict] = []
+
+        routes: Dict[str, dict] = {}
+        for first, last, path, node in analysis.routes():
+            col = analysis.loaded.locate(path)[1] - 1
+            symbol = self._symbol(lines, _route_name(path, node), _route_detail(node),
+                                  _NAMESPACE, first, col, last)
+            routes[path] = symbol
+            # Under the nearest route above it that also holds it in the text: an
+            # AlertmanagerConfig's routes sit elsewhere in the file than the root they join.
+            parent = path
+            while ".routes[" in parent:
+                parent = parent[:parent.rfind(".routes[")]
+                if parent in routes and _holds(routes[parent]["range"], symbol["range"]):
+                    routes[parent].setdefault("children", []).append(symbol)
+                    break
+            else:
+                out.append(symbol)
+
+        seen: set = set()
+        groups = (
+            ("receivers", _OBJECT, lambda r: r.get("name"), _receiver_detail),
+            ("inhibit_rules", _EVENT, _inhibit_name, _inhibit_detail),
+            ("time_intervals", _CONSTANT, lambda t: t.get("name"), _interval_detail),
+            ("mute_time_intervals", _CONSTANT, lambda t: t.get("name"), _interval_detail),
+        )
+        for key, kind, name, detail in groups:
+            children = []
+            for i, item in _dict_items(cfg.get(key)):
+                block = analysis.item_block(f"{key}[{i}]", seen)
+                if block is not None:
+                    first, col, last = block
+                    children.append(self._symbol(lines, name(item), detail(item), kind,
+                                                 first, col, last))
+            if not children:
+                continue
+            line, col = (n - 1 for n in analysis.loaded.locate(key))
+            start = children[0]["range"]["start"]["line"]
+            if not 0 <= line <= start:
+                line, col = start, 0
+            last = max(c["range"]["end"]["line"] for c in children)
+            group = self._symbol(lines, key, str(len(children)), _PACKAGE, line, col, last)
+            group["children"] = children
+            out.append(group)
+        return out

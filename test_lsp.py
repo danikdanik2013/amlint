@@ -510,3 +510,67 @@ def test_project_rules_that_cant_be_read_are_reported(lsp, tmp_path):
     [warning] = [d for d in diags if "Prometheus rules" in d["message"]]
     assert warning["severity"] == 2 and warning["range"]["start"]["line"] == 0
     assert "'missing/*.yml' matches no files" in warning["message"]
+
+
+# ── Outline ───────────────────────────────────────────────────────────
+
+def _symbols(client, uri):
+    return client.request("textDocument/documentSymbol", {"textDocument": {"uri": uri}})["result"]
+
+
+def _contains(outer: dict, inner: dict) -> bool:
+    def key(pos):
+        return (pos["line"], pos["character"])
+    return key(outer["start"]) <= key(inner["start"]) and key(inner["end"]) <= key(outer["end"])
+
+
+def _check_nesting(symbols):
+    for s in symbols:
+        assert s["name"]
+        assert _contains(s["range"], s["selectionRange"]), s
+        for child in s.get("children", []):
+            assert _contains(s["range"], child["range"]), (s["name"], child["name"])
+        _check_nesting(s.get("children", []))
+
+
+def test_outline_shows_routes_and_receivers(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    client.open(uri, CONFIG + "inhibit_rules:\n  - source_matchers: [severity=critical]\n"
+                "    target_matchers: [severity=warning]\n    equal: [alertname]\n")
+    symbols = _symbols(client, uri)
+    _check_nesting(symbols)
+    route, receivers, inhibit = symbols
+    assert (route["name"], route["detail"], route["kind"]) == ("route", "→ default", 3)
+    db, web = route["children"]
+    assert (db["name"], db["detail"]) == ('team="db"', "→ db-pager")
+    assert db["range"]["start"]["line"] == 6
+    [critical] = db["children"]
+    assert (critical["name"], critical["detail"]) == ('severity="critical"', "→ db-oncall")
+    assert (web["name"], web["detail"]) == ('team="web"', "→ ghost")
+    assert web["range"]["start"]["line"] == GHOST_LINE
+    assert (receivers["name"], receivers["detail"]) == ("receivers", "3")
+    assert [(r["name"], r["detail"]) for r in receivers["children"]] == [
+        ("default", "webhook"), ("db-pager", "webhook"), ("db-oncall", "webhook")]
+    [rule] = inhibit["children"]
+    assert (rule["name"], rule["detail"]) == ("severity=critical → severity=warning",
+                                              "equal: alertname")
+
+
+@pytest.mark.parametrize("name", sorted(os.listdir(os.path.join(ROOT, "testdata", "formats"))))
+def test_outline_for_every_input_format(lsp, tmp_path, name):
+    path = Path(ROOT, "testdata", "formats", name)
+    client = lsp()
+    client.open(path.as_uri(), path.read_text())
+    symbols = _symbols(client, path.as_uri())
+    _check_nesting(symbols)
+    lines = path.read_text().splitlines()
+    for s in symbols:  # every symbol starts at something written in the file
+        assert lines[s["range"]["start"]["line"]].strip()
+
+
+def test_outline_of_other_yaml_is_empty(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "docker-compose.yml")
+    client.open(uri, "services:\n  web:\n    image: nginx\n")
+    assert _symbols(client, uri) == []

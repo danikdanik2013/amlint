@@ -24,6 +24,9 @@ amlint lsp --help    # check that the command is there
 - **Quick fixes** for a finding you accept: add `# amlint: disable=<code>` to its line, or
   `# amlint: disable-file=<code>` to the top of the file. See
   [inline suppressions](usage.md#inline-suppressions).
+- **Outline**: the route tree, with each route's matchers and `→ receiver`, then the
+  receivers (with their integrations), inhibit rules (`source → target`) and time
+  intervals. In VS Code it's the Outline view and the breadcrumbs above the editor.
 
 A hover over a route looks like this:
 
