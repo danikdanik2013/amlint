@@ -21,6 +21,9 @@ amlint lsp --help    # check that the command is there
   a parent, or Alertmanager's default. It also shows an example alert that ends on the route
   and the receivers it goes to, from the same simulation as
   [`amlint route`](usage.md#route).
+- **Quick fixes** that change the config: a misspelled receiver or time interval
+  (`undefined-receiver`, `undefined-time-interval`) offers "Change 'db-pagr' to 'db-pager'"
+  for the closest names, and `useless-continue` offers to remove the `continue: true` line.
 - **Quick fixes** for a finding you accept: add `# amlint: disable=<code>` to its line, or
   `# amlint: disable-file=<code>` to the top of the file. See
   [inline suppressions](usage.md#inline-suppressions).

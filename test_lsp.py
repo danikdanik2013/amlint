@@ -786,3 +786,62 @@ def test_no_code_lens_without_tests_for_the_file(lsp, tmp_path):
     uri = _uri(tmp_path / "alertmanager.yml")
     client.open(uri, CONFIG)
     assert _lenses(client, uri) == {}
+
+
+# ── Quick fixes that change the config ────────────────────────────────
+
+def _fix_actions(client, uri, diags):
+    return client.request("textDocument/codeAction", {
+        "textDocument": {"uri": uri},
+        "range": diags[0]["range"],
+        "context": {"diagnostics": diags},
+    })["result"]
+
+
+def _fix(client, uri, text, code):
+    """Apply the preferred quick fix for `code` and return the new text."""
+    diags = [d for d in client.open(uri, text) if d.get("code") == code]
+    assert diags, code
+    [preferred] = [a for a in _fix_actions(client, uri, diags) if a.get("isPreferred")]
+    for edit in preferred["edit"]["changes"][uri]:
+        text = _apply(text, edit)
+    return preferred["title"], text
+
+
+def test_quick_fix_misspelled_receiver(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = CONFIG.replace("receiver: db-pager", "receiver: db-pagr", 1)
+    title, fixed = _fix(client, uri, text, "undefined-receiver")
+    assert title == "Change 'db-pagr' to 'db-pager'"
+    assert fixed == CONFIG
+
+
+def test_quick_fix_misspelled_time_interval(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = NAMES.replace("[nights, 'weekends']", "[nights, 'wekends']", 1)
+    title, fixed = _fix(client, uri, text, "undefined-time-interval")
+    assert title == "Change 'wekends' to 'weekends'"
+    assert fixed == NAMES
+
+
+def test_quick_fix_removes_a_useless_continue(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = CONFIG.replace("      receiver: ghost\n",
+                          "      receiver: ghost\n      continue: true\n")
+    title, fixed = _fix(client, uri, text, "useless-continue")
+    assert title.startswith("Remove continue: true")
+    assert fixed == CONFIG
+
+
+def test_no_continue_fix_when_it_starts_the_route(lsp, tmp_path):
+    client = lsp()
+    uri = _uri(tmp_path / "alertmanager.yml")
+    text = CONFIG.replace('    - matchers: [team="web"]\n      receiver: ghost\n',
+                          '    - continue: true\n      matchers: [team="web"]\n'
+                          '      receiver: ghost\n')
+    diags = [d for d in client.open(uri, text) if d.get("code") == "useless-continue"]
+    titles = [a["title"] for a in _fix_actions(client, uri, diags)]
+    assert titles and not any(t.startswith("Remove") for t in titles)

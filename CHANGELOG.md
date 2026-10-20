@@ -28,6 +28,10 @@
 - Test coverage in the editor: above each route (but the root), how many cases of the mapped
   test files reach it ("2 of 12 tests reach this route"), as `amlint test --coverage` counts
   them. The test files are read again when they change.
+- Quick fixes that change the config, in the editor: "did you mean" for `undefined-receiver`
+  and `undefined-time-interval` (the closest names, the first one preferred), and removing
+  the `continue: true` line of a `useless-continue`. Diagnostics carry the finding's path in
+  `data` for this.
 
 ### Changed
 - `route-unknown-alertname` and `inhibit-unknown-alertname` say "the rule files" instead of

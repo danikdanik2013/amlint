@@ -1012,6 +1012,7 @@ class Server:
                 "codeDescription": {"href": docs_url(f.code)},
                 "source": "amlint",
                 "message": f.msg,
+                "data": {"where": f.where},  # for the quick fixes that rewrite the config
             })
         for line, codes in loaded.comments:
             for code in sorted(set(codes) - set(EXPLAINS)):
@@ -1082,6 +1083,10 @@ class Server:
             line = (diag.get("range") or {}).get("start", {}).get("line")
             if diag.get("source") != "amlint" or code not in EXPLAINS or line is None:
                 continue
+            where = (diag.get("data") or {}).get("where")
+            if isinstance(where, str) and (code, where) not in done:
+                done.add((code, where))
+                actions += self._fixes(uri, doc, diag, code, where)
             if (code, line) not in done and 0 <= line < len(lines):
                 done.add((code, line))
                 edit = self._disable_on_line(lines, line, code)
@@ -1095,9 +1100,68 @@ class Server:
         return actions
 
     @staticmethod
-    def _action(title: str, uri: str, diag: dict, edit: dict) -> dict:
-        return {"title": title, "kind": "quickfix", "diagnostics": [diag],
-                "edit": {"changes": {uri: [edit]}}}
+    def _action(title: str, uri: str, diag: dict, edit: dict, preferred: bool = False) -> dict:
+        action = {"title": title, "kind": "quickfix", "diagnostics": [diag],
+                  "edit": {"changes": {uri: [edit]}}}
+        if preferred:
+            action["isPreferred"] = True
+        return action
+
+    def _fixes(self, uri: str, doc: _Document, diag: dict, code: str, where: str) -> List[dict]:
+        """Quick fixes that change the config itself, for a finding at route `where`."""
+        analysis = self.analyze(doc)
+        if analysis.loaded is None:
+            return []
+        cfg, lines = analysis.loaded.cfg, analysis.lines
+        if code in ("undefined-receiver", "undefined-time-interval"):
+            receiver = code == "undefined-receiver"
+            keys = ("receivers",) if receiver else ("time_intervals", "mute_time_intervals")
+            defined = [str(i["name"]) for key in keys for _, i in _dict_items(cfg.get(key))
+                       if i.get("name")]
+            spots = ([f"{where}.receiver"] if receiver else
+                     [f"{where}.{key}[{j}]"
+                      for key in ("mute_time_intervals", "active_time_intervals")
+                      for j in range(len(self._route_list(cfg, where, key)))])
+            actions = []
+            for spot in spots:
+                line, col = (n - 1 for n in analysis.loaded.locate(spot))
+                occ = next((o for o in analysis.occurrences()
+                            if o.role == "reference" and o.line == line
+                            and (receiver or o.start in (col, col + 1))  # after a quote
+                            and o.name not in defined), None)
+                if occ is None:
+                    continue
+                for n, name in enumerate(difflib.get_close_matches(occ.name, defined, n=3,
+                                                                   cutoff=0.5)):
+                    edit = {"range": self._range(lines, occ.line, occ.start, occ.end),
+                            "newText": _written(name, occ.quote)}
+                    actions.append(self._action(f"Change '{occ.name}' to '{name}'", uri, diag,
+                                                edit, preferred=n == 0))
+            return actions
+        if code == "useless-continue":
+            line = analysis.loaded.locate(f"{where}.continue")[0] - 1
+            text = lines[line] if 0 <= line < len(lines) else ""
+            if not re.fullmatch(r"\s*continue\s*:\s*\S+\s*(#.*)?", text):
+                return []  # not a line of its own, e.g. `- continue: true` starts the route
+            end = {"line": line + 1, "character": 0}
+            if line + 1 >= len(lines):  # the last line: take the line break before it instead
+                start = {"line": line - 1, "character": self._char(lines[line - 1],
+                                                                   len(lines[line - 1]))}
+                end = {"line": line, "character": self._char(text, len(text))}
+            else:
+                start = {"line": line, "character": 0}
+            edit = {"range": {"start": start, "end": end}, "newText": ""}
+            return [self._action("Remove continue: true (it does nothing here)", uri, diag,
+                                 edit, preferred=True)]
+        return []
+
+    @staticmethod
+    def _route_list(cfg: dict, where: str, key: str) -> list:
+        """The `key` list of the route at path `where`, or []."""
+        node = next((n for n, p in _walk_routes(cfg.get("route")) if p == where), None) \
+            if isinstance(cfg.get("route"), dict) else None
+        value = node.get(key) if node else None
+        return value if isinstance(value, list) else []
 
     def _directive(self, text: str, kind: str):
         """The `# amlint: <kind>=...` directive on a line, if any."""
