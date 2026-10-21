@@ -344,15 +344,34 @@ def _parse_matchers(items) -> List[Matcher]:
     return out
 
 
+def _object_matchers(items) -> List[Matcher]:
+    """Grafana's object_matchers: [label, op, value] triples. Grafana strips one double quote
+    from each end of the value; it doesn't check label names."""
+    out: List[Matcher] = []
+    for item in items if isinstance(items, list) else ():
+        if isinstance(item, list) and len(item) == 3 and _scalar(item[1]) in ("=", "!=", "=~",
+                                                                              "!~"):
+            label, op, value = (_scalar(part) for part in item)
+            value = value[1:] if value.startswith('"') else value
+            value = value[:-1] if value.endswith('"') else value
+            out.append((label, op, value))
+        else:
+            out.append((str(item), "?", ""))  # unreadable, but still a matcher
+    return out
+
+
 def _matchers(node: dict, prefix: str = "") -> List[Matcher]:
     """All matchers of a route (prefix "") or of one side of an inhibit rule
-    (prefix "source_" / "target_"), from match, match_re and matchers alike."""
+    (prefix "source_" / "target_"), from match, match_re and matchers alike, and on a route
+    Grafana's object_matchers."""
     out: List[Matcher] = []
     for key, op in (("match", "="), ("match_re", "=~")):
         value = node.get(prefix + key)
         if isinstance(value, dict):
             out.extend((str(k), op, _scalar(v)) for k, v in value.items())
     out.extend(_parse_matchers(node.get(prefix + "matchers")))
+    if not prefix:
+        out.extend(_object_matchers(node.get("object_matchers")))
     return out
 
 
@@ -985,6 +1004,7 @@ _INTEGRATION_KEYS = {
     "msteams_configs", "msteamsv2_configs", "telegram_configs", "discord_configs",
     "pushover_configs", "webex_configs", "jira_configs", "rocketchat_configs",
     "incidentio_configs", "mattermost_configs",
+    "grafana_managed_receiver_configs",  # Grafana's contact points
 }
 
 # Names that say "drop these on purpose" (kube-prometheus routes Watchdog/InfoInhibitor to "null")
@@ -1684,7 +1704,7 @@ _HTTP_SECRET_FIELDS = {
 # Words in a value that is only a stand-in for the secret, as in docs and examples.
 _PLACEHOLDER = re.compile(
     r"<[^>]*>|\$\{|\$\(|\{\{|\.\.\.|x{4,}|example|change[-_ ]?me|replace|redacted|dummy|"
-    r"placeholder|your[-_ ]|todo|fixme|secret_here|insert|"
+    r"placeholder|your[-_ ]|todo|fixme|secret_here|insert|\$__\w+\{|^\$[A-Za-z_]\w*$|"
     r"ABC-DEF1234ghIkl",  # the bot token in Telegram's docs
     re.IGNORECASE,
 )
@@ -1692,7 +1712,8 @@ _PLACEHOLDER = re.compile(
 _URL_SECRET_PARAM = re.compile(
     r"(^|_)(token|key|apikey|secret|sig|signature|password|passwd|pass|auth|code)$", re.IGNORECASE)
 _URL_SECRET_HOSTS = ("hooks.slack.com", "discord.com", "discordapp.com", "webhook.office.com",
-                     "outlook.office.com", "api.telegram.org", "logic.azure.com")
+                     "outlook.office.com", "api.telegram.org", "logic.azure.com",
+                     "alert.victorops.com")
 
 
 # Words in a key or password that is only an example (mysecret, token123, test-password).
@@ -1753,6 +1774,106 @@ def _secret_problem(section: str, field: str, value) -> Optional[str]:
 
 
 # CHECK 41: an API key, token, password or webhook URL with a token, written into the config
+# Grafana contact point types (grafana/alerting receivers/*/v1/config.go), by their type in
+# lower case: the settings that hold a secret, and whether that setting is a URL.
+_GRAFANA_SECRETS = {
+    "slack": {"url": True, "token": False}, "pagerduty": {"integrationKey": False},
+    "webhook": {"password": False, "authorization_credentials": False,
+                "hmacConfig.secret": False, "tlsConfig.clientKey": False},
+    "telegram": {"bottoken": False}, "discord": {"url": True}, "opsgenie": {"apiKey": False},
+    "googlechat": {"url": True}, "victorops": {"url": True},
+    "pushover": {"userKey": False, "apiToken": False},
+    "prometheus-alertmanager": {"basicAuthPassword": False}, "sensugo": {"apikey": False},
+    "threema": {"api_secret": False}, "kafka": {"password": False},
+    "mqtt": {"password": False, "tlsConfig.clientKey": False},
+    "oncall": {"password": False, "authorization_credentials": False},
+    "sns": {"sigv4.secret_key": False}, "jira": {"api_token": False, "password": False},
+    "wecom": {"url": True, "secret": False}, "dingding": {"url": True}, "line": {"token": False},
+    "webex": {"bot_token": False},
+}
+# The settings each type needs: any one of the alternatives, all of whose settings are set.
+_GRAFANA_REQUIRED = {
+    "slack": [("url",), ("token", "recipient")], "email": [("addresses",)],
+    "pagerduty": [("integrationKey",)], "webhook": [("url",)], "teams": [("url",)],
+    "telegram": [("bottoken", "chatid")], "discord": [("url",)], "opsgenie": [("apiKey",)],
+    "googlechat": [("url",)], "victorops": [("url",)], "pushover": [("userKey", "apiToken")],
+    "prometheus-alertmanager": [("url",)], "sensugo": [("url", "apikey")],
+    "kafka": [("kafkaRestProxy", "kafkaTopic")], "mqtt": [("brokerUrl", "topic")],
+    "oncall": [("url",)], "sns": [("topic_arn",), ("target_arn",), ("phone_number",)],
+    "jira": [("api_url", "project", "issue_type", "api_token"),
+             ("api_url", "project", "issue_type", "user", "password")],
+    "threema": [("gateway_id", "recipient_id", "api_secret")], "line": [("token",)],
+    "dingding": [("url",)], "wecom": [("url",), ("secret", "agent_id", "corp_id")],
+    "webex": [()], "wechat": [()],
+}
+_GRAFANA_ALIASES = {"msteams": "teams", "msteamsv2": "teams"}
+
+
+def _grafana_type(value) -> str:
+    typ = _scalar(value).strip().lower()
+    return _GRAFANA_ALIASES.get(typ, typ)
+
+
+def _setting(settings, path: str):
+    for key in path.split("."):
+        settings = settings.get(key) if isinstance(settings, dict) else None
+    return settings
+
+
+def _grafana_integrations(cfg: dict):
+    """(where, contact point name, type, settings, secure field names) of each integration
+    of a Grafana contact point."""
+    for r in _receivers(cfg):
+        for i, entry in _dict_items(r.get("grafana_managed_receiver_configs")):
+            secure = entry.get("secureFields")
+            yield (f"receivers[{r.get('name')}].grafana_managed_receiver_configs[{i}]",
+                   r.get("name"), _grafana_type(entry.get("type")), entry.get("settings"),
+                   {k for k, v in secure.items() if v} if isinstance(secure, dict) else set())
+
+
+# CHECK 49: a Grafana contact point Grafana refuses
+def check_grafana_contact_points(cfg: dict) -> List[Finding]:
+    """A type Grafana doesn't have, or settings it requires that are missing. Grafana checks
+    them when it provisions or saves the contact point."""
+    out: List[Finding] = []
+    for where, name, typ, settings, secure in _grafana_integrations(cfg):
+        if typ not in _GRAFANA_REQUIRED:
+            known = difflib_close(typ, sorted(_GRAFANA_REQUIRED) + sorted(_GRAFANA_ALIASES))
+            out.append(Finding(
+                ERROR, "grafana-contact-point",
+                f"Contact point '{name}' has an integration of type '{typ}', which Grafana "
+                f"doesn't have{known}. Grafana refuses to provision or save it.",
+                where,
+            ))
+            continue
+        settings = settings if isinstance(settings, dict) else {}
+
+        def has(key: str) -> bool:
+            value = _setting(settings, key)
+            return key in secure or (value not in (None, "", [], {})
+                                     and not (isinstance(value, str) and not value.strip()))
+
+        options = _GRAFANA_REQUIRED[typ]
+        if any(all(has(k) for k in option) for option in options):
+            continue
+        missing = [k for k in options[0] if not has(k)]
+        need = " or ".join(" and ".join(option) for option in options)
+        out.append(Finding(
+            ERROR, "grafana-contact-point",
+            f"Contact point '{name}': its {typ} integration has no {', '.join(missing)} "
+            f"setting{'s' if len(missing) > 1 else ''} (it needs {need}). Grafana refuses "
+            f"to provision or save it.",
+            where + ".settings",
+        ))
+    return out
+
+
+def difflib_close(word: str, words: List[str]) -> str:
+    import difflib
+    close = difflib.get_close_matches(word, words, n=1, cutoff=0.7)
+    return f" (did you mean '{close[0]}'?)" if close else ""
+
+
 def check_plaintext_secrets(cfg: dict) -> List[Finding]:
     """Anyone who can read the config, or the repository it's kept in, can use these. Values
     that only stand in for the secret (<secret>, ${VAR}, $(VAR), {{ ... }}, example values)
@@ -1761,7 +1882,10 @@ def check_plaintext_secrets(cfg: dict) -> List[Finding]:
 
     def report(where: str, field: str, problem: str, file_field: Optional[str],
                since: Optional[str] = None) -> None:
-        if file_field:
+        if file_field == "$__file":
+            how = ("Grafana's provisioning can read it from the environment or a file instead: "
+                   "$__env{VAR} or $__file{/path/to/secret}.")
+        elif file_field:
             newer = f" (Alertmanager {since} and later)" if since else ""
             how = (f"Put it in a file Alertmanager can read and set {file_field}{newer} to "
                    f"that path instead.")
@@ -1811,6 +1935,17 @@ def check_plaintext_secrets(cfg: dict) -> List[Finding]:
                         report(f"{where}.{field}", f"{section}[{i}].{field} in receiver "
                                f"'{r.get('name')}'", problem, file_field, since)
                 http_config(entry.get("http_config"), f"{where}.http_config")
+    for where, name, typ, settings, _ in _grafana_integrations(cfg):
+        for field, is_url in _GRAFANA_SECRETS.get(typ, {}).items():
+            value = _setting(settings, field)
+            if not isinstance(value, str) or _placeholder(value, is_url):
+                continue
+            what = _url_secret(value) if is_url else "secret"
+            if what is None:
+                continue
+            problem = f"a URL with {what} in it" if is_url else "a secret"
+            report(f"{where}.settings.{field}", f"settings.{field} of the {typ} integration in "
+                   f"contact point '{name}'", problem, "$__file")
     return out
 
 
@@ -2036,6 +2171,7 @@ ALL_CHECKS = [
     check_bad_time_intervals,
     check_never_active_time_intervals,
     check_always_muted_routes,
+    check_grafana_contact_points,
 ]
 
 _VALID_LEVELS = {ERROR, WARN, INFO}
@@ -2058,7 +2194,9 @@ def lint(cfg: dict, ignore=None, severity=None, only=None, basedir=None,
     from .templates import check_templates, template_sources  # builds on this module
     sources = template_sources(cfg, None if template_files is not None else basedir,
                                template_files, template_texts)
-    findings.extend(check_templates(cfg, sources))
+    from .templates import ALERTMANAGER, GRAFANA
+    grafana = template_files is not None and getattr(template_files, "grafana", False)
+    findings.extend(check_templates(cfg, sources, GRAFANA if grafana else ALERTMANAGER))
     if rules is not None:
         from .rules import check_rules  # imported here: rules.py builds on this module
         findings.extend(check_rules(cfg, rules))

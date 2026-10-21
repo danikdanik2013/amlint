@@ -13,12 +13,17 @@ An empty value or `~` stays None: Go reads it as "" and so does amlint.
 """
 
 import yaml
+from yaml.constructor import SafeConstructor
+
+# PyYAML resolves a plain `=` to YAML 1.1's "value" tag and has no constructor for it, so
+# Grafana's exported object_matchers (`- =`) fail to load. Go's yaml reads it as "=".
+SafeConstructor.add_constructor("tag:yaml.org,2002:value", SafeConstructor.construct_yaml_str)
 
 _STR = "tag:yaml.org,2002:str"
 _TYPED = {f"tag:yaml.org,2002:{t}" for t in ("bool", "int", "float", "timestamp")}
 _STRING_MAPS = {side + key for side in ("", "source_", "target_") for key in ("match", "match_re")}
 _STRING_LISTS = {side + "matchers" for side in ("", "source_", "target_")} | {
-    "group_by", "equal", "mute_time_intervals", "active_time_intervals",
+    "group_by", "equal", "mute_time_intervals", "active_time_intervals", "object_matchers",
 }
 _STRING_VALUES = {"receiver", "name"}
 # Time interval fields, also in AlertmanagerConfig resources. Go's yaml.v2 has no base-60 ints,
@@ -46,7 +51,11 @@ def _retag(node: yaml.Node, seen: set, maps: set, lists: set, values: set) -> No
                     _as_text(v)
             elif name in lists and isinstance(value, yaml.SequenceNode):
                 for item in value.value:
-                    _as_text(item)
+                    if isinstance(item, yaml.SequenceNode):  # Grafana's object_matchers
+                        for part in item.value:
+                            _as_text(part)
+                    else:
+                        _as_text(item)
             elif name in values:
                 _as_text(value)
             _retag(value, seen, maps, lists, values)

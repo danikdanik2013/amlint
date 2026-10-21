@@ -25,7 +25,11 @@ newer syntax or add dependencies casually.
 | `amlint/routing.py` | the Alertmanager routing and inhibition simulation behind `route`, `test` and `diff` |
 | `amlint/implication.py` | matcher implication for `shadowed-route` |
 | `amlint/formats.py` | input formats: Secret, ConfigMap, Helm values, Mimir/Cortex, AlertmanagerConfig |
+| `amlint/grafana.py` | Grafana Alerting provisioning files, exports and Alertmanager config, read as a config |
 | `amlint/rules.py` | Prometheus alerting rules for `--rules` |
+| `amlint/gotemplate.py`, `amlint/templates.py` | Go template parser (a port of text/template/parse) and the template checks |
+| `amlint/timeintervals.py` | time intervals read and evaluated the way timeinterval.go does |
+| `amlint/fixes.py` | `amlint fix` and the editor's rewrites, checked by reading the result back |
 | `amlint/source.py` | maps findings to `file:line:col`; inline `# amlint: disable=` comments |
 | `amlint/goyaml.py` | YAML parsed the way Alertmanager (Go yaml.v2) parses it |
 | `test_linter.py`, `test_formats.py`, `test_lsp.py` | the main test suites; `test_lsp.py` drives `amlint lsp` over stdio |

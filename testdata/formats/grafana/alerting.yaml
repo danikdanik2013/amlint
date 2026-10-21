@@ -1,0 +1,55 @@
+# Grafana Alerting file provisioning, the way a team keeps it in git: policies, contact
+# points with secrets from the environment, mute timings and a template. The contact point
+# for the database team lives in contact-points.yaml next to this file, as Grafana reads
+# every file in the directory together.
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: ops-email
+    group_by: [grafana_folder, alertname]
+    routes:
+      - receiver: db-pager
+        object_matchers:
+          - [team, =, db]
+          - [severity, =, critical]
+      - receiver: ops-slack
+        object_matchers:
+          - [team, =~, "web|api"]
+        mute_time_intervals: [nights]
+      - receiver: ops-slack
+        matchers:
+          - severity = warning
+
+contactPoints:
+  - orgId: 1
+    name: ops-email
+    receivers:
+      - uid: ops-email
+        type: email
+        settings:
+          addresses: ops@example.org
+  - orgId: 1
+    name: ops-slack
+    receivers:
+      - uid: ops-slack
+        type: slack
+        settings:
+          url: $__env{OPS_SLACK_WEBHOOK}
+          recipient: "#ops"
+          title: '{{ template "ops.title" . }}'
+          text: '{{ range .Alerts }}{{ .Labels.alertname }}: {{ .ValueString }}{{ end }}'
+
+muteTimes:
+  - orgId: 1
+    name: nights
+    time_intervals:
+      - times:
+          - start_time: "00:00"
+            end_time: "07:00"
+        location: Europe/Berlin
+
+templates:
+  - orgId: 1
+    name: ops.title
+    template: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}'

@@ -80,14 +80,14 @@ Each finding shows:
 - A misspelled code in `--ignore`, `--only` or a [config file](#project-config) prints a
   warning with a "did you mean" suggestion instead of being silently ignored.
 
-### Kubernetes, Helm and Mimir
+### Kubernetes, Helm, Mimir and Grafana
 
 Besides a plain `alertmanager.yml`, amlint reads a Kubernetes Secret or ConfigMap holding
-`alertmanager.yaml`, kube-prometheus-stack Helm values, a Mimir or Cortex tenant config, and
+`alertmanager.yaml`, kube-prometheus-stack Helm values, a Mimir or Cortex tenant config,
 prometheus-operator `AlertmanagerConfig` resources, which it merges the way the operator
-does. It detects the format; `--input-format` overrides that. Findings point at the line in
+does, and Grafana Alerting's provisioning files and exports. It detects the format; `--input-format` overrides that. Findings point at the line in
 the file you passed. `diff`, `tree`, `route` and `test` take `--input-format` and
-`--matcher-strategy` too. See [Kubernetes & Mimir](kubernetes.md).
+`--matcher-strategy` too. See [Kubernetes, Grafana & Mimir](kubernetes.md).
 
 ### Get JSON output { #json-output }
 

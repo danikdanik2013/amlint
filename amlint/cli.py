@@ -154,7 +154,8 @@ def _load_input(path, content, input_format=None, matcher_strategy=None):
     Secret, Helm values, a Mimir config, AlertmanagerConfig resources); exits 2 if it can't
     be read. Notes about how it was read go to stderr."""
     try:
-        loaded = load_input(content, input_format, matcher_strategy)
+        loaded = load_input(content, input_format, matcher_strategy,
+                            path=None if path == "-" else path)
     except FormatError as e:
         err_console.print(f"[red]{e.title}[/red] ({escape(path)}): {escape(str(e))}",
                           soft_wrap=True)
@@ -408,6 +409,8 @@ def _format_matchers(node: dict) -> list:
         parts.append(f"{k}=~{v}")
     for m in node.get("matchers") or []:
         parts.append(str(m))
+    for m in node.get("object_matchers") or []:
+        parts.append("".join(map(str, m)) if isinstance(m, list) else str(m))
     return parts
 
 

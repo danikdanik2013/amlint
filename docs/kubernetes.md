@@ -1,9 +1,9 @@
-# Kubernetes & Mimir
+# Kubernetes, Grafana & Mimir
 
 Lint the file you actually deploy: a Kubernetes Secret, kube-prometheus-stack Helm values, a
-Mimir or Cortex tenant config, or prometheus-operator `AlertmanagerConfig` resources. You
-don't need to extract `alertmanager.yml` first, and findings point at the line in the file
-you gave amlint.
+Mimir or Cortex tenant config, prometheus-operator `AlertmanagerConfig` resources, or Grafana
+Alerting's provisioning files. You don't need to extract `alertmanager.yml` first, and
+findings point at the line in the file you gave amlint.
 
 ## Point amlint at the file you deploy
 
@@ -11,6 +11,7 @@ you gave amlint.
 amlint check alertmanager-secret.yaml                    # Secret or ConfigMap
 amlint check values.yaml                                 # kube-prometheus-stack values
 amlint check tenant-config.yaml                          # Mimir / Cortex
+amlint check provisioning/alerting/*.yaml                # Grafana Alerting
 amlint route alertmanagerconfigs.yaml namespace=team-a severity=critical
 kubectl kustomize deploy/monitoring | amlint check -     # a whole stream on stdin
 ```
@@ -23,6 +24,7 @@ format from the content:
 | a `kind: AlertmanagerConfig` anywhere | `alertmanagerconfig` | the resources, merged into the base config the way the operator merges them ([details](#prometheus-operator-alertmanagerconfig)) | the line in the resource |
 | a `Secret` or `ConfigMap` with an `alertmanager.yaml`, `alertmanager.yml` or `alertmanager.yaml.gz` key | `secret` | that key; the other keys are template files | in a literal block (<code>key: &#124;</code>): the exact line. Base64 or a quoted string: the key |
 | a top-level `alertmanager_config:` string | `mimir` | that string, plus `template_files` | in a literal block: the exact line. Otherwise: the key |
+| top-level `contactPoints:`, `policies:`, `muteTimes:` or `templates:` lists (Grafana provisioning or export), or a config with `object_matchers` or `grafana_managed_receiver_configs` | `grafana` | the notification policies, contact points, mute timings and templates, with the provisioning files next to it ([details](#grafana)) | the line in the file |
 | a top-level `alertmanager:` map, and no top-level `route:` or `receivers:` | `helm` | `alertmanager.config` merged over the chart's defaults, plus `alertmanager.templateFiles` | the line in the values file |
 | none of the above | `alertmanager` | the file as a plain config | the line in the file |
 
@@ -36,7 +38,7 @@ format from the content:
   config come from the chart. They don't change the exit code.
 
 To skip detection, pass `--input-format` with `auto` (the default), `alertmanager`, `secret`,
-`helm`, `mimir` or `alertmanagerconfig`. `--input-format alertmanager` reads the file as
+`helm`, `mimir`, `alertmanagerconfig` or `grafana`. `--input-format alertmanager` reads the file as
 one plain document, even if it looks like something else.
 
 ## Secrets and ConfigMaps { #kubernetes-secrets }
@@ -143,6 +145,49 @@ alertmanager_config: |
 
 amlint doesn't check `templates:` against `template_files`: Mimir loads every template file
 of the tenant, whatever `templates:` lists, and refuses entries that contain a path.
+
+## Grafana Alerting { #grafana }
+
+Grafana runs its own Alertmanager. Its notification policies, contact points, mute timings
+and templates work the same way, so amlint checks them, and `route`, `test` and `diff`
+simulate their routing.
+
+```bash
+amlint check provisioning/alerting/*.yaml         # file provisioning
+amlint check notification-policies.yaml           # an export (Alerting → Export, or the API)
+amlint route provisioning/alerting/policies.yaml grafana_folder=Infra alertname=DiskFull
+```
+
+amlint reads:
+
+- **file provisioning** (`contactPoints`, `policies`, `muteTimes`, `templates`), and the same
+  format Grafana exports (`/api/v1/provisioning/policies/export`, contact points, mute
+  timings);
+- **Grafana's Alertmanager config**, as `GET /api/alertmanager/grafana/config/api/v1/alerts`
+  returns it (`alertmanager_config` with `template_files`), or without that wrapper.
+
+**Good to know**
+
+- Grafana reads every `.yaml`, `.yml` and `.json` file of the provisioning directory
+  together, and so does amlint: a policy in one file can use a contact point from another.
+  Each file's findings are reported when you check that file.
+- Contact points, mute timings and templates made in Grafana's UI aren't in these files. A
+  policy that uses one is not an `undefined-receiver`: a `note:` lists the names amlint
+  takes to be in Grafana. Templates are looked up only when the files define some.
+- Every alert from Grafana has an `alertname` label (the rule's title) and `grafana_folder`.
+  Use them in `amlint route` and in routing tests.
+- One org at a time: org 1, or the lowest one in the files. A `note:` says which.
+- `$$` is a plain `$`. `$VAR`, `${VAR}`, `$__env{…}`, `$__file{…}` and an exported
+  `[REDACTED]` stand for a secret kept elsewhere, so they aren't a `plaintext-secret`.
+- [`grafana-contact-point`](checks/receivers.md#grafana-contact-point) reports a type or a
+  required setting Grafana refuses. Templates are checked with Grafana's functions and data
+  (`.ValueString`, `.DashboardURL`, `coll.Dict`, …).
+- `unused-receiver` and `global-resolve-timeout-missing` don't apply: Grafana adds a route
+  for every contact point itself, for alert rules that pick one directly, and has no
+  `global:` section.
+- Not modeled: the routes Grafana adds for alert rules that pick a contact point directly,
+  named routing trees, and inhibition rules, which provisioning files can't hold.
+- Messages say "Alertmanager" where they mean the Alertmanager that runs inside Grafana.
 
 ## prometheus-operator AlertmanagerConfig { #prometheus-operator-alertmanagerconfig }
 

@@ -591,6 +591,9 @@ def _matcher_texts(node: dict) -> List[str]:
         parts += [str(m) for m in value]
     elif isinstance(value, str):
         parts.append(value)
+    value = node.get("object_matchers")
+    if isinstance(value, list):  # Grafana's [label, op, value] triples
+        parts += ["".join(map(str, m)) if isinstance(m, list) else str(m) for m in value]
     return parts
 
 
@@ -1047,7 +1050,7 @@ class Server:
     def _lint(self, doc: _Document, analysis: _Analysis) -> None:
         lines, diags = analysis.lines, analysis.diagnostics
         try:
-            loaded = load_input(doc.text)
+            loaded = load_input(doc.text, path=doc.path)
         except FormatError as e:
             if _LOOKS_LIKE_CONFIG.search(doc.text):
                 diags.append(self._format_error(e, doc.text, lines))

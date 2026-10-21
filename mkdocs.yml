@@ -35,7 +35,7 @@ nav:
   - Install: install.md
   - Usage: usage.md
   - Editors: editors.md
-  - Kubernetes & Mimir: kubernetes.md
+  - Kubernetes, Grafana & Mimir: kubernetes.md
   - Playground: playground/index.md
   - GitHub Action: github-action.md
   - Verified against Alertmanager: fidelity.md
