@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-10-21
+
+Highlights:
+
+- **Grafana Alerting.** amlint reads Grafana's provisioning files, exports and Alertmanager
+  config: its notification policies, contact points, mute timings and templates. Every
+  check, `route`, `test`, `diff` and the editor work on them, `grafana-contact-point` finds
+  contact points Grafana refuses, and templates are checked with Grafana's functions and
+  data.
+- **Template checks closer to Alertmanager**, compared with amtool 0.34, and quieter in the
+  editor on `.tmpl` files that aren't Alertmanager templates.
+
 ### Added
 - Grafana Alerting: amlint reads Grafana's file provisioning (`contactPoints`, `policies`,
   `muteTimes`, `templates`), its exports, and its Alertmanager config, and checks them like

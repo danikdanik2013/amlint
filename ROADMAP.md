@@ -1,10 +1,10 @@
 # Roadmap
 
-Where amlint is going after 0.8.0, release by release. This is a plan, not a promise: items
+Where amlint is going after 0.8.5, release by release. This is a plan, not a promise: items
 can move between releases or drop out. Want to work on one? Open an issue first, so two
 people don't build the same thing.
 
-Last updated: 2026-10-20.
+Last updated: 2026-10-21.
 
 ## 0.9: scale and team policies
 

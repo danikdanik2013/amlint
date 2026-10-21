@@ -22,7 +22,7 @@ inputs:
     required: false
     default: ''
   version:
-    description: 'amlint version to install, e.g. 0.8.0 (defaults to latest from PyPI)'
+    description: 'amlint version to install, e.g. 0.8.5 (defaults to latest from PyPI)'
     required: false
     default: ''
   format:
