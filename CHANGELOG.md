@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+- Homebrew install docs: `brew install amlint` fails on Homebrew 6 and newer because the tap
+  isn't trusted. Install with the full name, `brew install danikdanik2013/amlint/amlint`,
+  which trusts the formula. The editor docs say where Homebrew puts amlint on Apple Silicon.
+
 ## [0.8.5] - 2026-10-21
 
 Highlights:

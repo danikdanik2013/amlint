@@ -83,8 +83,11 @@ docker run --rm -v "$PWD":/cfg ghcr.io/danikdanik2013/amlint check /cfg/alertman
 
 # Homebrew
 brew tap danikdanik2013/amlint https://github.com/danikdanik2013/amlint
-brew install amlint
+brew install danikdanik2013/amlint/amlint
 ```
+
+Homebrew 6 and newer refuse `brew install amlint` from an untrusted tap. The full name trusts
+the formula ([Tap Trust](https://docs.brew.sh/Tap-Trust)), and `brew upgrade amlint` then works.
 
 Or don't install anything and use the
 [playground](https://danikdanik2013.github.io/amlint/playground/).
