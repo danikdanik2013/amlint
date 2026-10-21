@@ -61,7 +61,7 @@
         "amlint.path": {
           "type": "string",
           "default": "amlint",
-          "markdownDescription": "The `amlint` executable to run as `amlint lsp`. A name is looked up on `PATH`. `~` and `${workspaceFolder}` are expanded, for example `${workspaceFolder}/.venv/bin/amlint`."
+          "markdownDescription": "The `amlint` executable to run as `amlint lsp`. A name is looked up on `PATH`. `~` and `${workspaceFolder}` are expanded, for example `${workspaceFolder}/.venv/bin/amlint`. Left at `amlint` and not on `PATH`, amlint is looked for where Homebrew and pipx install it, and in a trusted workspace's `.venv`."
         },
         "amlint.trace.server": {
           "type": "string",

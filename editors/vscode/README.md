@@ -35,11 +35,16 @@ inside an embedded `alertmanager.yaml: |` block.
 amlint 0.6.0 or newer, which has the `amlint lsp` command:
 
 ```bash
-pip install -U amlint
+brew tap danikdanik2013/amlint https://github.com/danikdanik2013/amlint
+brew install danikdanik2013/amlint/amlint
 ```
 
-Check that it works: `amlint lsp --help`. If VS Code can't find `amlint` on its `PATH`,
-set `amlint.path` to the full path, for example `${workspaceFolder}/.venv/bin/amlint`.
+or `pipx install amlint`. Check that it works: `amlint lsp --help`.
+
+VS Code may not see your shell's `PATH`. If `amlint` isn't on it, the extension looks where
+Homebrew and pipx install it (`/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`), and
+in a trusted workspace in `.venv` first. Anywhere else, set `amlint.path` to the full path,
+for example `${workspaceFolder}/.venv/bin/amlint`.
 
 ## Which files it lints
 
@@ -65,7 +70,7 @@ templates, get nothing. Unsaved changes count, in the template and in the config
 | Setting | Default | What it does |
 |---|---|---|
 | `amlint.enable` | `true` | Turn amlint off without uninstalling the extension. |
-| `amlint.path` | `amlint` | The amlint executable. `~` and `${workspaceFolder}` are expanded. |
+| `amlint.path` | `amlint` | The amlint executable. `~` and `${workspaceFolder}` are expanded. Left at `amlint`, it is looked up on `PATH`, then where Homebrew and pipx install it. |
 | `amlint.trace.server` | `off` | `messages` or `verbose` logs the traffic to the **amlint** output channel. |
 
 In an untrusted workspace, `amlint.path` comes from your user settings only.
@@ -87,11 +92,14 @@ severity:
 ## Troubleshooting
 
 - **"can't find amlint"**: amlint isn't installed, or isn't on the `PATH` VS Code sees,
-  which can differ from your terminal's. Install it with `pipx install amlint`, or run
-  `which amlint` in a terminal and put that path in `amlint.path`.
+  which can differ from your terminal's, nor where Homebrew and pipx install it. Install it
+  (see [Requirements](#requirements)) and run **amlint: Restart Server**, or run
+  `which amlint` in a terminal and put that path in `amlint.path`. The **amlint** output
+  channel lists where the extension looked.
 - **"is amlint 0.x, and the editor needs 0.6.0 or newer"**: the amlint VS Code finds is too
-  old for `amlint lsp`. Upgrade it (`pipx upgrade amlint` or `pip install -U amlint`), or
-  point `amlint.path` at a newer one. Then run **amlint: Restart Server**.
+  old for `amlint lsp`. Upgrade it (`brew upgrade danikdanik2013/amlint/amlint`,
+  `pipx upgrade amlint` or `pip install -U amlint`), or point `amlint.path` at a newer one.
+  Then run **amlint: Restart Server**.
 - **"stopped 3 times in a few minutes"**: the server crashed. The **amlint** output channel
   has the error; please [open an issue](https://github.com/danikdanik2013/amlint/issues)
   with it.

@@ -14,7 +14,14 @@ import {
   LanguageClientOptions,
   ServerOptions,
 } from "vscode-languageclient/node";
-import { checkExecutable, MIN_VERSION, problemMessage } from "./preflight";
+import {
+  DEFAULT_COMMAND,
+  fallbackLocations,
+  findExecutable,
+  INSTALL,
+  MIN_VERSION,
+  problemMessage,
+} from "./preflight";
 
 const DOCS = "https://danikdanik2013.github.io/amlint/editors/#vscode";
 const MAX_RESTARTS = 2;           // after a crash; more than this in RESTART_WINDOW_MS stops it
@@ -50,9 +57,9 @@ export async function deactivate(): Promise<void> {
 
 /** amlint.path with `~` and `${workspaceFolder}` expanded. */
 function executable(): string {
-  const setting = vscode.workspace.getConfiguration("amlint").get<string>("path", "amlint");
+  const setting = vscode.workspace.getConfiguration("amlint").get<string>("path", DEFAULT_COMMAND);
   const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? "";
-  let command = (setting || "amlint").trim().replace(/\$\{workspaceFolder\}/g, folder);
+  let command = (setting || DEFAULT_COMMAND).trim().replace(/\$\{workspaceFolder\}/g, folder);
   if (command === "~" || command.startsWith("~/") || command.startsWith("~\\")) {
     command = path.join(os.homedir(), command.slice(1));
   }
@@ -81,8 +88,18 @@ async function start(userAsked: boolean): Promise<void> {
   if (!vscode.workspace.getConfiguration("amlint").get<boolean>("enable", true)) {
     return;
   }
-  const command = executable();
-  const check = await checkExecutable(command);
+  // The workspace's .venv only once the workspace is trusted: that runs code from it
+  const found = await findExecutable(executable(), fallbackLocations({
+    platform: process.platform,
+    home: os.homedir(),
+    env: process.env,
+    workspaceFolder: vscode.workspace.isTrusted
+      ? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath : undefined,
+  }));
+  const { command, result: check } = found;
+  if (found.tried.length) {
+    output.info(`"${DEFAULT_COMMAND}" isn't on VS Code's PATH; tried ${found.tried.join(", ")}.`);
+  }
   if (!check.ok) {
     // Starting it anyway would only make the client restart a server that exits at once.
     output.error(`Not starting "${command} lsp": ${check.reason}. ${check.detail}`);
@@ -132,7 +149,7 @@ async function start(userAsked: boolean): Promise<void> {
     await candidate.dispose().catch(() => undefined);
     void report(`${command}:start`,
       `amlint: could not start "${command} lsp". Install amlint ${MIN_VERSION} or newer ` +
-        "(pipx install amlint), or point amlint.path at it.", userAsked);
+        `(${INSTALL}), or point amlint.path at it.`, userAsked);
   }
 }
 

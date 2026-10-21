@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Fixed
+- VS Code extension, next version: with `amlint.path` left at `amlint`, an amlint that
+  isn't on VS Code's `PATH` is found where Homebrew and pipx install it, instead of "can't
+  find amlint". Its install hint gives the Homebrew commands too.
+
 ## [0.8.5] - 2026-10-21
 
 Highlights:

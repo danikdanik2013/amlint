@@ -140,10 +140,13 @@ upgrade amlint.
 If it doesn't start:
 
 - **"can't find amlint"**: VS Code doesn't see amlint on its `PATH`, which can differ from
-  your terminal's. Install it with `pipx install amlint`, or run `which amlint` in a
-  terminal and put that path in `amlint.path`.
+  your terminal's. Install it with `pipx install amlint`, or with Homebrew:
+  `brew tap danikdanik2013/amlint https://github.com/danikdanik2013/amlint`, then
+  `brew install danikdanik2013/amlint/amlint`. Or run `which amlint` in a terminal and put
+  that path in `amlint.path`.
 - **"the editor needs 0.6.0 or newer"**: the amlint VS Code finds predates `amlint lsp`.
-  Upgrade it with `pipx upgrade amlint` or `pip install -U amlint`, then restart the server.
+  Upgrade it with `brew upgrade danikdanik2013/amlint/amlint`, `pipx upgrade amlint` or
+  `pip install -U amlint`, then restart the server.
 
 ## Neovim
 
