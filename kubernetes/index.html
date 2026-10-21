@@ -1,0 +1,1745 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Semantic linter for Prometheus Alertmanager configs">
+      
+      
+      
+        <link rel="canonical" href="https://danikdanik2013.github.io/amlint/kubernetes/">
+      
+      
+        <link rel="prev" href="../editors/">
+      
+      
+        <link rel="next" href="../playground/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Kubernetes, Grafana & Mimir - amlint</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#kubernetes-grafana-mimir" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="amlint" class="md-header__button md-logo" aria-label="amlint" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            amlint
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Kubernetes, Grafana & Mimir
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/danikdanik2013/amlint" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    danikdanik2013/amlint
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../install/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Install
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../usage/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../editors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Editors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Kubernetes, Grafana & Mimir
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../playground/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Playground
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../github-action/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  GitHub Action
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../fidelity/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Verified against Alertmanager
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../checks/" class="md-tabs__link">
+          
+  
+  
+  Checks
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="amlint" class="md-nav__button md-logo" aria-label="amlint" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    amlint
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/danikdanik2013/amlint" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    danikdanik2013/amlint
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../editors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Editors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes, Grafana & Mimir
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes, Grafana & Mimir
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#point-amlint-at-the-file-you-deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Point amlint at the file you deploy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubernetes-secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets and ConfigMaps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kube-prometheus-stack-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kube-prometheus-stack Helm values
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mimir-and-cortex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mimir and Cortex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grafana" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grafana Alerting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prometheus-operator-alertmanagerconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        prometheus-operator AlertmanagerConfig
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="prometheus-operator AlertmanagerConfig">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#matcher-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Matcher strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#routing-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routing tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#several-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lint several files together
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-isnt-modeled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../playground/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Playground
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../github-action/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Action
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fidelity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verified against Alertmanager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Checks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Checks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/receivers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Receivers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/inhibition/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inhibition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/timing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Timing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prometheus rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#point-amlint-at-the-file-you-deploy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Point amlint at the file you deploy
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kubernetes-secrets" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets and ConfigMaps
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#kube-prometheus-stack-values" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        kube-prometheus-stack Helm values
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mimir-and-cortex" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Mimir and Cortex
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#grafana" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grafana Alerting
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prometheus-operator-alertmanagerconfig" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        prometheus-operator AlertmanagerConfig
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="prometheus-operator AlertmanagerConfig">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#matcher-strategy" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Matcher strategy
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#routing-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routing tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#several-files" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Lint several files together
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-isnt-modeled" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Limits
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="kubernetes-grafana-mimir">Kubernetes, Grafana &amp; Mimir</h1>
+<p>Lint the file you actually deploy: a Kubernetes Secret, kube-prometheus-stack Helm values, a
+Mimir or Cortex tenant config, prometheus-operator <code>AlertmanagerConfig</code> resources, or Grafana
+Alerting's provisioning files. You don't need to extract <code>alertmanager.yml</code> first, and
+findings point at the line in the file you gave amlint.</p>
+<h2 id="point-amlint-at-the-file-you-deploy">Point amlint at the file you deploy</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>amlint<span class="w"> </span>check<span class="w"> </span>alertmanager-secret.yaml<span class="w">                    </span><span class="c1"># Secret or ConfigMap</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>amlint<span class="w"> </span>check<span class="w"> </span>values.yaml<span class="w">                                 </span><span class="c1"># kube-prometheus-stack values</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>amlint<span class="w"> </span>check<span class="w"> </span>tenant-config.yaml<span class="w">                          </span><span class="c1"># Mimir / Cortex</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>amlint<span class="w"> </span>check<span class="w"> </span>provisioning/alerting/*.yaml<span class="w">                </span><span class="c1"># Grafana Alerting</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>amlint<span class="w"> </span>route<span class="w"> </span>alertmanagerconfigs.yaml<span class="w"> </span><span class="nv">namespace</span><span class="o">=</span>team-a<span class="w"> </span><span class="nv">severity</span><span class="o">=</span>critical
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>kubectl<span class="w"> </span>kustomize<span class="w"> </span>deploy/monitoring<span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>check<span class="w"> </span>-<span class="w">     </span><span class="c1"># a whole stream on stdin</span>
+</code></pre></div>
+<p><code>check</code>, <code>diff</code>, <code>tree</code>, <code>route</code> and <code>test</code> all read these formats. amlint detects the
+format from the content:</p>
+<table>
+<thead>
+<tr>
+<th>If the file has…</th>
+<th>amlint reads it as</th>
+<th>It lints</th>
+<th>Findings point at</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>a <code>kind: AlertmanagerConfig</code> anywhere</td>
+<td><code>alertmanagerconfig</code></td>
+<td>the resources, merged into the base config the way the operator merges them (<a href="#prometheus-operator-alertmanagerconfig">details</a>)</td>
+<td>the line in the resource</td>
+</tr>
+<tr>
+<td>a <code>Secret</code> or <code>ConfigMap</code> with an <code>alertmanager.yaml</code>, <code>alertmanager.yml</code> or <code>alertmanager.yaml.gz</code> key</td>
+<td><code>secret</code></td>
+<td>that key; the other keys are template files</td>
+<td>in a literal block (<code>key: &#124;</code>): the exact line. Base64 or a quoted string: the key</td>
+</tr>
+<tr>
+<td>a top-level <code>alertmanager_config:</code> string</td>
+<td><code>mimir</code></td>
+<td>that string, plus <code>template_files</code></td>
+<td>in a literal block: the exact line. Otherwise: the key</td>
+</tr>
+<tr>
+<td>top-level <code>contactPoints:</code>, <code>policies:</code>, <code>muteTimes:</code> or <code>templates:</code> lists (Grafana provisioning or export), or a config with <code>object_matchers</code> or <code>grafana_managed_receiver_configs</code></td>
+<td><code>grafana</code></td>
+<td>the notification policies, contact points, mute timings and templates, with the provisioning files next to it (<a href="#grafana">details</a>)</td>
+<td>the line in the file</td>
+</tr>
+<tr>
+<td>a top-level <code>alertmanager:</code> map, and no top-level <code>route:</code> or <code>receivers:</code></td>
+<td><code>helm</code></td>
+<td><code>alertmanager.config</code> merged over the chart's defaults, plus <code>alertmanager.templateFiles</code></td>
+<td>the line in the values file</td>
+</tr>
+<tr>
+<td>none of the above</td>
+<td><code>alertmanager</code></td>
+<td>the file as a plain config</td>
+<td>the line in the file</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>A file can be a stream of YAML documents (<code>---</code>) or a <code>kind: List</code>, as
+  <code>kubectl get -o yaml</code> prints it. amlint skips other objects in it (Deployments, Services,
+  PrometheusRules, and Secrets or ConfigMaps without a config key).</li>
+<li>amlint lints one config per file. A file with two configs (two config Secrets, say) exits
+  2: split it, or, if the two are in different formats, pick one with <code>--input-format</code>. A
+  file with no config at all also exits 2.</li>
+<li><code>note:</code> lines on stderr say how amlint read the file, for example which parts of a Helm
+  config come from the chart. They don't change the exit code.</li>
+</ul>
+<p>To skip detection, pass <code>--input-format</code> with <code>auto</code> (the default), <code>alertmanager</code>, <code>secret</code>,
+<code>helm</code>, <code>mimir</code>, <code>alertmanagerconfig</code> or <code>grafana</code>. <code>--input-format alertmanager</code> reads the file as
+one plain document, even if it looks like something else.</p>
+<h2 id="kubernetes-secrets">Secrets and ConfigMaps</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Secret</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">alertmanager-main</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">monitoring</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nt">stringData</span><span class="p">:</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">alertmanager.yaml</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|-</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="w">    </span><span class="no">route:</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="w">      </span><span class="no">receiver: default</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="w">      </span><span class="no">...</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="w">  </span><span class="nt">notify.tmpl</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|-</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="w">    </span><span class="no">{{ define "notify.description" }}...{{ end }}</span>
+</code></pre></div>
+<ul>
+<li><strong>Use a literal block</strong> (<code>alertmanager.yaml: |</code>, YAML's multi-line string that keeps
+  line breaks). Then every finding points at its line and column inside the block, and
+  <code># amlint: disable=...</code> comments inside the block work as in a plain file. With base64
+  <code>data</code> or a quoted string, lines can't be mapped one to one, so findings point at the
+  <code>alertmanager.yaml:</code> key.</li>
+<li><code>stringData</code> wins over <code>data</code> for the same key, as the API server merges them. <code>data</code>
+  values are base64.</li>
+<li><code>alertmanager.yaml.gz</code> is the gzipped, base64 config in the Secret the operator generates
+  (<code>alertmanager-&lt;name&gt;-generated</code>).</li>
+<li><strong>Template files.</strong> The Secret's other keys are template files. The operator mounts them
+  in <code>/etc/alertmanager/config/</code>, so amlint checks <code>templates:</code> entries in that directory
+  against the keys instead of against files on disk:<ul>
+<li>a file name that isn't a key is an error</li>
+<li>a glob that matches no key is a warning, but only if the Secret has template files at
+  all (<code>*.tmpl</code> with no template files just loads nothing)</li>
+<li>relative paths and other directories aren't checked. The operator runs Alertmanager on
+  a copy of the config in <code>config_out/</code>, so they don't resolve next to the Secret.</li>
+</ul>
+</li>
+<li>A <strong>ConfigMap</strong> is read the same way, from <code>data</code> or base64 <code>binaryData</code>. Its template
+  files aren't checked, because where it is mounted depends on how you deploy it.</li>
+</ul>
+<h2 id="kube-prometheus-stack-values">kube-prometheus-stack Helm values</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">alertmanager</span><span class="p">:</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">config</span><span class="p">:</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">route</span><span class="p">:</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">      </span><span class="nt">receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slack</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">    </span><span class="nt">receivers</span><span class="p">:</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slack</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">        </span><span class="nt">slack_configs</span><span class="p">:</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">api_url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://hooks.slack.com/services/T/B/X</span>
+</code></pre></div>
+<p>Helm merges your values over the chart's own <code>values.yaml</code>, so Alertmanager gets more than
+your file says. amlint merges <code>alertmanager.config</code> over the default config of
+kube-prometheus-stack 92.10.1 the same way: maps key by key, lists replaced whole, and
+<code>null</code> deletes a key.</p>
+<p>That catches a common mistake. The values above replace <code>receivers</code>, so the chart's <code>null</code>
+receiver is gone, but the chart's Watchdog route to <code>null</code> is still there:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>$ amlint check values.yaml
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>note: values.yaml:2: alertmanager.config is merged over the kube-prometheus-stack 92.10.1 defaults, as Helm merges values: global, inhibit_rules, templates, route.routes come from the chart
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>  ✖  ERROR  [undefined-receiver]  ·  values.yaml:3:5  ·  route.routes[0]
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>     Route references receiver 'null' which is not defined in receivers. Alertmanager refuses to load this config.
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>──────────────────────────────────────────────────────────────────────────────
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>  ✖ 1 error
+</code></pre></div>
+<p>A finding in a part that only the chart's defaults have points at the nearest part your
+file does have: here, the <code>route:</code> that the default routes are merged into.</p>
+<ul>
+<li><code>alertmanager.templateFiles</code> end up in the config Secret, so <code>templates:</code> entries in
+  <code>/etc/alertmanager/config/</code> are checked against them, as for a Secret.</li>
+<li><code>alertmanager.stringConfig</code> is used only with <code>alertmanager.tplConfig: true</code>, as in the
+  chart's Secret template. Without it the chart renders <code>alertmanager.config</code>, and amlint
+  notes that the string is ignored. A string <code>alertmanager.config</code> is read as a config.</li>
+<li><code>alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy.type</code> sets the
+  <a href="#matcher-strategy">matcher strategy</a> for <code>AlertmanagerConfig</code> resources in the same
+  stream.</li>
+<li>
+<p>Values from <code>--set</code> or other values files aren't in the file. Lint the values Helm
+  actually uses, or the rendered chart, which holds the config Secret:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>helm<span class="w"> </span>get<span class="w"> </span>values<span class="w"> </span>&lt;release&gt;<span class="w"> </span>--all<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>check<span class="w"> </span>-
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>helm<span class="w"> </span>template<span class="w"> </span>monitoring<span class="w"> </span>./chart<span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>check<span class="w"> </span>-
+</code></pre></div>
+</li>
+</ul>
+<h2 id="mimir-and-cortex">Mimir and Cortex</h2>
+<p>This is the format <code>mimirtool alertmanager get</code> prints and <code>POST /api/v1/alerts</code> takes:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">template_files</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">default_template</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">    </span><span class="no">{{ define "email.subject" }}...{{ end }}</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">alertmanager_config</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">  </span><span class="no">route:</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">    </span><span class="no">receiver: team-email</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="no">...</span>
+</code></pre></div>
+<p>amlint doesn't check <code>templates:</code> against <code>template_files</code>: Mimir loads every template file
+of the tenant, whatever <code>templates:</code> lists, and refuses entries that contain a path.</p>
+<h2 id="grafana">Grafana Alerting</h2>
+<p>Grafana runs its own Alertmanager. Its notification policies, contact points, mute timings
+and templates work the same way, so amlint checks them, and <code>route</code>, <code>test</code> and <code>diff</code>
+simulate their routing.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>amlint<span class="w"> </span>check<span class="w"> </span>provisioning/alerting/*.yaml<span class="w">         </span><span class="c1"># file provisioning</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>amlint<span class="w"> </span>check<span class="w"> </span>notification-policies.yaml<span class="w">           </span><span class="c1"># an export (Alerting → Export, or the API)</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>amlint<span class="w"> </span>route<span class="w"> </span>provisioning/alerting/policies.yaml<span class="w"> </span><span class="nv">grafana_folder</span><span class="o">=</span>Infra<span class="w"> </span><span class="nv">alertname</span><span class="o">=</span>DiskFull
+</code></pre></div>
+<p>amlint reads:</p>
+<ul>
+<li><strong>file provisioning</strong> (<code>contactPoints</code>, <code>policies</code>, <code>muteTimes</code>, <code>templates</code>), and the same
+  format Grafana exports (<code>/api/v1/provisioning/policies/export</code>, contact points, mute
+  timings);</li>
+<li><strong>Grafana's Alertmanager config</strong>, as <code>GET /api/alertmanager/grafana/config/api/v1/alerts</code>
+  returns it (<code>alertmanager_config</code> with <code>template_files</code>), or without that wrapper.</li>
+</ul>
+<p><strong>Good to know</strong></p>
+<ul>
+<li>Grafana reads every <code>.yaml</code>, <code>.yml</code> and <code>.json</code> file of the provisioning directory
+  together, and so does amlint: a policy in one file can use a contact point from another.
+  Each file's findings are reported when you check that file.</li>
+<li>Contact points, mute timings and templates made in Grafana's UI aren't in these files. A
+  policy that uses one is not an <code>undefined-receiver</code>: a <code>note:</code> lists the names amlint
+  takes to be in Grafana. Templates are looked up only when the files define some.</li>
+<li>Every alert from Grafana has an <code>alertname</code> label (the rule's title) and <code>grafana_folder</code>.
+  Use them in <code>amlint route</code> and in routing tests.</li>
+<li>One org at a time: org 1, or the lowest one in the files. A <code>note:</code> says which.</li>
+<li><code>$$</code> is a plain <code>$</code>. <code>$VAR</code>, <code>${VAR}</code>, <code>$__env{…}</code>, <code>$__file{…}</code> and an exported
+  <code>[REDACTED]</code> stand for a secret kept elsewhere, so they aren't a <code>plaintext-secret</code>.</li>
+<li><a href="../checks/receivers/#grafana-contact-point"><code>grafana-contact-point</code></a> reports a type or a
+  required setting Grafana refuses. Templates are checked with Grafana's functions and data
+  (<code>.ValueString</code>, <code>.DashboardURL</code>, <code>coll.Dict</code>, …).</li>
+<li><code>unused-receiver</code> and <code>global-resolve-timeout-missing</code> don't apply: Grafana adds a route
+  for every contact point itself, for alert rules that pick one directly, and has no
+  <code>global:</code> section.</li>
+<li>Not modeled: the routes Grafana adds for alert rules that pick a contact point directly,
+  named routing trees, and inhibition rules, which provisioning files can't hold.</li>
+<li>Messages say "Alertmanager" where they mean the Alertmanager that runs inside Grafana.</li>
+</ul>
+<h2 id="prometheus-operator-alertmanagerconfig">prometheus-operator AlertmanagerConfig</h2>
+<p><code>AlertmanagerConfig</code> resources (<code>monitoring.coreos.com/v1alpha1</code> and <code>v1beta1</code>) let each team
+define its own routes and receivers in its own namespace. The operator converts them and
+merges them into one Alertmanager config. amlint does the same, the way prometheus-operator
+v0.94.1 does it, so findings, <code>tree</code>, <code>route</code> and <code>test</code> show the config Alertmanager will
+actually run.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>$ amlint tree alertmanagerconfigs.yaml
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>   (root)  →  default
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>├──    {namespace="team-a"}  →  team-a/payments/slack  [continue]
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>│   └──    {severity="critical"}  →  team-a/payments/pager
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>├──    {service=~"search-.*", namespace="team-b"}  →  team-b/search/webhook  [continue]
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>└──    {alertname = "Watchdog"}  →  null
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>  1 more issue outside routing (receivers, global, timing) — run 'amlint check alertmanagerconfigs.yaml' for full details.
+</code></pre></div>
+<details class="example">
+<summary>alertmanagerconfigs.yaml: a config Secret and two teams' resources</summary>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">v1</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Secret</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">alertmanager-main</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">monitoring</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="nt">stringData</span><span class="p">:</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">  </span><span class="nt">alertmanager.yaml</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="no">global:</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">      </span><span class="no">resolve_timeout: 5m</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">    </span><span class="no">route:</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">      </span><span class="no">receiver: default</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">      </span><span class="no">routes:</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">        </span><span class="no">- matchers: ['alertname = "Watchdog"']</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">          </span><span class="no">receiver: "null"</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">    </span><span class="no">receivers:</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">      </span><span class="no">- name: default</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">        </span><span class="no">webhook_configs:</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">          </span><span class="no">- url: http://example.com/default</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">      </span><span class="no">- name: "null"</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="nn">---</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">monitoring.coreos.com/v1alpha1</span>
+<a id="__codelineno-8-22" name="__codelineno-8-22" href="#__codelineno-8-22"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AlertmanagerConfig</span>
+<a id="__codelineno-8-23" name="__codelineno-8-23" href="#__codelineno-8-23"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-8-24" name="__codelineno-8-24" href="#__codelineno-8-24"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">payments</span>
+<a id="__codelineno-8-25" name="__codelineno-8-25" href="#__codelineno-8-25"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team-a</span>
+<a id="__codelineno-8-26" name="__codelineno-8-26" href="#__codelineno-8-26"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-8-27" name="__codelineno-8-27" href="#__codelineno-8-27"></a><span class="w">  </span><span class="nt">route</span><span class="p">:</span>
+<a id="__codelineno-8-28" name="__codelineno-8-28" href="#__codelineno-8-28"></a><span class="w">    </span><span class="nt">receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slack</span>
+<a id="__codelineno-8-29" name="__codelineno-8-29" href="#__codelineno-8-29"></a><span class="w">    </span><span class="nt">routes</span><span class="p">:</span>
+<a id="__codelineno-8-30" name="__codelineno-8-30" href="#__codelineno-8-30"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matchers</span><span class="p">:</span>
+<a id="__codelineno-8-31" name="__codelineno-8-31" href="#__codelineno-8-31"></a><span class="w">          </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">severity</span>
+<a id="__codelineno-8-32" name="__codelineno-8-32" href="#__codelineno-8-32"></a><span class="w">            </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">critical</span>
+<a id="__codelineno-8-33" name="__codelineno-8-33" href="#__codelineno-8-33"></a><span class="w">        </span><span class="nt">receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pager</span>
+<a id="__codelineno-8-34" name="__codelineno-8-34" href="#__codelineno-8-34"></a><span class="w">  </span><span class="nt">receivers</span><span class="p">:</span>
+<a id="__codelineno-8-35" name="__codelineno-8-35" href="#__codelineno-8-35"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slack</span>
+<a id="__codelineno-8-36" name="__codelineno-8-36" href="#__codelineno-8-36"></a><span class="w">      </span><span class="nt">slackConfigs</span><span class="p">:</span>
+<a id="__codelineno-8-37" name="__codelineno-8-37" href="#__codelineno-8-37"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">apiURL</span><span class="p">:</span>
+<a id="__codelineno-8-38" name="__codelineno-8-38" href="#__codelineno-8-38"></a><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">slack-webhook</span>
+<a id="__codelineno-8-39" name="__codelineno-8-39" href="#__codelineno-8-39"></a><span class="w">            </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">url</span>
+<a id="__codelineno-8-40" name="__codelineno-8-40" href="#__codelineno-8-40"></a><span class="w">          </span><span class="nt">channel</span><span class="p">:</span><span class="w"> </span><span class="s">'#payments'</span>
+<a id="__codelineno-8-41" name="__codelineno-8-41" href="#__codelineno-8-41"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pager</span>
+<a id="__codelineno-8-42" name="__codelineno-8-42" href="#__codelineno-8-42"></a><span class="w">      </span><span class="nt">pagerdutyConfigs</span><span class="p">:</span>
+<a id="__codelineno-8-43" name="__codelineno-8-43" href="#__codelineno-8-43"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">routingKey</span><span class="p">:</span>
+<a id="__codelineno-8-44" name="__codelineno-8-44" href="#__codelineno-8-44"></a><span class="w">            </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pagerduty</span>
+<a id="__codelineno-8-45" name="__codelineno-8-45" href="#__codelineno-8-45"></a><span class="w">            </span><span class="nt">key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">routing-key</span>
+<a id="__codelineno-8-46" name="__codelineno-8-46" href="#__codelineno-8-46"></a><span class="nn">---</span>
+<a id="__codelineno-8-47" name="__codelineno-8-47" href="#__codelineno-8-47"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">monitoring.coreos.com/v1beta1</span>
+<a id="__codelineno-8-48" name="__codelineno-8-48" href="#__codelineno-8-48"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">AlertmanagerConfig</span>
+<a id="__codelineno-8-49" name="__codelineno-8-49" href="#__codelineno-8-49"></a><span class="nt">metadata</span><span class="p">:</span>
+<a id="__codelineno-8-50" name="__codelineno-8-50" href="#__codelineno-8-50"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">search</span>
+<a id="__codelineno-8-51" name="__codelineno-8-51" href="#__codelineno-8-51"></a><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team-b</span>
+<a id="__codelineno-8-52" name="__codelineno-8-52" href="#__codelineno-8-52"></a><span class="nt">spec</span><span class="p">:</span>
+<a id="__codelineno-8-53" name="__codelineno-8-53" href="#__codelineno-8-53"></a><span class="w">  </span><span class="nt">route</span><span class="p">:</span>
+<a id="__codelineno-8-54" name="__codelineno-8-54" href="#__codelineno-8-54"></a><span class="w">    </span><span class="nt">receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">webhook</span>
+<a id="__codelineno-8-55" name="__codelineno-8-55" href="#__codelineno-8-55"></a><span class="w">    </span><span class="nt">matchers</span><span class="p">:</span>
+<a id="__codelineno-8-56" name="__codelineno-8-56" href="#__codelineno-8-56"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">service</span>
+<a id="__codelineno-8-57" name="__codelineno-8-57" href="#__codelineno-8-57"></a><span class="w">        </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">search-.*</span>
+<a id="__codelineno-8-58" name="__codelineno-8-58" href="#__codelineno-8-58"></a><span class="w">        </span><span class="nt">matchType</span><span class="p">:</span><span class="w"> </span><span class="s">"=~"</span>
+<a id="__codelineno-8-59" name="__codelineno-8-59" href="#__codelineno-8-59"></a><span class="w">  </span><span class="nt">receivers</span><span class="p">:</span>
+<a id="__codelineno-8-60" name="__codelineno-8-60" href="#__codelineno-8-60"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">webhook</span>
+<a id="__codelineno-8-61" name="__codelineno-8-61" href="#__codelineno-8-61"></a><span class="w">      </span><span class="nt">webhookConfigs</span><span class="p">:</span>
+<a id="__codelineno-8-62" name="__codelineno-8-62" href="#__codelineno-8-62"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">http://search.example.com/hook</span>
+</code></pre></div>
+</details>
+<p>What the merge does:</p>
+<ul>
+<li><strong>Names.</strong> Receiver and time interval names become <code>&lt;namespace&gt;/&lt;name&gt;/&lt;receiver&gt;</code>, so
+  <code>receiver: pager</code> in <code>team-a/payments</code> is <code>team-a/payments/pager</code>. Findings, <code>tree</code>,
+  <code>route</code> and <code>test</code> all use these names.</li>
+<li><strong>Namespace matcher.</strong> Each resource's route gets <code>namespace="&lt;namespace&gt;"</code> added to its
+  matchers, and so do both sides of each of its inhibit rules (unless a side already has
+  it). So a resource only sees alerts from its own namespace. The
+  <a href="#matcher-strategy">matcher strategy</a> can turn this off.</li>
+<li><strong>Order and <code>continue</code>.</strong> The resources' routes go first under the root route, sorted by
+  <code>namespace/name</code>, before the base config's own routes. Each gets <code>continue: true</code>, so
+  alerts also go on to the routes after it.</li>
+<li><strong>Base config.</strong> A Secret, plain config, Helm values or Mimir config in the same stream is
+  the base. Without one, amlint uses the operator's default config (a root route to a
+  <code>null</code> receiver) and drops findings about that default, since there is nothing in your
+  input to fix.</li>
+<li><strong>Secret references.</strong> Fields that reference a Secret (<code>apiURL</code>, <code>routingKey</code>, <code>apiKey</code>,
+  <code>urlSecret</code>, <code>botToken</code>, ...) count as set, because the operator fills in the value.
+  amlint doesn't read the value, so it can't catch a Secret that doesn't exist.</li>
+<li><strong>Field names.</strong> camelCase fields become Alertmanager's (<code>slackConfigs</code> →
+  <code>slack_configs</code>, <code>groupWait</code> → <code>group_wait</code>). A webhook's <code>urlSecret</code> becomes its <code>url</code>, a
+  Discord <code>apiURL</code> its <code>webhook_url</code>. A zero <code>groupInterval</code> or <code>repeatInterval</code> is dropped,
+  as the operator drops it, so the parent's value applies.</li>
+<li><strong>API versions.</strong> v1alpha1 calls the top-level time intervals <code>muteTimeIntervals</code>, v1beta1
+  calls them <code>timeIntervals</code>. If a resource uses the other version's name, amlint notes that
+  the API server drops it. A v1alpha1 matcher without <code>matchType</code> uses <code>regex: true</code> for
+  <code>=~</code>.</li>
+<li><strong>No <code>spec.route</code>.</strong> A resource without a route only contributes its inhibit rules. The
+  operator drops its receivers and time intervals, and amlint notes it.</li>
+<li><strong><code>spec.alertmanagerConfiguration</code>.</strong> If an <code>Alertmanager</code> resource in the input names one
+  of the resources there, that resource becomes the whole config, without a namespace
+  matcher, as the operator does it.</li>
+</ul>
+<p>Some findings would only describe what the operator adds on purpose, so amlint drops them:
+<code>inhibit-same-match</code>, <code>inhibit-no-equal</code> and <code>circular-inhibition</code> when only the namespace
+matcher causes them, and <code>useless-continue</code> on a resource's route. Problems in your own
+rules are still reported.</p>
+<h3 id="matcher-strategy">Matcher strategy</h3>
+<p><code>alertmanagerConfigMatcherStrategy</code> decides which resources get the namespace matcher:</p>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>Namespace matcher</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OnNamespace</code> (default)</td>
+<td>added to every resource</td>
+</tr>
+<tr>
+<td><code>OnNamespaceExceptForAlertmanagerNamespace</code></td>
+<td>added, except to resources in the Alertmanager's own namespace</td>
+</tr>
+<tr>
+<td><code>None</code></td>
+<td>never added</td>
+</tr>
+</tbody>
+</table>
+<p>amlint takes the first of these it finds: <code>--matcher-strategy</code>, an <code>Alertmanager</code> resource in
+the input (<code>spec.alertmanagerConfigMatcherStrategy.type</code>), Helm values in the input
+(<code>alertmanager.alertmanagerSpec.alertmanagerConfigMatcherStrategy.type</code>). Otherwise it uses
+<code>OnNamespace</code>.</p>
+<p>For <code>OnNamespaceExceptForAlertmanagerNamespace</code>, the Alertmanager's namespace comes from the
+<code>Alertmanager</code> resource or the config Secret. If neither is in the input, every resource gets
+the matcher, and amlint notes it.</p>
+<h3 id="routing-tests">Routing tests</h3>
+<p>Test cases run against the merged config. So their labels need a <code>namespace</code>, and they use
+the operator's receiver names:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nt">tests</span><span class="p">:</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">payments critical alerts page</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="nv">team-a</span><span class="p p-Indicator">,</span><span class="nt"> alertname</span><span class="p">:</span><span class="w"> </span><span class="nv">PaymentsDown</span><span class="p p-Indicator">,</span><span class="nt"> severity</span><span class="p">:</span><span class="w"> </span><span class="nv">critical</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="w">    </span><span class="nt">expect</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team-a/payments/pager</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">another namespace never reaches team-a</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">    </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="nv">team-c</span><span class="p p-Indicator">,</span><span class="nt"> alertname</span><span class="p">:</span><span class="w"> </span><span class="nv">PaymentsDown</span><span class="p p-Indicator">,</span><span class="nt"> severity</span><span class="p">:</span><span class="w"> </span><span class="nv">critical</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">    </span><span class="nt">expect</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">team-a's route has continue, so the base routes still see its alerts</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="w">    </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="nv">team-a</span><span class="p p-Indicator">,</span><span class="nt"> alertname</span><span class="p">:</span><span class="w"> </span><span class="nv">Watchdog</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">    </span><span class="nt">expect</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">team-a/payments/slack</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"null"</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>$ amlint test alertmanagerconfigs.yaml routing-tests.yaml
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>  ✓  payments critical alerts page
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>  ✓  another namespace never reaches team-a
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>  ✓  team-a's route has continue, so the base routes still see its alerts
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>──────────────────────────────────────────────────────────────────────────────
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>  3 passed
+</code></pre></div>
+<h3 id="several-files">Lint several files together</h3>
+<p>The operator merges every selected resource, and amlint merges every resource in one input.
+To lint resources from several files together, send them as one stream:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>kubectl<span class="w"> </span>kustomize<span class="w"> </span>deploy/monitoring<span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>check<span class="w"> </span>-
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>helm<span class="w"> </span>template<span class="w"> </span>monitoring<span class="w"> </span>./chart<span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>check<span class="w"> </span>-
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>kubectl<span class="w"> </span>get<span class="w"> </span>alertmanagerconfigs<span class="w"> </span>-A<span class="w"> </span>-o<span class="w"> </span>yaml<span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>check<span class="w"> </span>-
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="k">for</span><span class="w"> </span>f<span class="w"> </span><span class="k">in</span><span class="w"> </span>alertmanagerconfigs/*.yaml<span class="p">;</span><span class="w"> </span><span class="k">do</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span>---<span class="p">;</span><span class="w"> </span>cat<span class="w"> </span><span class="s2">"</span><span class="nv">$f</span><span class="s2">"</span><span class="p">;</span><span class="w"> </span><span class="k">done</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>check<span class="w"> </span>-
+</code></pre></div>
+<p>With stdin, findings point at lines of the stream. <code>amlint check a.yaml b.yaml</code> instead
+lints each file on its own, so each resource is merged into the operator's default config.</p>
+<h3 id="what-isnt-modeled">Limits</h3>
+<ul>
+<li><code>alertmanagerConfigSelector</code> and <code>alertmanagerConfigNamespaceSelector</code> aren't modeled:
+  every resource in the input counts as selected.</li>
+<li>The operator's validation isn't modeled. The operator skips a whole resource it rejects
+  (say, a route to a receiver the resource doesn't define). amlint reports what is wrong
+  instead.</li>
+<li>Matchers are always written in the <code>matchers:</code> syntax, so configs for Alertmanager before
+  0.22 aren't modeled.</li>
+<li>A resource without <code>metadata.namespace</code> is taken to be in <code>default</code>, with a note.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>

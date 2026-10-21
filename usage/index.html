@@ -1,0 +1,2912 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Semantic linter for Prometheus Alertmanager configs">
+      
+      
+      
+        <link rel="canonical" href="https://danikdanik2013.github.io/amlint/usage/">
+      
+      
+        <link rel="prev" href="../install/">
+      
+      
+        <link rel="next" href="../editors/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Usage - amlint</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#usage" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="amlint" class="md-header__button md-logo" aria-label="amlint" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            amlint
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Usage
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/danikdanik2013/amlint" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    danikdanik2013/amlint
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../install/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Install
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    <li class="md-tabs__item md-tabs__item--active">
+      <a href="./" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Usage
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../editors/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Editors
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../kubernetes/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Kubernetes, Grafana & Mimir
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../playground/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Playground
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../github-action/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  GitHub Action
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../fidelity/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Verified against Alertmanager
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../checks/" class="md-tabs__link">
+          
+  
+  
+  Checks
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../contributing/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Contributing
+
+      </a>
+    </li>
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="amlint" class="md-nav__button md-logo" aria-label="amlint" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    amlint
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/danikdanik2013/amlint" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    danikdanik2013/amlint
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Install
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#in-60-seconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In 60 seconds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Find mistakes in a config
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Find mistakes in a config">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes-helm-mimir-and-grafana" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes, Helm, Mimir and Grafana
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Get JSON output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#project-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Set defaults for a repo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inline-suppressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Silence one finding in the config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checking-against-prometheus-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check routes against your Prometheus rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See the routing tree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="See the routing tree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tree-mermaid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Draw the tree as a diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#route" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See where an alert goes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="See where an alert goes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inhibition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check whether an alert is muted
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test your routing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test your routing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inhibition-in-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test inhibition
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measure route coverage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review a config change
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Review a config change">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#routing-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routing changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#markdown-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post the diff as a PR comment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run amlint in CI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run amlint in CI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fail-the-build-on-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fail the build on findings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#github-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Annotate the PR diff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sarif-github-code-scanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upload to GitHub Code Scanning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#in-ci-pr-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catch regressions on a PR
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rewrite deprecated syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lsp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See findings in your editor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#look-up-a-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Look up a check
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Look up a check">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List all checks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#explain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explain one check
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#init" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start a new config
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../editors/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Editors
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../kubernetes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Kubernetes, Grafana & Mimir
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../playground/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Playground
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../github-action/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Action
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fidelity/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Verified against Alertmanager
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Checks
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Checks
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/routing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Routing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/receivers/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Receivers
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/inhibition/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inhibition
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/timing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Timing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/templates/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Templates
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../checks/rules/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prometheus rules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#in-60-seconds" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        In 60 seconds
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Find mistakes in a config
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Find mistakes in a config">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#kubernetes-helm-mimir-and-grafana" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Kubernetes, Helm, Mimir and Grafana
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#json-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Get JSON output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#project-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Set defaults for a repo
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inline-suppressions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Silence one finding in the config
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checking-against-prometheus-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check routes against your Prometheus rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tree" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See the routing tree
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="See the routing tree">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tree-mermaid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Draw the tree as a diagram
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#route" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See where an alert goes
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="See where an alert goes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inhibition" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Check whether an alert is muted
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#test" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test your routing
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Test your routing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#inhibition-in-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test inhibition
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Measure route coverage
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diff" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Review a config change
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Review a config change">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#routing-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routing changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#markdown-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Post the diff as a PR comment
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Run amlint in CI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run amlint in CI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fail-the-build-on-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fail the build on findings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#github-annotations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Annotate the PR diff
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sarif-github-code-scanning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Upload to GitHub Code Scanning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#in-ci-pr-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Catch regressions on a PR
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rewrite deprecated syntax
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#lsp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See findings in your editor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#look-up-a-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Look up a check
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Look up a check">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        List all checks
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#explain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explain one check
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#init" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Start a new config
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="usage">Usage</h1>
+<p>amlint finds mistakes in an Alertmanager config before they cost you a missed page. It also
+shows where a given alert ends up, runs routing tests in CI, and shows how a change reroutes
+alerts.</p>
+<h2 id="in-60-seconds">In 60 seconds</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>amlint<span class="w"> </span>check<span class="w"> </span>alertmanager.yml<span class="w">                                </span><span class="c1"># find mistakes</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>amlint<span class="w"> </span>route<span class="w"> </span>alertmanager.yml<span class="w"> </span><span class="nv">team</span><span class="o">=</span>infra<span class="w"> </span><span class="nv">severity</span><span class="o">=</span>critical<span class="w">   </span><span class="c1"># where does this alert go?</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>amlint<span class="w"> </span><span class="nb">test</span><span class="w"> </span>alertmanager.yml<span class="w"> </span>routing-tests.yml<span class="w">               </span><span class="c1"># run your routing tests</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>amlint<span class="w"> </span>diff<span class="w"> </span>main.yml<span class="w"> </span>alertmanager.yml<span class="w">                        </span><span class="c1"># what does this change break or reroute?</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Use it to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#check"><code>check</code></a></td>
+<td>find mistakes in one or more configs</td>
+</tr>
+<tr>
+<td><a href="#tree"><code>tree</code></a></td>
+<td>print the routing tree with problems marked on it</td>
+</tr>
+<tr>
+<td><a href="#route"><code>route</code></a></td>
+<td>see where an alert with given labels goes</td>
+</tr>
+<tr>
+<td><a href="#test"><code>test</code></a></td>
+<td>run routing unit tests from a file</td>
+</tr>
+<tr>
+<td><a href="#diff"><code>diff</code></a></td>
+<td>compare two configs: new and fixed findings, and alerts that now go elsewhere</td>
+</tr>
+<tr>
+<td><a href="#fix"><code>fix</code></a></td>
+<td>rewrite deprecated syntax (<code>match:</code>, <code>source_match:</code>, ...) in place</td>
+</tr>
+<tr>
+<td><a href="#list"><code>list</code></a>, <a href="#explain"><code>explain</code></a></td>
+<td>see every check, or read about one</td>
+</tr>
+<tr>
+<td><a href="#init"><code>init</code></a></td>
+<td>print a minimal valid config to start from</td>
+</tr>
+<tr>
+<td><a href="#lsp"><code>lsp</code></a></td>
+<td>show findings in your editor as you type</td>
+</tr>
+<tr>
+<td><code>amlint --version</code></td>
+<td>print the installed version</td>
+</tr>
+</tbody>
+</table>
+<h2 id="check">Find mistakes in a config</h2>
+<p><code>check</code> reviews the whole config: routes (the tree of label conditions, called matchers, that
+decides where each alert goes), receivers (named notification targets, such as a Slack
+channel), inhibit rules (rules that mute some alerts while a related alert fires), timings
+and integration settings.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>amlint<span class="w"> </span>check<span class="w"> </span>alertmanager.yml
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>amlint<span class="w"> </span>check<span class="w"> </span>prod.yml<span class="w"> </span>staging.yml<span class="w">        </span><span class="c1"># several files</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>cat<span class="w"> </span>alertmanager.yml<span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>check<span class="w"> </span>-<span class="w">    </span><span class="c1"># stdin</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>  ✖  ERROR  [undefined-receiver]  ·  alertmanager.yml:6:7  ·  route.routes[1]
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>     Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config.
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>  ℹ  INFO   [global-resolve-timeout-missing]  ·  alertmanager.yml:1:1  ·  global
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>     global.resolve_timeout is not set, so Alertmanager uses 5m. It only applies to alerts sent without an end time; Prometheus always sets one.
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>────────────────────────────────────────
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>  ✖ 1 error  ·  ℹ 1 info
+</code></pre></div>
+<p>Each finding shows:</p>
+<ul>
+<li>its level: <code>ERROR</code>, <code>WARN</code> or <code>INFO</code>. By default only <code>ERROR</code> fails the run.</li>
+<li>the check code. <code>amlint explain &lt;code&gt;</code> tells you why it matters and how to fix it.</li>
+<li><code>file:line:col</code>, which most terminals and editors turn into a link.</li>
+<li>the config path: <code>route.routes[1]</code> is the second child of the top-level route.</li>
+</ul>
+<p><strong>Options</strong></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--strict</code></td>
+<td>Exit <code>1</code> on WARN findings too, not only ERROR</td>
+</tr>
+<tr>
+<td><code>--exit-zero</code></td>
+<td>Always exit <code>0</code> when the config could be read, whatever amlint finds. For report-only CI runs</td>
+</tr>
+<tr>
+<td><code>--ignore CODE</code></td>
+<td>Skip these checks. Comma-separate the codes or repeat the flag</td>
+</tr>
+<tr>
+<td><code>--only CODE</code></td>
+<td>Report only these checks. Comma-separate the codes or repeat the flag</td>
+</tr>
+<tr>
+<td><code>--format FORMAT</code></td>
+<td><code>text</code> (default), <code>json</code>, <code>sarif</code> (<a href="#sarif-github-code-scanning">Code Scanning</a>) or <code>github</code> (<a href="#github-annotations">PR annotations</a>)</td>
+</tr>
+<tr>
+<td><code>--rules GLOB</code></td>
+<td>Also check against your Prometheus alerting rules. Quote the glob; repeat the flag for more (<a href="#checking-against-prometheus-rules">details</a>)</td>
+</tr>
+<tr>
+<td><code>--input-format FORMAT</code></td>
+<td>What the file is: <code>auto</code> (default, detected), <code>alertmanager</code>, <code>secret</code>, <code>helm</code>, <code>mimir</code> or <code>alertmanagerconfig</code> (<a href="#kubernetes-helm-and-mimir">details</a>)</td>
+</tr>
+<tr>
+<td><code>--matcher-strategy STRATEGY</code></td>
+<td><code>alertmanagerConfigMatcherStrategy</code> for <code>AlertmanagerConfig</code> resources: <code>OnNamespace</code>, <code>OnNamespaceExceptForAlertmanagerNamespace</code> or <code>None</code>. Default: the one on the Alertmanager resource in the input, else <code>OnNamespace</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Good to know</strong></p>
+<ul>
+<li>The line is where that part of the config starts: the <code>-</code> entry of a route, receiver or
+  inhibit rule, or a key such as <code>global:</code>. If the part is missing (no <code>global:</code> block), the
+  finding points at the nearest part that exists. JSON and SARIF carry the same line and
+  column.</li>
+<li>With several files, text output has one section per file.</li>
+<li>A misspelled code in <code>--ignore</code>, <code>--only</code> or a <a href="#project-config">config file</a> prints a
+  warning with a "did you mean" suggestion instead of being silently ignored.</li>
+</ul>
+<h3 id="kubernetes-helm-mimir-and-grafana">Kubernetes, Helm, Mimir and Grafana</h3>
+<p>Besides a plain <code>alertmanager.yml</code>, amlint reads a Kubernetes Secret or ConfigMap holding
+<code>alertmanager.yaml</code>, kube-prometheus-stack Helm values, a Mimir or Cortex tenant config,
+prometheus-operator <code>AlertmanagerConfig</code> resources, which it merges the way the operator
+does, and Grafana Alerting's provisioning files and exports. It detects the format; <code>--input-format</code> overrides that. Findings point at the line in
+the file you passed. <code>diff</code>, <code>tree</code>, <code>route</code> and <code>test</code> take <code>--input-format</code> and
+<code>--matcher-strategy</code> too. See <a href="../kubernetes/">Kubernetes, Grafana &amp; Mimir</a>.</p>
+<h3 id="json-output">Get JSON output</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>amlint<span class="w"> </span>check<span class="w"> </span>alertmanager.yml<span class="w"> </span>--format<span class="w"> </span>json
+</code></pre></div>
+<p>The output is a list with one object per finding:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">"file"</span><span class="p">:</span><span class="w"> </span><span class="s2">"alertmanager.yml"</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">"line"</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">"column"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">"level"</span><span class="p">:</span><span class="w"> </span><span class="s2">"error"</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="s2">"undefined-receiver"</span><span class="p">,</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">  </span><span class="nt">"message"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config."</span><span class="p">,</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">  </span><span class="nt">"where"</span><span class="p">:</span><span class="w"> </span><span class="s2">"route.routes[1]"</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="p">}</span>
+</code></pre></div>
+<p><code>level</code> is <code>error</code>, <code>warn</code> or <code>info</code>. <code>file</code> is <code>-</code> for stdin.</p>
+<h3 id="project-config">Set defaults for a repo</h3>
+<p>amlint reads settings from <code>.amlint.yml</code> (or <code>.amlint.yaml</code>) in the directory you run it
+from. If there is none, it reads <code>[tool.amlint]</code> from <code>pyproject.toml</code> in that directory.</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">.amlint.yml</label><label for="__tabbed_1_2">pyproject.toml</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">ignore</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">empty-receiver</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unused-receiver</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="nt">strict</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nt">severity</span><span class="p">:</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="w">  </span><span class="nt">empty-receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">info</span><span class="w">      </span><span class="c1"># downgrade warn → info</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="w">  </span><span class="nt">unused-receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">error</span><span class="w">    </span><span class="c1"># upgrade info → error</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="nt">rules</span><span class="p">:</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">rules/*.yml</span><span class="w">             </span><span class="c1"># Prometheus alerting rules, like --rules</span>
+</code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="k">[tool.amlint]</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">ignore</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"empty-receiver"</span><span class="p">,</span><span class="w"> </span><span class="s2">"unused-receiver"</span><span class="p">]</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="n">strict</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">rules</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"rules/*.yml"</span><span class="p">]</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="k">[tool.amlint.severity]</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">empty-receiver</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"info"</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">unused-receiver</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"error"</span>
+</code></pre></div>
+</div>
+</div>
+</div>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>What it does</th>
+<th>Used by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ignore</code></td>
+<td>Checks to skip, added to any <code>--ignore</code> codes</td>
+<td><code>check</code>, <code>diff</code>, <code>tree</code>, <code>lsp</code></td>
+</tr>
+<tr>
+<td><code>strict</code></td>
+<td>Same as <code>--strict</code></td>
+<td><code>check</code></td>
+</tr>
+<tr>
+<td><code>severity</code></td>
+<td>Sets a check's level to <code>error</code>, <code>warn</code> or <code>info</code></td>
+<td><code>check</code>, <code>diff</code>, <code>tree</code>, <code>lsp</code></td>
+</tr>
+<tr>
+<td><code>rules</code></td>
+<td>Globs of <a href="#checking-against-prometheus-rules">Prometheus rule files</a>, relative to the config file's directory. Added to any <code>--rules</code></td>
+<td><code>check</code>, <code>lsp</code></td>
+</tr>
+<tr>
+<td><code>tests</code></td>
+<td>Maps config files to their <a href="#test"><code>amlint test</code></a> files (a glob or a list of globs), relative to the config file's directory</td>
+<td><code>test</code>, <code>lsp</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Good to know:</strong> amlint doesn't look in parent directories or next to the config file. Only
+the first file found is read, so <code>pyproject.toml</code> is ignored when <code>.amlint.yml</code> exists.</p>
+<h3 id="inline-suppressions">Silence one finding in the config</h3>
+<p>Turn a check off for one spot with a comment. The exception and its reason then live next to
+the config, not in a global <code>ignore:</code> list:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># amlint: disable-file=global-resolve-timeout-missing</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nt">route</span><span class="p">:</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">default</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">routes</span><span class="p">:</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">catch-all</span><span class="w">   </span><span class="c1"># amlint: disable=unreachable-route</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">matchers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">team="infra"</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">      </span><span class="nt">receiver</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">infra</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="nt">receivers</span><span class="p">:</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="w">  </span><span class="c1"># amlint: disable=empty-receiver, unused-receiver</span>
+<a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a><span class="w">  </span><span class="c1"># drops alerts on purpose</span>
+<a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">blackhole</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Comment</th>
+<th>Where</th>
+<th>Silences</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code># amlint: disable=code1,code2</code></td>
+<td>at the end of a line</td>
+<td>those codes for findings on that line</td>
+</tr>
+<tr>
+<td><code># amlint: disable=code1,code2</code></td>
+<td>on a line of its own</td>
+<td>those codes for findings on the next line of YAML (other comment lines in between are fine)</td>
+</tr>
+<tr>
+<td><code># amlint: disable-file=code1,code2</code></td>
+<td>in the comment block at the top of the file, before any YAML</td>
+<td>those codes for the whole file</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Good to know</strong></p>
+<ul>
+<li>A finding's line is the one shown in the output.</li>
+<li>An unknown code gets the same "did you mean" warning as <code>--ignore</code>. A <code>disable-file</code>
+  comment further down the file is ignored, with a warning.</li>
+<li>Suppressions also apply to <code>diff</code>, <code>tree</code> and the <a href="#lsp">editor</a>, which can add the
+  comment for you.</li>
+</ul>
+<h3 id="checking-against-prometheus-rules">Check routes against your Prometheus rules</h3>
+<p>On its own, amlint only sees the Alertmanager config. Give it your alerting rules with
+<code>--rules</code>, and it also checks that routes and inhibit rules match alerts that actually exist:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>amlint<span class="w"> </span>check<span class="w"> </span>alertmanager.yml<span class="w"> </span>--rules<span class="w"> </span><span class="s1">'rules/*.yml'</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>amlint<span class="w"> </span>check<span class="w"> </span>alertmanager.yml<span class="w"> </span>--rules<span class="w"> </span><span class="s1">'rules/**/*.yml'</span><span class="w"> </span>--rules<span class="w"> </span><span class="s1">'manifests/*-prometheusrule.yaml'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>  ⚠  WARN   [route-unknown-alertname]  ·  alertmanager.yml:7:7  ·  route.routes[0]
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>     Route matches alertname 'HighCpuUsage', which no alerting rule in the rule files produces — did you mean 'HighCPUUsage'? Unless such alerts come from another source, this branch is dead.
+</code></pre></div>
+<p><code>--rules</code> adds three checks:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Level</th>
+<th>What it catches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../checks/rules/#route-unknown-alertname"><code>route-unknown-alertname</code></a></td>
+<td>warn</td>
+<td>A route matches an <code>alertname</code> no rule produces (typo, renamed or removed rule), with a "did you mean"</td>
+</tr>
+<tr>
+<td><a href="../checks/rules/#inhibit-unknown-alertname"><code>inhibit-unknown-alertname</code></a></td>
+<td>warn</td>
+<td>The same for an inhibit rule's source and target matchers</td>
+</tr>
+<tr>
+<td><a href="../checks/rules/#alert-hits-default-receiver"><code>alert-hits-default-receiver</code></a></td>
+<td>info</td>
+<td>Based on their static labels, alerts match no child route and go to the root receiver (one finding per <code>severity=…</code> etc.)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Good to know</strong></p>
+<ul>
+<li>Put the globs under <code>rules:</code> in <a href="#project-config"><code>.amlint.yml</code></a> to use them on every
+  <code>check</code> without the flag, and in the <a href="../editors/">editor</a>. <code>--rules</code> adds more.</li>
+<li><code>--rules</code> reads Prometheus rule files (<code>groups:</code>) and prometheus-operator <code>PrometheusRule</code>
+  manifests (<code>spec.groups:</code>). Recording rules are skipped. <code>**</code> matches subdirectories.</li>
+<li>Quote the glob. Unquoted, the shell expands it, and the extra files are either rejected as
+  unknown arguments or linted as Alertmanager configs, depending on where <code>--rules</code> sits.
+  amlint warns when a config looks like a rule file.</li>
+<li>A glob that matches no files, a directory instead of a glob, or a rule file that doesn't
+  parse exits <code>2</code>. If the files hold no alerting rules, amlint warns and skips the three
+  checks.</li>
+<li>amlint only knows <code>alertname</code> and the rule's <code>labels:</code>. Real alerts also get labels from
+  their PromQL series and Prometheus' <code>external_labels</code>, so a templated label value counts as
+  unknown, and a result that depends on an unknown label is skipped rather than guessed. See
+  <a href="../checks/rules/">Prometheus rules checks</a>.</li>
+</ul>
+<h2 id="tree">See the routing tree</h2>
+<p><code>tree</code> prints the route tree with problems marked inline, so you can see how alerts flow
+without reading the YAML:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>amlint<span class="w"> </span>tree<span class="w"> </span>alertmanager.yml
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>cat<span class="w"> </span>alertmanager.yml<span class="w"> </span><span class="p">|</span><span class="w"> </span>amlint<span class="w"> </span>tree<span class="w"> </span>-<span class="w">   </span><span class="c1"># stdin</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>   (root)  →  default
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>├──    {team="infra"}  →  infra-slack  [continue]
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>├── ⚠  (catch-all)  →  catch-all  (unreachable-route)
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>└── ✖  {severity="critical"}  →  pager-team  (undefined-receiver)
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>  2 routing issues flagged above — run 'amlint check alertmanager.yml' for full details.
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>  2 more issues outside routing (receivers, global, timing) — run 'amlint check alertmanager.yml' for full details.
+</code></pre></div>
+<p>Each line is one route:</p>
+<ul>
+<li>its matchers, or <code>(catch-all)</code> if it has none,</li>
+<li><code>→</code> the receiver it sends to, or <code>(inherited)</code> if it doesn't set one,</li>
+<li><code>[continue]</code> when the route has <code>continue: true</code>, which tells Alertmanager to keep checking
+  the next sibling routes after this one matches,</li>
+<li>the level icon and check codes when a routing check (<code>undefined-receiver</code>,
+  <code>unreachable-route</code>, <code>route-match-collision</code>, <code>bad-regex</code>, <code>groupby-ellipsis</code> and similar)
+  fired on that route.</li>
+</ul>
+<p>Findings that don't belong to one route (receivers, global settings, timing) are counted
+below the tree.</p>
+<p><strong>Options</strong></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--ignore CODE</code></td>
+<td>Don't mark these checks on the tree. Comma-separate the codes or repeat the flag</td>
+</tr>
+<tr>
+<td><code>--format mermaid</code></td>
+<td>Print a <a href="#tree-mermaid">Mermaid</a> flowchart instead of the text tree</td>
+</tr>
+<tr>
+<td><code>--input-format</code>, <code>--matcher-strategy</code></td>
+<td>As for <a href="#check"><code>check</code></a></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Good to know:</strong> <code>tree</code> exits <code>0</code> even when it marks problems. Use <code>check</code> to fail CI.</p>
+<h3 id="tree-mermaid">Draw the tree as a diagram</h3>
+<p><code>--format mermaid</code> prints the tree as a <a href="https://mermaid.js.org">Mermaid</a> flowchart. Put it in
+a <code>```mermaid</code> block and GitHub, GitLab and MkDocs draw it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>amlint<span class="w"> </span>tree<span class="w"> </span>broken.yml<span class="w"> </span>--format<span class="w"> </span>mermaid
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>flowchart LR
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>    r["(root)&lt;br/&gt;→ default-team&lt;br/&gt;✖ groupby-ellipsis"]
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>    r_0["(catch-all)&lt;br/&gt;→ catch-all-team&lt;br/&gt;⚠ unreachable-route"]
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>    r --&gt; r_0
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>    r_1["{severity=#34;critical#34;}&lt;br/&gt;→ pager-team&lt;br/&gt;✖ undefined-receiver"]
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>    r --&gt; r_1
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>    r_2["{service=~#34;auth([#34;}&lt;br/&gt;→ default-team&lt;br/&gt;✖ bad-regex"]
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>    r --&gt; r_2
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>    classDef error fill:#ffebe9,stroke:#cf222e,color:#1f2328
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>    class r,r_1,r_2 error
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>    classDef warn fill:#fff8c5,stroke:#9a6700,color:#1f2328
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>    class r_0 warn
+</code></pre></div>
+<ul>
+<li>Each node shows the matchers, the receiver and <code>continue</code>. Routes with an error are red,
+  routes with a warning are yellow, and the check codes are on the node.</li>
+<li>Text from the config is written as Mermaid entity codes (<code>#34;</code> is a quote), so a receiver
+  name can't break the diagram.</li>
+<li>A tree with more than 150 routes stops there, with <code>…and N more routes</code>.</li>
+</ul>
+<h2 id="route">See where an alert goes</h2>
+<p><code>route</code> simulates Alertmanager's routing for one alert. It shows which routes the alert
+matches, which receivers get it, and the grouping and timings it ends up with: <code>group_by</code>
+(the labels Alertmanager uses to batch alerts into one notification), <code>group_wait</code> (how long
+it waits before sending the first notification for a new batch), <code>group_interval</code> and
+<code>repeat_interval</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>amlint<span class="w"> </span>route<span class="w"> </span>alertmanager.yml<span class="w"> </span><span class="nv">team</span><span class="o">=</span>infra<span class="w"> </span><span class="nv">severity</span><span class="o">=</span>critical<span class="w"> </span><span class="nv">alertname</span><span class="o">=</span>DiskFull
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>  Labels  team=infra, severity=critical, alertname=DiskFull
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>  1. route → route.routes[0] → route.routes[0].routes[0]
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>    receiver          infra-pager          set here
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>    group_by          alertname, cluster   inherited from route
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>    group_wait        10s                  inherited from route.routes[0]
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>    group_interval    5m                   Alertmanager default
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a>    repeat_interval   1h                   set here
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>  2. route → route.routes[1]
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a>    receiver          pager                set here
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a>    group_by          alertname, cluster   inherited from route
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>    group_wait        30s                  Alertmanager default
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>    group_interval    5m                   Alertmanager default
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a>    repeat_interval   4h                   Alertmanager default
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a>────────────────────────────────────────
+<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a>  Delivered to: infra-pager, pager
+</code></pre></div>
+<p>Here <code>route.routes[0]</code> has <code>continue: true</code>. So after the alert reaches its critical child,
+<code>route.routes[1]</code> is checked too, and matches as well. The last column says where each value
+comes from. <code>mute_time_intervals</code> and <code>active_time_intervals</code> show up when the matched route
+sets them.</p>
+<p>Pass labels as <code>label=value</code>. With no labels, amlint routes an alert that has none. Unlike
+<code>amtool config routes test</code>, <code>route</code> also shows the effective grouping and timings and where
+each comes from, and it needs no Go binary.</p>
+<p><strong>How amlint matches</strong>, following Alertmanager:</p>
+<ul>
+<li>Routes are checked depth-first, children in order. A route matches when all its matchers
+  match. The first matching child ends the search at its level, unless it has
+  <code>continue: true</code>. If no child matches, the parent itself is the match.</li>
+<li><code>receiver</code>, <code>group_by</code> and the timings are inherited from the parent. Alertmanager's
+  defaults are 30s / 5m / 4h. <code>group_by: []</code> means no grouping, and <code>group_by: ['...']</code>
+  groups by every label. Time intervals are not inherited: each route has only its own.</li>
+<li>A label the alert doesn't have matches as the empty string. So <code>env!="prod"</code> and <code>env=""</code>
+  both match an alert without <code>env</code>.</li>
+<li>Regexes are fully anchored: <code>service=~"api"</code> matches <code>api</code>, not <code>api-gateway</code>. They follow
+  Go RE2, as in Alertmanager: <code>(?i)</code> flags, ASCII-only <code>\d</code>, <code>\w</code>, <code>\s</code>, and POSIX classes
+  such as <code>[[:alpha:]]</code>.</li>
+<li>Matchers are parsed the way Alertmanager parses them, quirks included.
+  <a href="../fidelity/">Verified against Alertmanager</a> shows how this is tested against
+  Alertmanager itself.</li>
+</ul>
+<p><strong>Options</strong></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--firing 'label=value,...'</code></td>
+<td>Another alert firing at the same time. Repeat for more alerts. Shows whether an inhibit rule mutes this alert (<a href="#inhibition">details</a>)</td>
+</tr>
+<tr>
+<td><code>--format json</code></td>
+<td>JSON output. <code>text</code> is the default</td>
+</tr>
+<tr>
+<td><code>--input-format</code>, <code>--matcher-strategy</code></td>
+<td>As for <a href="#check"><code>check</code></a></td>
+</tr>
+</tbody>
+</table>
+<p><code>--format json</code> prints <code>labels</code>, <code>receivers</code>, and for every matched route its <code>path</code>, the
+effective settings, and <code>set_by</code>: the route that set each value. A value missing from
+<code>set_by</code> is Alertmanager's default. It also has <code>firing</code>, <code>inhibited</code> and <code>inhibited_by</code>
+(<code>rule</code>, <code>line</code>, <code>column</code>, and the <code>source</code> alert that matched).</p>
+<p><strong>Limits</strong></p>
+<ul>
+<li>A config Alertmanager would refuse to load exits <code>2</code> and names the route at fault: a regex
+  RE2 rejects, a malformed duration, matchers on the root route. So does a label that isn't
+  <code>label=value</code>.</li>
+<li>A regex with Unicode classes such as <code>\pL</code> also exits <code>2</code>, since amlint can't evaluate it
+  the way Go does. Check those routes with <code>amtool config routes test</code>.</li>
+</ul>
+<h3 id="inhibition">Check whether an alert is muted</h3>
+<p><code>--firing</code> adds another alert that fires at the same time, as comma-separated <code>label=value</code>
+pairs. Quote a value that contains a comma: <code>summary="a, b"</code>. Repeat the flag for more
+alerts. amlint then checks the config's <code>inhibit_rules</code> and shows the rule that mutes
+(inhibits) the alert, if any:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>amlint<span class="w"> </span>route<span class="w"> </span>alertmanager.yml<span class="w"> </span><span class="nv">alertname</span><span class="o">=</span>DiskFull<span class="w"> </span><span class="nv">instance</span><span class="o">=</span>db-1<span class="w"> </span><span class="nv">team</span><span class="o">=</span>infra<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">  </span>--firing<span class="w"> </span><span class="s1">'alertname=NodeDown,instance=db-1'</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a>  Labels  alertname=DiskFull, instance=db-1, team=infra
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>  Firing  alertname=NodeDown, instance=db-1
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>  route → route.routes[0]
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>    receiver          infra-slack          set here
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>    group_by          alertname, cluster   inherited from route
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a>    group_wait        10s                  set here
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>    group_interval    5m                   Alertmanager default
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>    repeat_interval   4h                   Alertmanager default
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>────────────────────────────────────────
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a>  Inhibited by inhibit_rules[1]  ·  alertmanager.yml:42:5
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a>     while firing: alertname=NodeDown, instance=db-1
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>  Routed to: infra-slack, but no notification is sent while it is inhibited.
+</code></pre></div>
+<p>The alert is muted when, for some rule:</p>
+<ul>
+<li>the alert matches the rule's <code>target_matchers</code>,</li>
+<li>a firing alert matches its <code>source_matchers</code>, and</li>
+<li>every label in <code>equal</code> has the same value on both alerts. A label missing on both counts
+  as equal, since Alertmanager compares missing labels as <code>""</code>.</li>
+</ul>
+<p><strong>Good to know</strong></p>
+<ul>
+<li>An alert never mutes itself, and alerts that match both sides of a rule don't mute each
+  other.</li>
+<li>A firing alert still mutes others when it is muted or silenced itself, as in Alertmanager.</li>
+<li>Rules are checked in order. The first one that applies is shown.</li>
+<li><code>source_matchers</code> / <code>target_matchers</code> and the older <code>source_match</code> / <code>source_match_re</code> /
+  <code>target_match</code> / <code>target_match_re</code> both work, with the same anchored RE2 regexes as routes.</li>
+<li>Muting doesn't change routing: the alert lands on the same routes, but Alertmanager sends
+  no notification for it.</li>
+<li>An inhibit rule amlint can't evaluate exits <code>2</code>, but only when you pass <code>--firing</code>.</li>
+</ul>
+<h2 id="test">Test your routing</h2>
+<p><code>test</code> runs unit tests for your routing tree. For each set of alert labels, you state which
+receivers the alert must reach. It uses the same simulation as <a href="#route"><code>route</code></a>, against
+the local file: no running Alertmanager or Go toolchain needed.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>amlint<span class="w"> </span><span class="nb">test</span><span class="w"> </span>alertmanager.yml<span class="w"> </span>routing-tests.yml
+</code></pre></div>
+<p><code>routing-tests.yml</code> is a list of cases:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">critical infra alerts page infra and the on-call</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="nv">infra</span><span class="p p-Indicator">,</span><span class="nt"> severity</span><span class="p">:</span><span class="w"> </span><span class="nv">critical</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="w">  </span><span class="nt">expect</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">infra-pager</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pager</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">warning infra alerts go to slack only</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="nv">infra</span><span class="p p-Indicator">,</span><span class="nt"> severity</span><span class="p">:</span><span class="w"> </span><span class="nv">warning</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="w">  </span><span class="nt">expect</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">infra-slack</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>
+<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">unrelated alerts aren't swallowed</span>
+<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">team</span><span class="p">:</span><span class="w"> </span><span class="nv">unknown</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="w">  </span><span class="nt">expect</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">default</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>  ✓  critical infra alerts page infra and the on-call
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>  ✓  warning infra alerts go to slack only
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>  ✓  unrelated alerts aren't swallowed
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a>────────────────────────────────────────
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>  3 passed
+</code></pre></div>
+<p>Each case has <code>labels:</code>, an optional <code>name:</code>, and exactly one of these assertions:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Passes when the alert reaches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>expect: [a, b]</code></td>
+<td>exactly these receivers, in any order</td>
+</tr>
+<tr>
+<td><code>receiver: name</code></td>
+<td>exactly this one receiver</td>
+</tr>
+<tr>
+<td><code>receivers: [a, b]</code></td>
+<td>exactly these receivers, in this order (<code>continue: true</code> fan-out follows definition order)</td>
+</tr>
+<tr>
+<td><code>drop: true</code></td>
+<td>no receiver at all</td>
+</tr>
+</tbody>
+</table>
+<p>The cases can also sit under a top-level <code>tests:</code> key.</p>
+<p>A failing case shows what differs, and which routes the alert matched. Had the second case
+said <code>expect: [infra-slack, pager]</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>  ✓  critical infra alerts page infra and the on-call
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>  ✗  warning infra alerts go to slack only
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>     labels:    team=infra, severity=warning
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>     expected:  infra-slack, pager
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>     actual:    infra-slack
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a>       - pager  expected, not delivered
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a>     routes:    route.routes[0]
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>────────────────────────────────────────
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>  1 failed  ·  1 passed
+</code></pre></div>
+<p><code>test</code> exits <code>1</code> if any case fails, and <code>2</code> if the config can't be simulated (see
+<a href="#route"><code>route</code></a>) or the tests file isn't a list of cases.</p>
+<p>Map each config to its tests under <code>tests:</code> in <a href="#project-config"><code>.amlint.yml</code></a>, and you
+can leave the tests file out. The editor uses the same mapping to show above each route
+how many cases reach it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># .amlint.yml</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="nt">tests</span><span class="p">:</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="w">  </span><span class="nt">alertmanager.yml</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">routing-tests.yml</span><span class="w">           </span><span class="c1"># a file, a glob, or a list of them</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="w">  </span><span class="nt">k8s/alertmanager-secret.yaml</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">tests/k8s/*.yml</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a>amlint<span class="w"> </span><span class="nb">test</span><span class="w"> </span>alertmanager.yml<span class="w">                    </span><span class="c1"># runs routing-tests.yml</span>
+</code></pre></div>
+<p><strong>Options</strong></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--coverage</code></td>
+<td>List the routes no case reaches, with <code>file:line:col</code>, and the coverage percentage (<a href="#coverage">details</a>)</td>
+</tr>
+<tr>
+<td><code>--fail-under N</code></td>
+<td>Exit <code>1</code> if route coverage is below N% (0 to 100). Turns on <code>--coverage</code></td>
+</tr>
+<tr>
+<td><code>--format json</code></td>
+<td>JSON output. <code>text</code> is the default</td>
+</tr>
+<tr>
+<td><code>--input-format</code>, <code>--matcher-strategy</code></td>
+<td>As for <a href="#check"><code>check</code></a></td>
+</tr>
+</tbody>
+</table>
+<p><code>--format json</code> gives one object per case, with <code>passed</code>, <code>expected</code>, <code>actual</code>, <code>missing</code>,
+<code>unexpected</code>, the matched <code>routes</code>, and the inhibition fields (<code>firing</code>,
+<code>expected_inhibited</code>, <code>inhibited</code>, <code>inhibited_by</code>). A malformed case has <code>error</code> instead.</p>
+<h3 id="inhibition-in-tests">Test inhibition</h3>
+<p>A case can list <code>firing:</code>, the labels of other alerts firing at the same time, and assert
+<code>inhibited: true</code> or <code>inhibited: false</code>. amlint checks it the same way as
+<a href="#inhibition"><code>route --firing</code></a>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">disk alerts are muted while their node is down</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">alertname</span><span class="p">:</span><span class="w"> </span><span class="nv">DiskFull</span><span class="p p-Indicator">,</span><span class="nt"> instance</span><span class="p">:</span><span class="w"> </span><span class="nv">db-1</span><span class="p p-Indicator">,</span><span class="nt"> team</span><span class="p">:</span><span class="w"> </span><span class="nv">db</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="nt">firing</span><span class="p">:</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">alertname</span><span class="p">:</span><span class="w"> </span><span class="nv">NodeDown</span><span class="p p-Indicator">,</span><span class="nt"> instance</span><span class="p">:</span><span class="w"> </span><span class="nv">db-1</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="w">  </span><span class="nt">expect</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">db-slack</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># where it is routed</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="w">  </span><span class="nt">inhibited</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">          </span><span class="c1"># ...and that nothing is sent</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">another node's outage doesn't mute it</span>
+<a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">alertname</span><span class="p">:</span><span class="w"> </span><span class="nv">DiskFull</span><span class="p p-Indicator">,</span><span class="nt"> instance</span><span class="p">:</span><span class="w"> </span><span class="nv">db-1</span><span class="p p-Indicator">,</span><span class="nt"> team</span><span class="p">:</span><span class="w"> </span><span class="nv">db</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-24-10" name="__codelineno-24-10" href="#__codelineno-24-10"></a><span class="w">  </span><span class="nt">firing</span><span class="p">:</span>
+<a id="__codelineno-24-11" name="__codelineno-24-11" href="#__codelineno-24-11"></a><span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt">alertname</span><span class="p">:</span><span class="w"> </span><span class="nv">NodeDown</span><span class="p p-Indicator">,</span><span class="nt"> instance</span><span class="p">:</span><span class="w"> </span><span class="nv">db-2</span><span class="p p-Indicator">}</span>
+<a id="__codelineno-24-12" name="__codelineno-24-12" href="#__codelineno-24-12"></a><span class="w">  </span><span class="nt">expect</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">db-slack</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># firing: without inhibited: expects inhibited: false</span>
+</code></pre></div>
+<ul>
+<li><code>inhibited:</code> goes next to a receiver assertion, which still checks routing, or on its own.</li>
+<li>With <code>firing:</code> and no <code>inhibited:</code>, the case expects the alert not to be muted.</li>
+<li>A case that fails on inhibition names the rule. Had the second case listed <code>NodeDown</code> on
+  <code>db-1</code>:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a>  ✗  another node's outage doesn't mute it
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a>     labels:    alertname=DiskFull, instance=db-1, team=db
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a>     firing:    alertname=NodeDown, instance=db-1
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a>     expected:  db-slack
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a>     actual:    db-slack
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a>     inhibited: expected no, actual yes
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a>       by inhibit_rules[1]  ·  alertmanager.yml:42:5  ·  while firing: alertname=NodeDown, instance=db-1
+<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a>     routes:    route.routes[2]
+</code></pre></div>
+<h3 id="coverage">Measure route coverage</h3>
+<p><code>--coverage</code> lists the routes no case reaches, so you can see what your tests miss:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a>amlint<span class="w"> </span><span class="nb">test</span><span class="w"> </span>alertmanager.yml<span class="w"> </span>routing-tests.yml<span class="w"> </span>--coverage
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a>  ✓  critical infra alerts page infra and the on-call
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a>  ✓  warning infra alerts go to slack only
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a>  ✓  unrelated alerts aren't swallowed
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a>────────────────────────────────────────
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a>  3 passed
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a>
+<a id="__codelineno-27-7" name="__codelineno-27-7" href="#__codelineno-27-7"></a>  Route coverage  4 of 6 routes  ·  66.7%
+<a id="__codelineno-27-8" name="__codelineno-27-8" href="#__codelineno-27-8"></a>  Not matched by any test case:
+<a id="__codelineno-27-9" name="__codelineno-27-9" href="#__codelineno-27-9"></a>    route.routes[2]             alertmanager.yml:18:7    {team="db"}  →  db-slack
+<a id="__codelineno-27-10" name="__codelineno-27-10" href="#__codelineno-27-10"></a>    route.routes[2].routes[0]   alertmanager.yml:21:11   {severity="critical"}  →  db-pager
+</code></pre></div>
+<ul>
+<li>A route is covered when a case's alert passes through it: the route it lands on, that
+  route's parents, and every branch of a <code>continue: true</code> fan-out. The root route counts too.</li>
+<li>Failing cases count. Malformed ones don't, since they aren't routed.</li>
+<li>Some routes can't be covered. Above, <code>route.routes[2].routes[0]</code> is unreachable:
+  <code>route.routes[1]</code> takes every critical alert first. A case for
+  <code>{team: db, severity: critical}</code> shows it going to <code>pager</code>.</li>
+<li><code>--fail-under N</code> exits <code>1</code> when coverage is below N%. The percentage is rounded to one
+  decimal before the comparison, and is only 100 when every route is covered.</li>
+</ul>
+<p>With <code>--format json</code> and coverage on, the output is an object instead of a list:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="p">{</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="w">  </span><span class="nt">"tests"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="w"> </span><span class="err">...</span><span class="w"> </span><span class="p">],</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="w">  </span><span class="nt">"coverage"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="w">    </span><span class="nt">"routes"</span><span class="p">:</span><span class="w"> </span><span class="mi">6</span><span class="p">,</span><span class="w"> </span><span class="nt">"covered"</span><span class="p">:</span><span class="w"> </span><span class="mi">4</span><span class="p">,</span><span class="w"> </span><span class="nt">"percent"</span><span class="p">:</span><span class="w"> </span><span class="mf">66.7</span><span class="p">,</span><span class="w"> </span><span class="nt">"fail_under"</span><span class="p">:</span><span class="w"> </span><span class="mf">90.0</span><span class="p">,</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="w">    </span><span class="nt">"uncovered"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="w">      </span><span class="p">{</span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"route.routes[2]"</span><span class="p">,</span><span class="w"> </span><span class="nt">"line"</span><span class="p">:</span><span class="w"> </span><span class="mi">18</span><span class="p">,</span><span class="w"> </span><span class="nt">"column"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">},</span>
+<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a><span class="w">      </span><span class="p">{</span><span class="nt">"path"</span><span class="p">:</span><span class="w"> </span><span class="s2">"route.routes[2].routes[0]"</span><span class="p">,</span><span class="w"> </span><span class="nt">"line"</span><span class="p">:</span><span class="w"> </span><span class="mi">21</span><span class="p">,</span><span class="w"> </span><span class="nt">"column"</span><span class="p">:</span><span class="w"> </span><span class="mi">11</span><span class="p">}</span>
+<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a><span class="w">    </span><span class="p">]</span>
+<a id="__codelineno-28-9" name="__codelineno-28-9" href="#__codelineno-28-9"></a><span class="w">  </span><span class="p">}</span>
+<a id="__codelineno-28-10" name="__codelineno-28-10" href="#__codelineno-28-10"></a><span class="p">}</span>
+</code></pre></div>
+<h2 id="diff">Review a config change</h2>
+<p><code>diff</code> compares two versions of a config, old first. It shows the findings the change fixed
+or added, and the alerts it routes differently. Use it on pull requests to catch
+regressions.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a>amlint<span class="w"> </span>diff<span class="w"> </span>main.yml<span class="w"> </span>alertmanager.yml
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a>  FIXED  [undefined-receiver]  ·  main.yml:6:7  ·  route.routes[1]
+<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a>     Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config.
+<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a>
+<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a>  NEW    [empty-receiver]  ·  alertmanager.yml:15:5  ·  receivers[db-slack]
+<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a>     Receiver 'db-slack' has no integration configured (no slack_configs, pagerduty_configs, webhook_configs, etc.). Alerts sent here will be silently dropped.
+<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a>
+<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a>────────────────────────────────────────
+<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a>  1 fixed  ·  1 new  ·  1 unchanged
+<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a>
+<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a>──────────────── Routing ────────────────
+<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a>
+<a id="__codelineno-30-12" name="__codelineno-30-12" href="#__codelineno-30-12"></a>  team=infra
+<a id="__codelineno-30-13" name="__codelineno-30-13" href="#__codelineno-30-13"></a>    infra-slack  group_wait   30s → 10s
+<a id="__codelineno-30-14" name="__codelineno-30-14" href="#__codelineno-30-14"></a>    and 1 more label set with the same change
+<a id="__codelineno-30-15" name="__codelineno-30-15" href="#__codelineno-30-15"></a>
+<a id="__codelineno-30-16" name="__codelineno-30-16" href="#__codelineno-30-16"></a>  team=db, severity=critical
+<a id="__codelineno-30-17" name="__codelineno-30-17" href="#__codelineno-30-17"></a>    receivers   db-pager → db-slack
+<a id="__codelineno-30-18" name="__codelineno-30-18" href="#__codelineno-30-18"></a>
+<a id="__codelineno-30-19" name="__codelineno-30-19" href="#__codelineno-30-19"></a>  2 routing changes  · 6 label sets checked
+</code></pre></div>
+<p><code>diff</code> exits <code>1</code> if the new config has any <strong>new</strong> finding, and <code>0</code> otherwise.</p>
+<p><strong>Options</strong></p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--format FORMAT</code></td>
+<td><code>text</code> (default), <code>json</code>, or <code>markdown</code> (<a href="#markdown-report">PR comment</a>)</td>
+</tr>
+<tr>
+<td><code>--no-routing</code></td>
+<td>Compare findings only; skip the routing comparison</td>
+</tr>
+<tr>
+<td><code>--ignore CODE</code></td>
+<td>Skip these checks. Comma-separate the codes or repeat the flag</td>
+</tr>
+<tr>
+<td><code>--only CODE</code></td>
+<td>Consider only these checks. Comma-separate the codes or repeat the flag</td>
+</tr>
+<tr>
+<td><code>--input-format</code>, <code>--matcher-strategy</code></td>
+<td>As for <a href="#check"><code>check</code></a></td>
+</tr>
+</tbody>
+</table>
+<p><code>--format json</code> gives the <code>added</code> and <code>fixed</code> findings (lines from the new file for <code>added</code>,
+the old one for <code>fixed</code>), the <code>unchanged</code> count, and a <code>routing</code> object: <code>checked</code>,
+<code>truncated</code> and <code>changes</code> (each with <code>labels</code>, <code>differences</code>, the full <code>old</code> / <code>new</code> routes
+and the number of <code>similar</code> label sets), or <code>skipped</code> with the reason.</p>
+<p><strong>Good to know</strong></p>
+<ul>
+<li>A finding counts as unchanged when its code and config path (such as <code>route.routes[1]</code>)
+  are the same in both files. Moving a route can show its findings as fixed and new.</li>
+<li>An empty old file (<code>/dev/null</code>, or a config that is new in a PR) counts as no config at
+  all: every finding is new, none is fixed, and every label set's receivers were <code>(none)</code>
+  before.</li>
+</ul>
+<h3 id="routing-changes">Routing changes</h3>
+<p>After the findings, <code>diff</code> sends the same label sets (sample alerts) through both configs,
+with the same simulation as <a href="#route"><code>route</code></a>, and lists the ones that come out differently.</p>
+<ul>
+<li>A label set shows up when its receivers change, or when a receiver it reaches gets a
+  different <code>group_by</code>, <code>group_wait</code>, <code>group_interval</code>, <code>repeat_interval</code> or time intervals.</li>
+<li>Edits that still deliver every alert the same way don't show up: <code>match:</code> rewritten as
+  <code>matchers:</code>, or reordered siblings that never match the same alert.</li>
+<li>Label sets with exactly the same change are folded into one, shown with the smallest label
+  set.</li>
+<li>Routing changes don't affect the exit code, since a PR that edits routing usually means
+  to.</li>
+<li>If either config can't be simulated (see <a href="#route"><code>route</code></a>), the section says why, and the
+  findings diff still runs.</li>
+</ul>
+<details class="note">
+<summary>How amlint picks the label sets</summary>
+<p>The label sets come from the matchers of both configs: for every label, the values used
+with <code>=</code> and <code>!=</code>, a few strings each <code>=~</code> / <code>!~</code> regex fully matches, and the label
+being absent. Small configs get every combination. Larger ones get, for every route, a
+label set that reaches it and one that stops on it, then single-label variations of
+those, spread evenly over the routes and capped at 5000 label sets. The summary says
+when the cap was hit.</p>
+</details>
+<h3 id="markdown-report">Post the diff as a PR comment</h3>
+<p><code>--format markdown</code> prints a compact report for a pull-request comment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a>amlint<span class="w"> </span>diff<span class="w"> </span>main.yml<span class="w"> </span>alertmanager.yml<span class="w"> </span>--format<span class="w"> </span>markdown
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="gu">### amlint diff</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="gs">**2 routing changes**</span> · <span class="gs">**1 new finding**</span> · 1 fixed · 1 unchanged · 6 label sets checked
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="gu">#### Receivers</span>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a>
+<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a>| labels | before | after |
+<a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a>| --- | --- | --- |
+<a id="__codelineno-32-9" name="__codelineno-32-9" href="#__codelineno-32-9"></a>| <span class="sb">`team=db, severity=critical`</span> | <span class="sb">`db-pager`</span> | <span class="sb">`db-slack`</span> |
+<a id="__codelineno-32-10" name="__codelineno-32-10" href="#__codelineno-32-10"></a>
+<a id="__codelineno-32-11" name="__codelineno-32-11" href="#__codelineno-32-11"></a><span class="gu">#### Grouping and timings</span>
+<a id="__codelineno-32-12" name="__codelineno-32-12" href="#__codelineno-32-12"></a>
+<a id="__codelineno-32-13" name="__codelineno-32-13" href="#__codelineno-32-13"></a>| labels | receiver | setting | before | after |
+<a id="__codelineno-32-14" name="__codelineno-32-14" href="#__codelineno-32-14"></a>| --- | --- | --- | --- | --- |
+<a id="__codelineno-32-15" name="__codelineno-32-15" href="#__codelineno-32-15"></a>| <span class="sb">`team=infra`</span> (+1 similar) | <span class="sb">`infra-slack`</span> | <span class="sb">`group_wait`</span> | <span class="sb">`30s`</span> | <span class="sb">`10s`</span> |
+<a id="__codelineno-32-16" name="__codelineno-32-16" href="#__codelineno-32-16"></a>
+<a id="__codelineno-32-17" name="__codelineno-32-17" href="#__codelineno-32-17"></a><span class="gu">#### Changed routes</span>
+<a id="__codelineno-32-18" name="__codelineno-32-18" href="#__codelineno-32-18"></a>
+<a id="__codelineno-32-19" name="__codelineno-32-19" href="#__codelineno-32-19"></a>Green: added · yellow: changed · red, dashed: removed · grey: unchanged routes, folded.
+<a id="__codelineno-32-20" name="__codelineno-32-20" href="#__codelineno-32-20"></a>
+<a id="__codelineno-32-21" name="__codelineno-32-21" href="#__codelineno-32-21"></a><span class="sb">```mermaid</span>
+<a id="__codelineno-32-22" name="__codelineno-32-22" href="#__codelineno-32-22"></a><span class="s">flowchart LR</span>
+<a id="__codelineno-32-23" name="__codelineno-32-23" href="#__codelineno-32-23"></a><span class="s">    r["(root)&lt;br/&gt;→ default"]</span>
+<a id="__codelineno-32-24" name="__codelineno-32-24" href="#__codelineno-32-24"></a><span class="s">    r_0["{team=#34;infra#34;}&lt;br/&gt;→ infra-slack&lt;br/&gt;group_wait: unset → 10s"]</span>
+<a id="__codelineno-32-25" name="__codelineno-32-25" href="#__codelineno-32-25"></a><span class="s">    r --&gt; r_0</span>
+<a id="__codelineno-32-26" name="__codelineno-32-26" href="#__codelineno-32-26"></a><span class="s">    r_1["{team=#34;db#34;, severity=#34;critical#34;}&lt;br/&gt;→ db-slack&lt;br/&gt;receiver: db-pager → db-slack"]</span>
+<a id="__codelineno-32-27" name="__codelineno-32-27" href="#__codelineno-32-27"></a><span class="s">    r --&gt; r_1</span>
+<a id="__codelineno-32-28" name="__codelineno-32-28" href="#__codelineno-32-28"></a><span class="s">    classDef changed fill:#fff8c5,stroke:#9a6700,color:#1f2328</span>
+<a id="__codelineno-32-29" name="__codelineno-32-29" href="#__codelineno-32-29"></a><span class="s">    class r_0,r_1 changed</span>
+<a id="__codelineno-32-30" name="__codelineno-32-30" href="#__codelineno-32-30"></a><span class="sb">```</span>
+<a id="__codelineno-32-31" name="__codelineno-32-31" href="#__codelineno-32-31"></a>
+<a id="__codelineno-32-32" name="__codelineno-32-32" href="#__codelineno-32-32"></a><span class="gu">#### New findings</span>
+<a id="__codelineno-32-33" name="__codelineno-32-33" href="#__codelineno-32-33"></a>
+<a id="__codelineno-32-34" name="__codelineno-32-34" href="#__codelineno-32-34"></a>| level | check | location | message |
+<a id="__codelineno-32-35" name="__codelineno-32-35" href="#__codelineno-32-35"></a>| --- | --- | --- | --- |
+<a id="__codelineno-32-36" name="__codelineno-32-36" href="#__codelineno-32-36"></a>| ⚠ warning | <span class="sb">`empty-receiver`</span> | <span class="sb">`alertmanager.yml:15:5`</span> (<span class="sb">`receivers[db-slack]`</span>) | Receiver 'db-slack' has no integration configured (no slack\_configs, pagerduty\_configs, webhook\_configs, etc.). Alerts sent here will be silently dropped. |
+<a id="__codelineno-32-37" name="__codelineno-32-37" href="#__codelineno-32-37"></a>
+<a id="__codelineno-32-38" name="__codelineno-32-38" href="#__codelineno-32-38"></a><span class="gu">#### Fixed findings</span>
+<a id="__codelineno-32-39" name="__codelineno-32-39" href="#__codelineno-32-39"></a>
+<a id="__codelineno-32-40" name="__codelineno-32-40" href="#__codelineno-32-40"></a>| level | check | location | message |
+<a id="__codelineno-32-41" name="__codelineno-32-41" href="#__codelineno-32-41"></a>| --- | --- | --- | --- |
+<a id="__codelineno-32-42" name="__codelineno-32-42" href="#__codelineno-32-42"></a>| ✖ error | <span class="sb">`undefined-receiver`</span> | <span class="sb">`main.yml:6:7`</span> (<span class="sb">`route.routes[1]`</span>) | Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config. |
+</code></pre></div>
+<ul>
+<li>The summary line always comes first. Each table appears only when it has rows, so an
+  unchanged config gives just the heading and the summary.</li>
+<li><code>(+1 similar)</code> means one more label set with exactly the same change.</li>
+<li><strong>Changed routes</strong> is a Mermaid diagram, which GitHub draws in the comment. It shows the
+  routes that were added, removed or changed, with what changed, and the routes above them.
+  Unchanged siblings fold into one grey node. Routes are matched by their matchers, so a
+  route inserted at the top doesn't make every route below it look changed, but a new
+  order of the same routes does: the first match wins. It stops after 40 routes.</li>
+<li>New findings point into the new file, fixed ones into the old file.</li>
+<li>Each table stops after 50 rows with <code>…and N more</code>, so a large config can't produce a huge
+  comment.</li>
+<li>The output is deterministic. Names from the config are escaped, so a receiver called
+  <code>@team</code> doesn't ping anyone.</li>
+<li>Exit codes are the same as for text output.</li>
+</ul>
+<p>The <a href="../github-action/#routing-diff-as-a-pr-comment">GitHub Action</a> posts this report as a PR
+comment and keeps it up to date.</p>
+<h2 id="ci-integration">Run amlint in CI</h2>
+<p>The <a href="../github-action/">GitHub Action</a> does all of this for GitHub with a few inputs. To run
+the CLI yourself:</p>
+<h3 id="fail-the-build-on-findings">Fail the build on findings</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="c1"># .github/workflows/alertmanager.yml</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Lint Alertmanager config</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">push</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pull_request</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a>
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="nt">jobs</span><span class="p">:</span>
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="w">  </span><span class="nt">lint</span><span class="p">:</span>
+<a id="__codelineno-33-8" name="__codelineno-33-8" href="#__codelineno-33-8"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<a id="__codelineno-33-9" name="__codelineno-33-9" href="#__codelineno-33-9"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<a id="__codelineno-33-10" name="__codelineno-33-10" href="#__codelineno-33-10"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v7</span>
+<a id="__codelineno-33-11" name="__codelineno-33-11" href="#__codelineno-33-11"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">pip install amlint</span>
+<a id="__codelineno-33-12" name="__codelineno-33-12" href="#__codelineno-33-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">amlint check alertmanager.yml --strict</span>
+</code></pre></div>
+<p><code>--strict</code> fails the build on WARN findings too. For a report that never fails the build,
+use <code>--exit-zero</code> instead.</p>
+<h3 id="exit-codes">Exit codes</h3>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th><code>0</code></th>
+<th><code>1</code></th>
+<th><code>2</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>check</code></td>
+<td>No ERROR findings (WARN and INFO pass unless <code>--strict</code>)</td>
+<td>An ERROR finding, or a WARN with <code>--strict</code></td>
+<td>Input can't be read (see below)</td>
+</tr>
+<tr>
+<td><code>diff</code></td>
+<td>No new findings</td>
+<td>A new finding</td>
+<td>Input can't be read</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td>Every case passes and coverage meets <code>--fail-under</code></td>
+<td>A case fails, or coverage is below <code>--fail-under</code></td>
+<td>Input can't be read, the config can't be simulated, or the tests file isn't a list of cases</td>
+</tr>
+<tr>
+<td><code>route</code></td>
+<td>The alert was routed, delivered or not</td>
+<td>—</td>
+<td>Input can't be read, the config can't be simulated, or a label isn't <code>label=value</code></td>
+</tr>
+<tr>
+<td><code>tree</code></td>
+<td>Always, findings or not</td>
+<td>—</td>
+<td>No root route, or input can't be read</td>
+</tr>
+<tr>
+<td><code>fix</code></td>
+<td>Done, or with <code>--diff</code>, nothing to change</td>
+<td>With <code>--diff</code>: something to change</td>
+<td>Input can't be read</td>
+</tr>
+</tbody>
+</table>
+<p>"Input can't be read" means: file not found, YAML that doesn't parse, a file that isn't an
+Alertmanager config in the format given or detected, or, for <code>check --rules</code>, a glob that
+matches no files or a rule file that can't be read. <code>--exit-zero</code> turns <code>1</code> into <code>0</code>, but
+not <code>2</code>.</p>
+<h3 id="github-annotations">Annotate the PR diff</h3>
+<p><code>--format github</code> prints
+<a href="https://docs.github.com/en/actions/reference/workflow-commands-for-github-actions">workflow commands</a>
+that GitHub shows as annotations on the PR diff. You don't need SARIF or Code Scanning:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Lint Alertmanager config</span>
+<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="w">  </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">amlint check alertmanager.yml --strict --format github</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a>::error file=alertmanager.yml,line=6,col=7,title=amlint undefined-receiver::Route references receiver 'db-pager' which is not defined in receivers. Alertmanager refuses to load this config. (route.routes[1])
+<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a>::notice file=alertmanager.yml,line=1,col=1,title=amlint global-resolve-timeout-missing::global.resolve_timeout is not set, so Alertmanager uses 5m. It only applies to alerts sent without an end time; Prometheus always sets one. (global)
+</code></pre></div>
+<p>ERROR becomes <code>::error</code>, WARN <code>::warning</code> and INFO <code>::notice</code>. Paths are made relative to
+<code>$GITHUB_WORKSPACE</code>, so annotations land on the right file even when you pass an absolute
+path. Exit codes are the same as for text output.</p>
+<h3 id="sarif-github-code-scanning">Upload to GitHub Code Scanning</h3>
+<p>SARIF output lets GitHub Code Scanning show findings on the PR diff, on the line each finding
+points at. The job needs the <code>security-events: write</code> permission:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Run amlint</span>
+<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="w">  </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">amlint check alertmanager.yml --format sarif --exit-zero &gt; results.sarif</span>
+<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a>
+<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Upload to GitHub Code Scanning</span>
+<a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a><span class="w">  </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github/codeql-action/upload-sarif@v4</span>
+<a id="__codelineno-36-6" name="__codelineno-36-6" href="#__codelineno-36-6"></a><span class="w">  </span><span class="nt">with</span><span class="p">:</span>
+<a id="__codelineno-36-7" name="__codelineno-36-7" href="#__codelineno-36-7"></a><span class="w">    </span><span class="nt">sarif_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results.sarif</span>
+</code></pre></div>
+<p><code>--exit-zero</code> keeps the upload step running when amlint finds errors. Fail the build in a
+separate <code>amlint check</code> step.</p>
+<h3 id="in-ci-pr-check">Catch regressions on a PR</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Check for regressions</span>
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="w">  </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="w">    </span><span class="no">git show origin/main:alertmanager.yml &gt; /tmp/main.yml</span>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="w">    </span><span class="no">amlint diff /tmp/main.yml alertmanager.yml</span>
+</code></pre></div>
+<p>To get the routing diff as a PR comment, use the GitHub Action's
+<a href="../github-action/#routing-diff-as-a-pr-comment"><code>diff-base</code></a> input.</p>
+<h2 id="fix">Rewrite deprecated syntax</h2>
+<p><code>amlint fix</code> rewrites the syntax Alertmanager has deprecated. <code>match:</code> and <code>match_re:</code> become
+<code>matchers:</code>, an inhibition rule's <code>source_match:</code> and <code>target_match:</code> become
+<code>source_matchers:</code> and <code>target_matchers:</code>, and the top-level <code>mute_time_intervals:</code> list
+becomes <code>time_intervals:</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a>amlint<span class="w"> </span>fix<span class="w"> </span>alertmanager.yml<span class="w">          </span><span class="c1"># rewrite the file</span>
+<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a>amlint<span class="w"> </span>fix<span class="w"> </span>--diff<span class="w"> </span>alertmanager.yml<span class="w">   </span><span class="c1"># print the changes, write nothing</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-39-1" name="__codelineno-39-1" href="#__codelineno-39-1"></a><span class="gp">$ </span>amlint<span class="w"> </span>fix<span class="w"> </span>--diff<span class="w"> </span>alertmanager.yml
+<a id="__codelineno-39-2" name="__codelineno-39-2" href="#__codelineno-39-2"></a><span class="go">  ✔ fixed  [deprecated-match]  ·  alertmanager.yml:4:7  ·  route.routes[0].match</span>
+<a id="__codelineno-39-3" name="__codelineno-39-3" href="#__codelineno-39-3"></a><span class="go">  ✔ fixed  [deprecated-match]  ·  alertmanager.yml:9:7  ·  route.routes[1].match</span>
+<a id="__codelineno-39-4" name="__codelineno-39-4" href="#__codelineno-39-4"></a><span class="go">  ✔ fixed  [deprecated-match]  ·  alertmanager.yml:19:5  ·  inhibit_rules[0].source_match</span>
+<a id="__codelineno-39-5" name="__codelineno-39-5" href="#__codelineno-39-5"></a><span class="go">  ✔ fixed  [deprecated-match]  ·  alertmanager.yml:20:5  ·  inhibit_rules[0].target_match</span>
+<a id="__codelineno-39-6" name="__codelineno-39-6" href="#__codelineno-39-6"></a><span class="go">--- alertmanager.yml</span>
+<a id="__codelineno-39-7" name="__codelineno-39-7" href="#__codelineno-39-7"></a><span class="go">+++ alertmanager.yml</span>
+<a id="__codelineno-39-8" name="__codelineno-39-8" href="#__codelineno-39-8"></a><span class="go">@@ -1,12 +1,11 @@</span>
+<a id="__codelineno-39-9" name="__codelineno-39-9" href="#__codelineno-39-9"></a><span class="go"> route:</span>
+<a id="__codelineno-39-10" name="__codelineno-39-10" href="#__codelineno-39-10"></a><span class="go">   receiver: default</span>
+<a id="__codelineno-39-11" name="__codelineno-39-11" href="#__codelineno-39-11"></a><span class="go">   routes:</span>
+<a id="__codelineno-39-12" name="__codelineno-39-12" href="#__codelineno-39-12"></a><span class="go">-    - match:</span>
+<a id="__codelineno-39-13" name="__codelineno-39-13" href="#__codelineno-39-13"></a><span class="go">-        team: db        # the database team</span>
+<a id="__codelineno-39-14" name="__codelineno-39-14" href="#__codelineno-39-14"></a><span class="go">-      match_re:</span>
+<a id="__codelineno-39-15" name="__codelineno-39-15" href="#__codelineno-39-15"></a><span class="go">-        service: pg-.*|mysql</span>
+<a id="__codelineno-39-16" name="__codelineno-39-16" href="#__codelineno-39-16"></a><span class="go">+    - matchers:</span>
+<a id="__codelineno-39-17" name="__codelineno-39-17" href="#__codelineno-39-17"></a><span class="go">+        - team="db"  # the database team</span>
+<a id="__codelineno-39-18" name="__codelineno-39-18" href="#__codelineno-39-18"></a><span class="go">+        - service=~"pg-.*|mysql"</span>
+<a id="__codelineno-39-19" name="__codelineno-39-19" href="#__codelineno-39-19"></a><span class="go">       receiver: db-pager</span>
+<a id="__codelineno-39-20" name="__codelineno-39-20" href="#__codelineno-39-20"></a><span class="go">-    - match: {team: web}</span>
+<a id="__codelineno-39-21" name="__codelineno-39-21" href="#__codelineno-39-21"></a><span class="go">+    - matchers: [team="web"]</span>
+<a id="__codelineno-39-22" name="__codelineno-39-22" href="#__codelineno-39-22"></a><span class="go">       receiver: web</span>
+<a id="__codelineno-39-23" name="__codelineno-39-23" href="#__codelineno-39-23"></a><span class="go"> receivers:</span>
+<a id="__codelineno-39-24" name="__codelineno-39-24" href="#__codelineno-39-24"></a><span class="go">   - name: default</span>
+<a id="__codelineno-39-25" name="__codelineno-39-25" href="#__codelineno-39-25"></a><span class="go">@@ -16,6 +15,6 @@</span>
+<a id="__codelineno-39-26" name="__codelineno-39-26" href="#__codelineno-39-26"></a><span class="go">   - name: web</span>
+<a id="__codelineno-39-27" name="__codelineno-39-27" href="#__codelineno-39-27"></a><span class="go">     webhook_configs: [{url: http://alerts.example.com/web}]</span>
+<a id="__codelineno-39-28" name="__codelineno-39-28" href="#__codelineno-39-28"></a><span class="go"> inhibit_rules:</span>
+<a id="__codelineno-39-29" name="__codelineno-39-29" href="#__codelineno-39-29"></a><span class="go">-  - source_match: {severity: critical}</span>
+<a id="__codelineno-39-30" name="__codelineno-39-30" href="#__codelineno-39-30"></a><span class="go">-    target_match: {severity: warning}</span>
+<a id="__codelineno-39-31" name="__codelineno-39-31" href="#__codelineno-39-31"></a><span class="go">+  - source_matchers: [severity="critical"]</span>
+<a id="__codelineno-39-32" name="__codelineno-39-32" href="#__codelineno-39-32"></a><span class="go">+    target_matchers: [severity="warning"]</span>
+<a id="__codelineno-39-33" name="__codelineno-39-33" href="#__codelineno-39-33"></a><span class="go">     equal: [alertname]</span>
+</code></pre></div>
+<p><strong>Good to know</strong></p>
+<ul>
+<li>Before it writes, amlint reads the new config back and checks that every route and
+  inhibition rule has the same matchers as before, and that nothing else changed. When it
+  can't make such a change, it leaves that spot as it was and prints <code>✗ left</code>.</li>
+<li>Only the rewritten keys change. Comments on the <code>match:</code> entries move to the new ones.</li>
+<li><code>--diff</code> exits <code>1</code> when there is something to change, so CI can require the new syntax.</li>
+<li>It rewrites plain configs and kube-prometheus-stack Helm values. A config inside a Secret,
+  a ConfigMap or a Mimir string is checked, but not rewritten.</li>
+<li><code># amlint: disable=deprecated-match</code> comments and <code>ignore:</code> in the
+  <a href="#project-config">project config</a> keep a spot as it is.</li>
+<li><code>amlint fix -</code> reads the config from stdin and prints the fixed config.</li>
+</ul>
+<p>The <a href="#lsp">editor</a> offers the same rewrite as a quick fix.</p>
+<h2 id="lsp">See findings in your editor</h2>
+<p><code>amlint lsp</code> is a language server. Your editor starts it and shows amlint's findings as you
+type, on the lines <code>amlint check</code> reports. You don't run it yourself.</p>
+<ul>
+<li><strong>Findings</strong> come from the editor buffer, so you don't have to save first. Each check code
+  links to its docs.</li>
+<li><strong>Hover on a route</strong> shows its matchers, receiver, <code>group_by</code> and timings, where each
+  value comes from, and an example alert that ends there. It is the same simulation as
+  <a href="#route"><code>route</code></a>.</li>
+<li><strong>Quick fixes</strong> rewrite deprecated syntax the way <a href="#fix"><code>fix</code></a> does, or add
+  <code># amlint: disable=&lt;code&gt;</code> to the line, or <code># amlint: disable-file=&lt;code&gt;</code> to the top of the
+  file.</li>
+<li><strong>Template files</strong> (<code>.tmpl</code>) show <code>bad-template-file</code>, <code>undefined-template</code> and
+  <code>template-unknown-field</code> on the line where the problem is, for every config in the
+  workspace folder whose <code>templates:</code> globs load the file. A template file no config loads
+  gets its syntax errors only, if it uses Alertmanager's data (<code>.Alerts</code>, <code>.CommonLabels</code>
+  and the like); other <code>.tmpl</code> files get nothing.</li>
+</ul>
+<p>It reads every format <code>check</code> reads. YAML files without an Alertmanager config, such as
+Kubernetes manifests, get no findings.</p>
+<p><code>ignore</code> and <code>severity</code> come from the <a href="#project-config">project config</a> in the workspace
+folder, or next to the file when it isn't in one. The <code>--rules</code> checks don't run in the
+editor.</p>
+<p>Setup for VS Code, Neovim and Helix: <a href="../editors/">Editors</a>.</p>
+<h2 id="look-up-a-check">Look up a check</h2>
+<h3 id="list">List all checks</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-40-1" name="__codelineno-40-1" href="#__codelineno-40-1"></a>amlint<span class="w"> </span>list
+</code></pre></div>
+<p>Prints every check code with its level, a one-line description, and a ✓ in the <code>amtool</code>
+column when <code>amtool check-config</code> catches it too. Those are configs Alertmanager refuses to
+load. The rest load fine but don't behave as intended. Details for each check are in
+<a href="../checks/">Checks</a>.</p>
+<h3 id="explain">Explain one check</h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-41-1" name="__codelineno-41-1" href="#__codelineno-41-1"></a>amlint<span class="w"> </span>explain<span class="w"> </span>undefined-receiver
+<a id="__codelineno-41-2" name="__codelineno-41-2" href="#__codelineno-41-2"></a>amlint<span class="w"> </span>explain<span class="w"> </span>inhibit-no-equal
+</code></pre></div>
+<p>Shows the check's level, whether amtool catches it, why it matters, and a bad and a fixed
+example. Useful when a finding is unfamiliar, or for onboarding. An unknown code exits <code>2</code>
+and lists the valid ones.</p>
+<h2 id="init">Start a new config</h2>
+<p><code>init</code> prints a minimal valid <code>alertmanager.yml</code> to start from:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-42-1" name="__codelineno-42-1" href="#__codelineno-42-1"></a>amlint<span class="w"> </span>init<span class="w"> </span>&gt;<span class="w"> </span>alertmanager.yml
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.sections", "navigation.top", "content.code.copy", "content.code.annotate", "search.highlight", "search.suggest"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
