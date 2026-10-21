@@ -2,7 +2,7 @@
   "name": "amlint",
   "displayName": "amlint: Alertmanager config linter",
   "description": "Finds misrouted, unreachable and over-inhibited alerts in Prometheus Alertmanager configs as you type, and shows on hover where each route sends alerts.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "publisher": "dpyly",
   "license": "MIT",
   "icon": "images/icon.png",
