@@ -6,6 +6,9 @@
 - Homebrew install docs: `brew install amlint` fails on Homebrew 6 and newer because the tap
   isn't trusted. Install with the full name, `brew install danikdanik2013/amlint/amlint`,
   which trusts the formula. The editor docs say where Homebrew puts amlint on Apple Silicon.
+- VS Code extension, next version: with `amlint.path` left at `amlint`, an amlint that
+  isn't on VS Code's `PATH` is found where Homebrew and pipx install it, instead of "can't
+  find amlint". Its install hint gives the Homebrew commands too.
 
 ## [0.8.5] - 2026-10-21
 

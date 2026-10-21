@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+- Finds amlint that isn't on VS Code's `PATH`. VS Code started from the Dock or a desktop
+  menu often doesn't see the `PATH` your shell profile sets, so a Homebrew or pipx install
+  gave "can't find amlint". With `amlint.path` left at `amlint`, the extension now also
+  looks in Homebrew's directories (`/opt/homebrew/bin`, `/usr/local/bin`, Linuxbrew), in
+  pipx's `~/.local/bin`, and on Windows in each Python's `Scripts` directory. In a trusted
+  workspace it tries the workspace's `.venv` first. It uses the first amlint 0.6.0 or newer,
+  and the **amlint** output channel says which. An `amlint.path` you set is used as it is.
+- "can't find amlint" gives the Homebrew commands too: the tap with its URL, then
+  `brew install danikdanik2013/amlint/amlint`, the full name Homebrew 7 needs to trust a
+  formula from a third-party tap.
+
 - `.tmpl` files that aren't Alertmanager templates, such as chezmoi or gomplate templates,
   no longer get "function not defined" errors. The fix is in amlint itself (`amlint lsp`),
   so it comes with the amlint release after 0.8.0; the extension doesn't change.
