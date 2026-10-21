@@ -141,7 +141,9 @@ If it doesn't start:
 
 - **"can't find amlint"**: VS Code doesn't see amlint on its `PATH`, which can differ from
   your terminal's. Install it with `pipx install amlint`, or run `which amlint` in a
-  terminal and put that path in `amlint.path`.
+  terminal and put that path in `amlint.path`. Installed with Homebrew on Apple Silicon? It's
+  in `/opt/homebrew/bin`, which VS Code sees only if your shell profile runs `brew shellenv`.
+  Set `amlint.path` to `/opt/homebrew/bin/amlint`.
 - **"the editor needs 0.6.0 or newer"**: the amlint VS Code finds predates `amlint lsp`.
   Upgrade it with `pipx upgrade amlint` or `pip install -U amlint`, then restart the server.
 
