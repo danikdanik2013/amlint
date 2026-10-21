@@ -20,6 +20,7 @@ const fixture = (await readFile(new URL("../broken.yml", import.meta.url), "utf8
 const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHANNEL || undefined });
 const context = await browser.newContext();
 const problems = [];
+const warnings = []; // a third-party server that failed, while the playground still worked
 const leaks = [];
 let wheelRequests = 0; // made by the worker: shows its requests are seen too
 context.on("request", (req) => {
@@ -30,7 +31,18 @@ context.on("request", (req) => {
 async function open(target) {
   const page = await context.newPage();
   page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
-  page.on("console", (m) => { if (m.type() === "error") problems.push(`console: ${m.text()}`); });
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    // "Failed to load resource" from another server (a CDN refusing the CI runner, say) is
+    // only a warning: a resource the playground needs fails one of the steps anyway.
+    const source = m.location()?.url || "";
+    const thirdParty = source && new URL(source, target).origin !== new URL(target).origin;
+    if (thirdParty && m.text().startsWith("Failed to load resource")) {
+      warnings.push(`${source}: ${m.text()}`);
+    } else {
+      problems.push(`console: ${m.text()}${source ? ` (${source})` : ""}`);
+    }
+  });
   page.on("dialog", (d) => d.accept());
   await page.goto(target);
   await page.waitForFunction(
@@ -139,6 +151,7 @@ try {
   if (!wheelRequests) throw new Error("the worker's requests weren't seen, so leaks can't be");
   if (leaks.length) throw new Error(`requests carried the config: ${leaks.join(", ")}`);
   console.log("ok: no request carried the config");
+  for (const w of new Set(warnings)) console.log(`warning: ${w}`);
   if (problems.length) throw new Error(problems.join("\n"));
   console.log("playground smoke test passed");
 } catch (err) {
