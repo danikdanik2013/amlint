@@ -25,8 +25,15 @@ Releases are tagged by version (`0.8.5`) and minor version (`0.8`); `latest` fol
 
 ```bash
 brew tap danikdanik2013/amlint https://github.com/danikdanik2013/amlint
-brew install amlint
+brew install danikdanik2013/amlint/amlint
 ```
+
+Use the full name. Homebrew 6 and newer refuse `brew install amlint` with "Refusing to load
+formula ... from untrusted tap". Naming the formula in full trusts it
+([Tap Trust](https://docs.brew.sh/Tap-Trust)). Upgrade with `brew upgrade amlint`.
+
+On Apple Silicon, Homebrew installs to `/opt/homebrew/bin`. If your editor can't find amlint,
+see [VS Code](editors.md#vs-code).
 
 ## GitHub Action
 
